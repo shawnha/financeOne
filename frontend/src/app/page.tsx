@@ -47,6 +47,61 @@ export default function Home() {
           >
             Read our docs
           </a>
+          <a
+            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
+            href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Image
+              className="dark:invert"
+              src="https://nextjs.org/icons/file.svg"
+              alt="File icon"
+              width={16}
+              height={16}
+            />
+            Examples
+          </a>
+
+          {/* Interaction States */}
+          {isLoading && (
+            <div className="flex items-center justify-center p-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-foreground" />
+            </div>
+          )}
+
+          {isEmpty && (
+            <div className="text-center p-8 text-muted-foreground">
+              No transactions found
+            </div>
+          )}
+
+          {error && (
+            <div className="text-center p-8 text-destructive">
+              {error.message}
+            </div>
+          )}
+
+          {isSuccess && data && (
+            <div className="text-center p-4 text-chart-1 font-semibold">
+              ✓ {data.length} transactions loaded
+            </div>
+          )}
+          <a
+            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
+            href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Image
+              className="dark:invert"
+              src="https://nextjs.org/icons/globe.svg"
+              alt="Globe icon"
+              width={16}
+              height={16}
+            />
+            Go to nextjs.org →
+          </a>
         </div>
       </main>
       <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
