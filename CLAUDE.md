@@ -20,6 +20,13 @@
 - 컴포넌트: shadcn/ui / 차트: Recharts / 아이콘: Lucide
 - UUPM 스타일: Financial Dashboard (#9), Bento Box Grid (#21), Executive Dashboard (#3)
 
+## Dev Environment
+- Python 가상환경: `source .venv/bin/activate` (반드시 먼저 실행)
+- Backend 시작: `source .venv/bin/activate && uvicorn backend.main:app --reload`
+- Frontend 시작: `cd frontend && npm run dev`
+- pytest: `source .venv/bin/activate && python3 -m pytest backend/tests/ -v`
+- bun 경로: `/opt/homebrew/bin/bun` (gstack browse용)
+
 ## DB
 - 스키마: backend/database/schema.sql
 - 연결: DATABASE_URL (Neon dev 브랜치 connection string)
