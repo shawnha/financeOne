@@ -111,7 +111,7 @@ export function Sidebar() {
     <>
       {/* Logo */}
       <div className="p-6">
-        <h1 className="text-xl font-bold text-foreground">FinanceOne</h1>
+        <div className="text-xl font-bold text-foreground">FinanceOne</div>
       </div>
 
       {/* Navigation */}
