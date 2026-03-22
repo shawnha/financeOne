@@ -18,13 +18,14 @@
 | 1 | ☑️ | - | 40px | center | 일괄 선택 체크박스 |
 | 2 | 날짜 | `date` | 100px | left | YYYY-MM-DD, 정렬 가능 |
 | 3 | 출처 | `source_type` | 90px | left | 아이콘+라벨 (롯데카드/우리카드/우리은행) |
-| 4 | 내역 | `description` | flex | left | 거래 설명 |
-| 5 | 거래처 | `counterparty` | 140px | left | 가맹점/상대방, 정렬 가능 |
-| 6 | 수입 | `amount` (type='in') | 120px | right | green, tabular-nums, IBM Plex Mono |
-| 7 | 지출 | `amount` (type='out') | 120px | right | red, tabular-nums, IBM Plex Mono |
-| 8 | 내부 계정 | `internal_account_id` → JOIN | 120px | left | 클릭하여 변경 가능 |
-| 9 | 표준 계정 | `standard_account_id` → JOIN | 120px | left | 클릭하여 변경 가능 |
-| 10 | 신뢰 | `mapping_confidence` | 60px | center | 0-100% badge (color by level) |
+| 4 | 회원 | `member_id` → JOIN members | 80px | left | 카드 사용자 (은행 거래는 빈값) |
+| 5 | 내역 | `description` | flex | left | 거래 설명 |
+| 6 | 거래처 | `counterparty` | 140px | left | 가맹점/상대방, 정렬 가능 |
+| 7 | 수입 | `amount` (type='in') | 120px | right | green, tabular-nums, IBM Plex Mono |
+| 8 | 지출 | `amount` (type='out') | 120px | right | red, tabular-nums, IBM Plex Mono |
+| 9 | 내부 계정 | `internal_account_id` → JOIN | 120px | left | 클릭하여 변경 가능 |
+| 10 | 표준 계정 | `standard_account_id` → JOIN | 120px | left | 클릭하여 변경 가능 |
+| 11 | 신뢰 | `mapping_confidence` | 60px | center | 0-100% badge (color by level) |
 
 - 확정 여부: `is_confirmed` — 별도 컬럼 없이 체크박스 일괄 확정 + 행 클릭 편집
 - 중복 거래: `is_duplicate=true` 행은 회색 처리 + 취소선 또는 접힘 처리
@@ -32,6 +33,7 @@
 ## Filters
 - 검색: 내역, 거래처, 메모 통합 검색
 - 기간: 날짜 range picker + 월 선택 드롭다운
+- 회원: 드롭다운 필터 (카드 사용자별)
 - 표준 계정: 드롭다운 필터
 - 내부 계정: 드롭다운 필터
 - 미분류만: 체크박스 (is_confirmed=false AND standard_account_id IS NULL)
