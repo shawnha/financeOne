@@ -1,0 +1,2320 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FinanceOne v2 — PRD</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
+
+  :root {
+    --bg: #0d0f12;
+    --bg2: #13161b;
+    --bg3: #1a1e26;
+    --border: #252a35;
+    --border2: #2e3545;
+    --text: #e2e8f4;
+    --text2: #8892a4;
+    --text3: #4a5568;
+    --accent: #4f9cf9;
+    --accent2: #7c6af7;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --teal: #2dd4bf;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Noto Sans KR', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.7;
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* Sidebar */
+  nav {
+    width: 240px;
+    height: 100vh;
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    padding: 24px 0 60px;
+    position: fixed;
+    top: 0; left: 0;
+    overflow-y: auto;
+    z-index: 100;
+  }
+
+  .nav-logo {
+    padding: 0 20px 24px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+  .nav-logo .name { font-size: 18px; font-weight: 700; color: var(--accent); letter-spacing: -0.5px; }
+  .nav-logo .ver { font-size: 11px; color: var(--text3); font-family: var(--mono); }
+
+  .nav-section { padding: 8px 20px 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text3); font-weight: 600; }
+
+  nav a {
+    display: block;
+    padding: 6px 20px;
+    color: var(--text2);
+    text-decoration: none;
+    font-size: 13px;
+    border-left: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  nav a:hover { color: var(--text); background: var(--bg3); border-left-color: var(--accent); }
+  nav a.active { color: var(--accent); border-left-color: var(--accent); background: rgba(79,156,249,0.08); }
+
+  /* Main content */
+  main {
+    margin-left: 240px;
+    flex: 1;
+    padding: 48px 56px;
+    max-width: 960px;
+  }
+
+  /* Typography */
+  h1 { font-size: 32px; font-weight: 700; letter-spacing: -1px; color: var(--text); margin-bottom: 8px; }
+  h2 { font-size: 22px; font-weight: 700; color: var(--text); margin: 48px 0 16px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 16px; font-weight: 600; color: var(--accent); margin: 28px 0 12px; }
+  h4 { font-size: 14px; font-weight: 600; color: var(--teal); margin: 20px 0 8px; }
+  p { color: var(--text2); margin-bottom: 12px; }
+  strong { color: var(--text); font-weight: 600; }
+
+  /* Header */
+  .doc-header {
+    margin-bottom: 40px;
+    padding-bottom: 32px;
+    border-bottom: 1px solid var(--border);
+  }
+  .doc-meta { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; }
+  .badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    border: 1px solid;
+  }
+  .badge-blue { color: var(--accent); border-color: rgba(79,156,249,0.3); background: rgba(79,156,249,0.08); }
+  .badge-purple { color: var(--accent2); border-color: rgba(124,106,247,0.3); background: rgba(124,106,247,0.08); }
+  .badge-green { color: var(--green); border-color: rgba(52,211,153,0.3); background: rgba(52,211,153,0.08); }
+  .badge-amber { color: var(--amber); border-color: rgba(251,191,36,0.3); background: rgba(251,191,36,0.08); }
+
+  /* Callout */
+  .callout {
+    border: 1px solid var(--border2);
+    border-left: 3px solid;
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 16px 0;
+    background: var(--bg3);
+    font-size: 13px;
+    color: var(--text2);
+  }
+  .callout-blue { border-left-color: var(--accent); }
+  .callout-green { border-left-color: var(--green); }
+  .callout-amber { border-left-color: var(--amber); }
+  .callout-purple { border-left-color: var(--accent2); }
+  .callout strong { display: block; margin-bottom: 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.8px; }
+
+  /* Code blocks */
+  pre {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 20px;
+    overflow-x: auto;
+    margin: 12px 0 20px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: #a9c0e0;
+  }
+  code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--teal);
+  }
+  pre code { background: none; border: none; padding: 0; color: inherit; font-size: inherit; }
+
+  /* SQL keywords */
+  .kw { color: #7c6af7; }
+  .tb { color: #4f9cf9; }
+  .cm { color: #4a5568; font-style: italic; }
+  .str { color: #34d399; }
+  .num { color: #fbbf24; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: 13px; }
+  th { background: var(--bg3); color: var(--text2); font-weight: 600; padding: 10px 14px; text-align: left; border: 1px solid var(--border); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  td { padding: 9px 14px; border: 1px solid var(--border); color: var(--text2); vertical-align: top; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  td code { font-size: 11px; }
+
+  /* Priority badges */
+  .p1 { color: var(--red); font-weight: 700; }
+  .p2 { color: var(--amber); font-weight: 700; }
+  .p3 { color: var(--green); font-weight: 700; }
+  .p4 { color: var(--text3); font-weight: 700; }
+
+  /* Phase timeline */
+  .phases { display: flex; flex-direction: column; gap: 0; margin: 16px 0; }
+  .phase {
+    display: flex;
+    gap: 0;
+    position: relative;
+  }
+  .phase-dot {
+    width: 32px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .phase-circle {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    background: var(--bg2);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+    flex-shrink: 0;
+    z-index: 1;
+  }
+  .phase-line {
+    width: 2px;
+    flex: 1;
+    background: var(--border);
+    margin: 4px 0;
+    min-height: 20px;
+  }
+  .phase:last-child .phase-line { display: none; }
+  .phase-content {
+    padding: 0 0 28px 16px;
+    flex: 1;
+  }
+  .phase-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px; line-height: 1; padding-top: 4px; }
+  .phase-dur { font-family: var(--mono); font-size: 11px; color: var(--accent2); margin-bottom: 10px; }
+  .phase-items { list-style: none; }
+  .phase-items li { color: var(--text2); font-size: 13px; padding: 3px 0 3px 16px; position: relative; }
+  .phase-items li::before { content: '—'; position: absolute; left: 0; color: var(--text3); }
+
+  /* Checklist */
+  .checklist { list-style: none; margin: 12px 0; }
+  .checklist li {
+    padding: 8px 0 8px 32px;
+    position: relative;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--text2);
+  }
+  .checklist li::before {
+    content: '☐';
+    position: absolute;
+    left: 0;
+    color: var(--text3);
+    font-size: 16px;
+    line-height: 1;
+    top: 8px;
+  }
+  .checklist li strong { color: var(--text); }
+
+  /* Architecture diagram */
+  .arch-box {
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 8px 0;
+  }
+  .arch-title { font-family: var(--mono); font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .arch-items { display: flex; gap: 8px; flex-wrap: wrap; }
+  .arch-tag {
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    color: var(--text2);
+  }
+
+  /* Learning loop diagram */
+  .loop-diagram {
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    border-radius: 12px;
+    padding: 28px;
+    margin: 20px 0;
+  }
+  .loop-row { display: flex; align-items: center; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
+  .loop-node {
+    background: var(--bg2);
+    border: 1px solid;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .loop-node-blue { border-color: rgba(79,156,249,0.5); color: var(--accent); }
+  .loop-node-purple { border-color: rgba(124,106,247,0.5); color: var(--accent2); }
+  .loop-node-green { border-color: rgba(52,211,153,0.5); color: var(--green); }
+  .loop-node-amber { border-color: rgba(251,191,36,0.5); color: var(--amber); }
+  .loop-arrow { color: var(--text3); font-size: 18px; }
+  .loop-label { font-size: 11px; color: var(--text3); font-family: var(--mono); }
+
+  /* Section anchor helper */
+  section { scroll-margin-top: 24px; }
+
+  /* Divider */
+  hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+
+  /* SQL highlight helper classes inside pre */
+  pre .keyword { color: #7c6af7; }
+  pre .type { color: #fbbf24; }
+  pre .comment { color: #4a5568; font-style: italic; }
+  pre .string { color: #34d399; }
+  pre .table-name { color: #4f9cf9; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-logo">
+    <div class="name">FinanceOne v2</div>
+    <div class="ver">PRD · v1.2 · 2026-03-22</div>
+  </div>
+
+  <div class="nav-section">Overview</div>
+  <a href="#summary">전체 요약</a>
+  <a href="#overview">배경 & 목표</a>
+  <a href="#entities">법인 구조</a>
+  <a href="#why-tools">왜 이 도구들인가</a>
+
+  <div class="nav-section">Requirements</div>
+  <a href="#req-cashflow">현금흐름 파악</a>
+  <a href="#req-statements">재무제표</a>
+  <a href="#req-multi-entity">3개 법인</a>
+  <a href="#req-data">데이터 입력</a>
+
+  <div class="nav-section">Architecture</div>
+  <a href="#stack">기술 스택 & 배포</a>
+  <a href="#db-schema">DB 스키마 전체</a>
+  <a href="#db-erd">DB ERD 다이어그램</a>
+  <a href="#learning-loop">AI 학습 루프</a>
+  <a href="#knowledge-loop">Obsidian + NotebookLM</a>
+  <a href="#claude-md-rules">CLAUDE.md 규칙</a>
+
+  <div class="nav-section">UI / Design</div>
+  <a href="#ui-skill">UI UX Pro Max</a>
+  <a href="#screens">화면 목록</a>
+
+  <div class="nav-section">Dev Setup</div>
+  <a href="#five-repos">핵심 레포 5종</a>
+  <a href="#agent-skill-map">Agent & Skill 맵</a>
+  <a href="#setup-tools">CLI 도구 설치</a>
+  <a href="#setup-obsidian">Obsidian 설정</a>
+  <a href="#setup-notebooklm">notebooklm-py 설정</a>
+  <a href="#setup-project">프로젝트 초기화</a>
+  <a href="#checklist">시작 전 체크리스트</a>
+
+  <div class="nav-section">Integrations</div>
+  <a href="#expenseone">ExpenseOne 연동</a>
+  <a href="#api-integrations">거래 API 전략</a>
+
+  <div class="nav-section">Roadmap</div>
+  <a href="#phases">개발 페이즈</a>
+  <a href="#success">성공 지표</a>
+</nav>
+
+<main>
+
+<!-- HEADER -->
+<div class="doc-header">
+  <h1>FinanceOne v2</h1>
+  <p>한아원 그룹 내부 회계 BPO 시스템 — Product Requirements Document</p>
+  <div class="doc-meta">
+    <span class="badge badge-blue">v1.3</span>
+    <span class="badge badge-purple">2026-03-22</span>
+    <span class="badge badge-green">Next.js 14 + FastAPI</span>
+    <span class="badge badge-amber">Neon PostgreSQL</span>
+  </div>
+</div>
+
+<!-- FULL SUMMARY -->
+<section id="summary">
+<h2>전체 요약</h2>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:16px 0;">
+
+  <div class="arch-box">
+    <div class="arch-title">무엇을 만드는가</div>
+    <p style="font-size:13px; margin:0; color:var(--text2);">한아원코리아 그룹 3개 법인(HOI·한아원코리아·한아원리테일)의 재무를 자체적으로 관리하는 내부 회계 BPO 시스템. 거래내역 업로드 → AI 자동 분류 → 재무제표 생성까지 자동화.</p>
+  </div>
+
+  <div class="arch-box">
+    <div class="arch-title">왜 만드는가</div>
+    <p style="font-size:13px; margin:0; color:var(--text2);">회계법인 의존 구조 탈피. 오늘 잔고와 다음달 말 예상 잔고를 30초 안에 파악. 시간이 지날수록 AI 매핑 정확도가 높아지는 자기학습 구조 구현.</p>
+  </div>
+
+  <div class="arch-box">
+    <div class="arch-title">어떤 데이터를 다루는가</div>
+    <p style="font-size:13px; margin:0; color:var(--text2);">우리은행·롯데카드·우리카드 거래내역, Mercury(USD), QuickBooks(HOI), ExpenseOne 경비, 수동 예측치. Excel 업로드 기본, API 연동 선택적.</p>
+  </div>
+
+  <div class="arch-box">
+    <div class="arch-title">어떤 결과물이 나오는가</div>
+    <p style="font-size:13px; margin:0; color:var(--text2);">현금흐름 대시보드, 재무상태표·손익계산서·합계잔액시산표, 연결재무제표, CEO용 오디오 브리핑, 회계법인 제출용 Excel/PDF.</p>
+  </div>
+
+</div>
+
+<h3>한눈에 보는 전체 구조</h3>
+<pre>
+데이터 입력                처리                      출력
+──────────────────────    ──────────────────────    ──────────────────────
+Excel 업로드           →  AI 계정과목 매핑         →  현금흐름 대시보드
+(카드/은행/경비)           (Claude API +              재무제표 (자동 생성)
+                           mapping_rules)             연결재무제표
+Mercury API (HOI)      →  복식부기 검증
+Codef.io (한국법인)        (차변 = 대변)          →  Excel / PDF Export
+ExpenseOne (경비)      →
+                        ↓
+                       Neon DB
+                       (14개 테이블)
+                        ↓
+              Obsidian (패턴 축적)
+                        ↓
+              NotebookLM (분석)    →  CEO 오디오 브리핑
+                        ↓              이상 지출 감지
+              예측 정확도 향상          예측 보정 제안
+</pre>
+
+<h3>기술 스택 한눈에</h3>
+<table>
+  <tr><th>구분</th><th>기술</th><th>비고</th></tr>
+  <tr><td>프론트엔드</td><td>Next.js 14 (App Router)</td><td>SSR/SSG, 파일 기반 라우팅</td></tr>
+  <tr><td>UI 코드 생성</td><td><strong>UI UX Pro Max Skill</strong> → shadcn/ui + Tailwind 코드 자동 생성</td><td>UUPM이 디자인 시스템 생성 후 실제 코드를 shadcn+Tailwind로 작성. Phase 3+에서 Tremor/Magic UI 부분 추가</td></tr>
+  <tr><td>백엔드</td><td>FastAPI (Python)</td><td>v1 파서 5종 재활용</td></tr>
+  <tr><td>DB</td><td><strong>Neon PostgreSQL</strong> — 처음부터 Neon 사용</td><td>dev 브랜치와 prod 브랜치 분리</td></tr>
+  <tr><td>AI</td><td>Anthropic Claude API + LLMFit</td><td>계정과목 매핑, 컨텍스트 최적화</td></tr>
+  <tr><td>UI 설계</td><td>UI UX Pro Max Skill</td><td>161개 UX 규칙 자동 적용, 디자인 시스템 생성</td></tr>
+  <tr><td>지식 관리</td><td>Obsidian + notebooklm-py</td><td>AI 자기학습 루프</td></tr>
+  <tr><td>배포</td><td>Vercel (프론트) + Railway (백엔드)</td><td>월 $0, 미사용 시 sleep</td></tr>
+  <tr><td>외부 연동</td><td>Mercury · QuickBooks · Codef.io · ExpenseOne</td><td>Phase 2~4 순차 연동</td></tr>
+</table>
+
+<h3>개발 페이즈 요약</h3>
+<table>
+  <tr><th>Phase</th><th>기간</th><th>핵심 목표</th><th>완료 기준</th></tr>
+  <tr><td class="p1">1</td><td><strong>3~4일</strong></td><td>현금흐름 대시보드</td><td>오늘 잔고 + 다음달 말 예상 잔고 30초 파악</td></tr>
+  <tr><td class="p1">2</td><td><strong>4~5일</strong></td><td>재무제표 + API 검증</td><td>회계법인 자료와 ±5% 이내, Mercury API 비교 완료</td></tr>
+  <tr><td class="p2">3</td><td><strong>3~4일</strong></td><td>3개 법인 연결</td><td>연결재무제표 자동 생성</td></tr>
+  <tr><td class="p2">4</td><td><strong>1~2일</strong></td><td>Obsidian + NotebookLM</td><td>월 마감 → 오디오 브리핑 자동 생성</td></tr>
+  <tr><td class="p3">5</td><td><strong>1~2일</strong></td><td>n8n 자동화</td><td>정기 수집 + Slack 알림 자동화</td></tr>
+  <tr><td colspan="4" style="text-align:center; color:var(--green); font-weight:600;">총 예상: 약 2~3주 (Claude Code 기반, 인간 직접 코딩 시간 아님)</td></tr>
+</table>
+
+<h3>중요 결정 사항</h3>
+<table>
+  <tr><th>항목</th><th>결정</th><th>이유</th></tr>
+  <tr><td>DB</td><td><strong>Neon PostgreSQL — 처음부터</strong></td><td>SQLite → PostgreSQL 마이그레이션 시 미묘한 차이(타입, datetime 등)로 버그 발생. Neon dev 브랜치로 로컬/prod 완전 분리. 비용 동일($0).</td></tr>
+  <tr><td>API 연동 시점</td><td><strong>Excel 먼저 → Phase 2에서 병렬 비교</strong></td><td>API 결과와 Excel 결과를 나란히 검증 후 결정. 오차 ±1% 이내면 전환, 아니면 Excel 유지.</td></tr>
+  <tr><td>DB 스키마</td><td><strong>Day 1에 14개 테이블 전체 완성</strong></td><td>entity_id 나중에 추가하면 v1처럼 전체 개편 필요. 처음에 설계 완성, 기능은 Phase별 구현.</td></tr>
+  <tr><td>UI 품질</td><td><strong>Phase 1부터 UUPM 적용</strong></td><td>161개 UX 규칙(접근성, 애니메이션 등) 자동 적용. Phase 3+에서 프리미엄 컴포넌트 부분 추가.</td></tr>
+</table>
+</section>
+
+<!-- OVERVIEW -->
+<section id="overview">
+<h2>배경 & 목표</h2>
+
+<p>현재 한아원 그룹은 3개 법인의 재무 데이터를 체계적으로 관리하는 시스템이 없다. 회계법인(새로회계법인)에 의존하는 구조는 비용이 높고, 대표가 실시간으로 현금 흐름을 파악하기 어렵다.</p>
+
+<div class="callout callout-blue">
+  <strong>핵심 목표</strong>
+  오늘 잔고가 얼마이고, 다음달 말에 얼마가 남을지를 30초 안에 파악할 수 있어야 한다. 동시에 AI가 거래 패턴을 학습해서 매핑과 예측 정확도가 시간이 지날수록 높아지는 구조를 만든다.
+</div>
+
+<h3>FinanceOne v1에서 배운 것</h3>
+<table>
+  <tr><th>v1의 문제</th><th>v2의 해결</th></tr>
+  <tr><td>재무상태표 불일치 (자산 ≠ 부채+자본)</td><td>당기순이익 → 이익잉여금 자동 반영, 항등식 검증 필수화</td></tr>
+  <tr><td>차변/대변 방향 혼선</td><td>복식부기 엔진 분리, <code>sum(debit)==sum(credit)</code> 상시 검증</td></tr>
+  <tr><td>단일 법인 기준 설계</td><td>모든 테이블에 <code>entity_id</code> 포함, Day 1에 완성</td></tr>
+  <tr><td>현금흐름 예측 vs 실제 큰 차이</td><td>기초잔고 + 수입 - 지출 = 기말잔고 루프 검증</td></tr>
+  <tr><td>AI 매핑이 반복 학습 안 됨</td><td>mapping_rules 테이블 + Obsidian 컨텍스트로 정확도 향상</td></tr>
+</table>
+</section>
+
+<!-- ENTITIES -->
+<section id="entities">
+<h2>법인 구조</h2>
+<pre>HOI Inc. (미국 모회사, Delaware C-Corp)  ← USD
+  └── 주식회사 한아원코리아 (한국 자회사)  ← KRW
+        └── 주식회사 한아원리테일 (한국 손회사)  ← KRW</pre>
+<p>각 법인은 별도 계좌, 카드, 거래내역을 가지며, 법인 간 자금 이동(내부거래)도 추적·상계해야 한다.</p>
+</section>
+
+<!-- WHY TOOLS -->
+<section id="why-tools">
+<h2>왜 이 도구들인가</h2>
+
+<div class="callout callout-purple">
+  <strong>핵심 철학</strong>
+  단순한 기록 시스템이 아니라, <strong>사용할수록 더 똑똑해지는 시스템</strong>을 만든다. Obsidian + NotebookLM은 AI가 축적된 컨텍스트로 학습해서 매핑과 예측 정확도를 높이는 피드백 루프의 핵심이다.
+</div>
+
+<div class="loop-diagram">
+  <h4 style="margin-top:0; color: var(--text2); font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">AI 자기학습 루프</h4>
+
+  <div class="loop-row">
+    <div class="loop-node loop-node-blue">거래 업로드</div>
+    <span class="loop-arrow">→</span>
+    <div class="loop-node loop-node-purple">AI 매핑</div>
+    <span class="loop-arrow">→</span>
+    <div class="loop-node loop-node-amber">담당자 검토·수정</div>
+  </div>
+  <div class="loop-label" style="margin-left:8px; margin-bottom:8px;">↓ 확정 저장 시</div>
+  <div class="loop-row">
+    <div class="loop-node loop-node-green">mapping_rules 업데이트</div>
+    <span class="loop-arrow">+</span>
+    <div class="loop-node loop-node-purple">Obsidian에 패턴 저장</div>
+  </div>
+  <div class="loop-label" style="margin-left:8px; margin-bottom:8px;">↓ 월 마감 시</div>
+  <div class="loop-row">
+    <div class="loop-node loop-node-blue">NotebookLM 분석</div>
+    <span class="loop-arrow">→</span>
+    <div class="loop-node loop-node-amber">이상 패턴 탐지</div>
+    <span class="loop-arrow">→</span>
+    <div class="loop-node loop-node-green">예측 모델 보정</div>
+  </div>
+  <div class="loop-label" style="margin-left:8px;">↓ 다음 달 AI 매핑 정확도 향상 → 루프 반복</div>
+</div>
+
+<table>
+  <tr><th>도구</th><th>역할</th><th>학습에 기여하는 방법</th></tr>
+  <tr>
+    <td><strong>mapping_rules DB</strong></td>
+    <td>단기 학습</td>
+    <td>확정된 분류를 패턴으로 저장 → 동일 거래처 자동 적용</td>
+  </tr>
+  <tr>
+    <td><strong>Obsidian Vault</strong></td>
+    <td>중기 컨텍스트 축적</td>
+    <td>거래처 배경, 계약 조건, 분류 이유 → AI 매핑 시 추가 컨텍스트로 제공</td>
+  </tr>
+  <tr>
+    <td><strong>NotebookLM (notebooklm-py)</strong></td>
+    <td>장기 패턴 분석</td>
+    <td>3~12개월 재무 데이터 분석 → 이상 지출, 예측 오차 원인, 계절성 파악</td>
+  </tr>
+  <tr>
+    <td><strong>LLMFit</strong></td>
+    <td>AI 비용 최적화</td>
+    <td>525건 거래 매핑 시 컨텍스트 압축 → Claude API 토큰 비용 절감</td>
+  </tr>
+</table>
+</section>
+
+<hr>
+
+<!-- REQUIREMENTS -->
+<section id="req-cashflow">
+<h2>요구사항 1 — 현금흐름 파악 <span class="p1">P1</span></h2>
+<div class="callout callout-blue">
+  <strong>목표</strong>
+  지금 잔고가 얼마이고, 다음달 말에 얼마가 남을지 30초 안에 파악.
+</div>
+
+<h4>대시보드 레이아웃</h4>
+<pre>[법인 선택] HOI | 한아원코리아 | 한아원리테일 | 통합
+
+┌──────────────────────────────────────────────────┐
+│ 현재 잔고                                         │
+│  한아원코리아: ₩51,881,800                        │
+│  HOI: $12,074.71 (≈ ₩18,122,244)                │
+│  총 (KRW 기준): ₩70,004,044                      │
+└──────────────────────────────────────────────────┘
+[이번달 수입(예측)] [이번달 지출(예측)] [월말 예상 잔고]
+[현금흐름 차트 — 실선: 실제 / 점선: 예측]
+[알림: 다음달 예상 부족액 ₩XX,XXX,XXX]</pre>
+
+<h4>필요 기능</h4>
+<table>
+  <tr><th>기능</th><th>설명</th></tr>
+  <tr><td>전월 말 잔고 입력</td><td>수동 입력 또는 bank API 자동 집계</td></tr>
+  <tr><td>이번달 예상 수입 입력</td><td>확정 + 예상 구분, 고객사별</td></tr>
+  <tr><td>이번달 예상 지출 입력</td><td>고정비 자동 반복 (is_recurring=1) + 변동비</td></tr>
+  <tr><td>중간 실적 업로드</td><td>예측 vs 실제 갭 표시, 항목별 차이 %</td></tr>
+  <tr><td>월말 예상 잔고</td><td>기초잔고 + 예상수입 - 예상지출</td></tr>
+  <tr><td>법인 간 이체 표시</td><td>HOI→한아원코리아 송금 등 별도 표시</td></tr>
+  <tr><td>알림</td><td>예상 잔고 < 최소운영잔고(설정값) 시 경고</td></tr>
+</table>
+</section>
+
+<section id="req-statements">
+<h2>요구사항 2 — 월별 재무제표 자동 생성 <span class="p1">P1</span></h2>
+
+<h4>v1 버그 수정 필수사항</h4>
+<table>
+  <tr><th>버그</th><th>수정 방법</th></tr>
+  <tr><td>자산 ≠ 부채+자본 (차이 1.6억)</td><td>당기순이익 → 이익잉여금(37600) 자동 가산</td></tr>
+  <tr><td>전기 잔액 없음</td><td>연도별 기초잔액 입력 필드 추가</td></tr>
+  <tr><td>복식부기 검증 없음</td><td><code>assert sum(debit) == sum(credit)</code> API 레벨에서 강제</td></tr>
+  <tr><td>법인 구분 없음</td><td>entity_id 기반으로 법인별 재무제표 생성</td></tr>
+</table>
+
+<h4>생성 가능한 재무제표</h4>
+<table>
+  <tr><th>#</th><th>재무제표</th><th>Phase</th></tr>
+  <tr><td>1</td><td>재무상태표 (자산 = 부채 + 자본 항등식 보장)</td><td>Phase 2</td></tr>
+  <tr><td>2</td><td>손익계산서</td><td>Phase 2</td></tr>
+  <tr><td>3</td><td>현금흐름표 (직접법)</td><td>Phase 2</td></tr>
+  <tr><td>4</td><td>결손금처리계산서</td><td>Phase 2</td></tr>
+  <tr><td>5</td><td>합계잔액시산표</td><td>Phase 2</td></tr>
+  <tr><td>6</td><td>연결재무제표 — <strong>US GAAP 기준 (모회사 HOI)</strong>, 내부거래 상계, K-GAAP 뷰 토글</td><td>Phase 3</td></tr>
+</table>
+</section>
+
+<section id="req-multi-entity">
+<h2>요구사항 3 — 3개 법인 구조 <span class="p2">P2</span></h2>
+<table>
+  <tr><th>기능</th><th>설명</th></tr>
+  <tr><td>법인 선택 UI</td><td>탭 또는 드롭다운으로 법인 전환</td></tr>
+  <tr><td>내부거래 태깅</td><td>법인 간 이체 자동 감지 → is_intercompany=1</td></tr>
+  <tr><td>환율 처리</td><td>HOI(USD) ↔ KRW 한국은행 API 자동 수집 + 수동 입력 선택</td></tr>
+  <tr><td>HOI 회계 기준</td><td>US GAAP. <strong>FinanceOne이 직접 처리</strong>. QuickBooks는 검증 + 초기 AI 학습 데이터 소스</td></tr>
+  <tr><td>한국 법인 회계 기준</td><td>K-GAAP. FinanceOne 복식부기 엔진으로 직접 생성</td></tr>
+  <tr><td>연결재무제표</td><td><strong>US GAAP 기준 (모회사 HOI 기준)</strong>. 한국 법인 K-GAAP → US GAAP 변환 후 합산. 내부거래 상계. K-GAAP 뷰 토글 가능</td></tr>
+  <tr><td>US GAAP ↔ K-GAAP 매핑</td><td>gaap_mapping 테이블. 초기 Claude API 자동 제안 → CEO 확정 → 이후 자동 적용</td></tr>
+</table>
+</section>
+
+<section id="req-data">
+<h2>요구사항 4 — 데이터 입력 방식 <span class="p2">P2</span></h2>
+
+<h4>기본 (항상 사용)</h4>
+<table>
+  <tr><th>소스</th><th>형식</th><th>파서</th></tr>
+  <tr><td>롯데카드</td><td>Excel</td><td>v1 lotte_card_parser.py 재활용</td></tr>
+  <tr><td>우리카드</td><td>Excel</td><td>v1 woori_card_parser.py 재활용</td></tr>
+  <tr><td>우리은행</td><td>Excel</td><td>v1 woori_bank_parser.py 재활용</td></tr>
+  <tr><td>신한카드</td><td>Excel</td><td>신규 파서 추가</td></tr>
+  <tr><td>수동 입력</td><td>폼</td><td>예상 수입/지출 직접 입력</td></tr>
+</table>
+
+<h4>선택적 (API, On/Off 토글)</h4>
+<div class="callout callout-amber">
+  <strong>원칙</strong>
+  API 연동 비용이 높으면 사용 안 함. Settings 화면에서 법인별로 On/Off 가능. Off 상태면 자동으로 Excel 업로드로 대체.
+</div>
+</section>
+
+<hr>
+
+<!-- STACK -->
+<section id="stack">
+<h2>기술 스택</h2>
+<table>
+  <tr><th>레이어</th><th>기술</th><th>이유</th></tr>
+  <tr><td>Frontend</td><td>Next.js 14 (App Router)</td><td>SSR/SSG, 파일 기반 라우팅</td></tr>
+  <tr><td>UI 코드 생성</td><td><strong>UUPM 기반</strong> — shadcn/ui + Tailwind 코드 자동 생성</td><td>UUPM이 디자인 시스템 생성 → Claude Code가 shadcn/ui + Tailwind로 실제 코드 작성. 별도 UI 프레임워크 불필요</td></tr>
+  <tr><td>UI (Phase 3+)</td><td>Tremor / Magic UI 부분 추가</td><td>차트 컴포넌트(Tremor), 애니메이션 카드(Magic UI) 특정 부분에만 추가</td></tr>
+  <tr><td>차트</td><td>Recharts</td><td>React 친화적</td></tr>
+  <tr><td>아이콘</td><td>Lucide React</td><td>shadcn/ui 기본 세트</td></tr>
+  <tr><td>Backend</td><td>FastAPI (Python)</td><td>v1 자산 재활용, Claude API 연동</td></tr>
+  <tr><td>DB</td><td><strong>Neon (PostgreSQL)</strong></td><td>무료, auto-pause, ERP 연동 대비, Vercel 공식 파트너</td></tr>
+  <tr><td>AI 매핑</td><td>Anthropic Claude API</td><td>계정과목 분류, 거래처 패턴 인식</td></tr>
+  <tr><td>Excel 파싱</td><td>openpyxl + pandas</td><td>v1 파서 5종 재활용</td></tr>
+  <tr><td>지식 관리</td><td>Obsidian + notebooklm-py</td><td>AI 학습 루프 핵심</td></tr>
+  <tr><td>컨텍스트 최적화</td><td>LLMFit</td><td>AI 매핑 토큰 비용 절감</td></tr>
+  <tr><td>배포 (프론트)</td><td>Vercel — 무료 플랜</td><td>항상 켜짐, Next.js 최적화</td></tr>
+  <tr><td>배포 (백엔드)</td><td>Railway — 무료 플랜</td><td>미사용 시 sleep, 첫 요청 ~30초 웜업</td></tr>
+  <tr><td>테스트</td><td>Playwright</td><td>재무제표 항등식 E2E 검증</td></tr>
+</table>
+
+<h3>참고 아키텍처 — 오픈소스 회계 프로젝트</h3>
+<div class="callout callout-purple">
+  <strong>활용 원칙</strong>
+  기존 오픈소스 회계 플랫폼은 다법인 연결재무제표, K-GAAP, AI 매핑을 지원하지 않아 베이스로 사용 불가. 대신 아래 3개 프로젝트의 로직 패턴을 참고하여 Neon PostgreSQL + FastAPI 위에 직접 구현.
+</div>
+<table>
+  <tr><th>프로젝트</th><th>참고 영역</th><th>활용 방법</th></tr>
+  <tr>
+    <td><strong>Bigcapital</strong><br><code>bigcapitalhq/bigcapital</code><br>⭐3k+ · PostgreSQL · Node.js</td>
+    <td>재무제표 생성 쿼리, 시산표 집계, 원장 조회</td>
+    <td>PostgreSQL 기반이라 쿼리 패턴 직접 참고 가능. 특히 <code>SELECT</code> 집계 구조, materialized view 활용 패턴</td>
+  </tr>
+  <tr>
+    <td><strong>Frappe Books</strong><br><code>frappe/books</code><br>⭐4k+ · Python · SQLite</td>
+    <td>복식부기 엔진 로직 (차변=대변 검증, 전기이월, 분개 처리)</td>
+    <td>Python 로직 흐름 참고 → FastAPI 서비스로 변환. 전기이월/마감 처리 순서가 특히 유용</td>
+  </tr>
+  <tr>
+    <td><strong>hledger</strong><br><code>simonmichael/hledger</code><br>⭐3k+ · Haskell · 텍스트</td>
+    <td>다중 통화 환율 처리 (temporal vs current rate, 환산차이 계산)</td>
+    <td>환율 변환 알고리즘/개념 참고 → USD↔KRW 연결재무제표 환산 로직에 적용</td>
+  </tr>
+</table>
+<p style="color:var(--text2); font-size:13px;">→ Claude Code에 지시 예시: "Bigcapital의 trial balance 쿼리 패턴을 참고해서 Neon PostgreSQL용 합계잔액시산표 API를 구현해줘"</p>
+
+<h3>배포 전략 — 비용 $0</h3>
+<div class="callout callout-green">
+  <strong>전략</strong>
+  개인 사용 도구이므로 팀 공유 불필요. Vercel(프론트 항상 켜짐) + Railway(백엔드 sleep) + Neon(DB auto-pause) 조합으로 월 비용 $0 유지. 나중에 ERP 연동 시 Railway 유료 업그레이드($5/월) 고려.
+</div>
+<pre>개발 (로컬)              배포 (무료)               월 비용
+──────────────────────   ──────────────────────    ─────
+Neon dev 브랜치   →      Neon prod 브랜치           $0 (auto-pause)
+localhost:8000    →      Railway (FastAPI)          $0 (sleep 모드)
+localhost:3000    →      Vercel (Next.js)           $0 (항상 켜짐)
+
+<span style="color:var(--teal)">▶ Neon 브랜치 전략</span>
+  neon/main   → 프로덕션 (Railway 연결)
+  neon/dev    → 로컬 개발 (.env의 DATABASE_URL)
+  neon/test   → Phase 2 API 비교 검증용 (선택)</pre>
+
+<h3>UI UX Pro Max Skill — 실제 역할 (중요)</h3>
+<div class="callout callout-blue">
+  <strong>정확한 역할</strong>
+  단순 디자인 가이드가 아님. Python 스크립트 실행 → 프로젝트에 맞는 완전한 디자인 시스템(컬러·타이포·패턴·효과·안티패턴) 자동 생성 → Claude Code가 이 스펙을 읽고 실제 Next.js 코드를 작성함. 161개 UX 규칙(접근성, 애니메이션 타이밍, 터치 타겟 등)이 코드에 자동 적용됨.
+</div>
+
+<h4>실제 워크플로우</h4>
+<pre><span class="comment"># 1. 디자인 시스템 생성 (Claude Code가 자동 실행)</span>
+python3 .claude/skills/ui-ux-pro-max/scripts/search.py \
+  "fintech accounting dashboard multi-entity dark" \
+  --design-system -p "FinanceOne" -f markdown --persist
+
+<span class="comment"># 2. 출력: design-system/MASTER.md 생성</span>
+<span class="comment">#    ├ 컬러 팔레트 (Primary, Secondary, Success, Danger...)</span>
+<span class="comment">#    ├ 타이포그래피 (헤딩/바디 폰트 조합)</span>
+<span class="comment">#    ├ 레이아웃 패턴 (Financial Dashboard + Bento Grid)</span>
+<span class="comment">#    ├ 효과 (shadow scale, transition timing)</span>
+<span class="comment">#    └ 안티패턴 (뱅킹에 AI 보라/핑크 그라디언트 금지 등)</span>
+
+<span class="comment"># 3. Claude Code가 MASTER.md를 읽고 실제 코드 작성</span>
+<span class="comment">#    → 161개 UX 규칙 자동 적용</span>
+<span class="comment">#    → Pre-Delivery Checklist (contrast 4.5:1, 터치타겟 44pt 등) 자동 검증</span></pre>
+
+<h4>적용되는 핵심 UX 규칙 (161개 중 FinanceOne에 특히 중요한 것)</h4>
+<table>
+  <tr><th>카테고리</th><th>규칙</th><th>FinanceOne 적용 예시</th></tr>
+  <tr><td>접근성 (필수)</td><td>Contrast 4.5:1, Aria-labels</td><td>잔고 숫자, 테이블 헤더 대비 비율</td></tr>
+  <tr><td>터치/인터랙션 (필수)</td><td>클릭 피드백 80~150ms</td><td>거래 확정 버튼, 업로드 버튼</td></tr>
+  <tr><td>차트/데이터</td><td>툴팁, 범례, 색맹 배려 컬러</td><td>현금흐름 차트, 예측 vs 실제 그래프</td></tr>
+  <tr><td>폼 UX</td><td>인라인 유효성 검증, 에러 위치</td><td>금액 입력 폼, 계정과목 매핑 UI</td></tr>
+  <tr><td>레이아웃</td><td>8dp 스페이싱 리듬, max-width</td><td>대시보드 카드 배치, 테이블 밀도</td></tr>
+  <tr><td>다크모드</td><td>라이트/다크 동시 설계</td><td>재무 대시보드 테마 일관성</td></tr>
+</table>
+
+<h3>프리미엄 UI 컴포넌트 — Phase 3+ 추가 목록</h3>
+<div class="callout callout-purple">
+  <strong>UUPM과의 관계</strong>
+  UUPM이 생성한 디자인 시스템 위에서 특정 고급 컴포넌트를 추가할 때 사용. 전체 교체가 아니라 필요한 부분에만 적용. 예: Tremor의 고급 차트 컴포넌트, Aceternity의 애니메이션 카드.
+</div>
+<table>
+  <tr><th>#</th><th>라이브러리</th><th>특징</th><th>FinanceOne 적합성</th></tr>
+  <tr>
+    <td>1</td>
+    <td><strong>Aceternity UI</strong><br><code>ui.aceternity.com</code></td>
+    <td>Framer Motion 기반 고급 애니메이션, 카드·테이블·차트 컴포넌트 풍부</td>
+    <td>⭐⭐⭐⭐⭐ 대시보드 카드 애니메이션에 최적</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td><strong>Magic UI</strong><br><code>magicui.design</code></td>
+    <td>shadcn/ui 위에 올리는 50+ 고급 컴포넌트, 무료</td>
+    <td>⭐⭐⭐⭐⭐ shadcn 기반이라 교체 비용 최소</td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td><strong>21st.dev</strong><br><code>21st.dev</code></td>
+    <td>AI 생성 컴포넌트 마켓플레이스, 재무 대시보드 템플릿 다수</td>
+    <td>⭐⭐⭐⭐ 특정 컴포넌트만 골라쓰기 용이</td>
+  </tr>
+  <tr>
+    <td>4</td>
+    <td><strong>Tremor</strong><br><code>tremor.so</code></td>
+    <td>대시보드·분석 특화, 차트·KPI 카드·테이블 내장</td>
+    <td>⭐⭐⭐⭐⭐ 재무 데이터 시각화에 최적화됨</td>
+  </tr>
+  <tr>
+    <td>5</td>
+    <td><strong>Origin UI</strong><br><code>originui.com</code></td>
+    <td>300+ 고품질 컴포넌트, 다크모드 완벽 지원</td>
+    <td>⭐⭐⭐⭐ 전체 UI 리빌드 시 적합</td>
+  </tr>
+</table>
+<p style="color:var(--text2); font-size:13px;">→ <strong>현재 추천:</strong> Phase 3에서 <strong>Tremor + Magic UI</strong> 조합. Tremor는 차트/KPI 카드, Magic UI는 대시보드 애니메이션 담당.</p>
+</section>
+
+<!-- DB SCHEMA -->
+<section id="db-schema">
+<h2>DB 스키마 전체 (Day 1 완성)</h2>
+
+<div class="callout callout-amber">
+  <strong>원칙</strong>
+  모든 테이블에 entity_id 포함. 나중에 추가하면 v1처럼 전체 개편 필요. <strong>처음부터 Neon PostgreSQL 사용</strong> — SQLite와 달리 타입·datetime·트랜잭션 동작이 완전히 일치하므로 dev/prod 차이 없음.
+</div>
+
+<h3>1. entities — 법인</h3>
+<pre>CREATE TABLE entities (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  code        TEXT NOT NULL UNIQUE,        <span class="comment">-- 'HOI', 'HAK', 'HAR'</span>
+  name        TEXT NOT NULL,               <span class="comment">-- 'HOI Inc.', '한아원코리아'</span>
+  type        TEXT NOT NULL,               <span class="comment">-- 'US_CORP', 'KR_CORP'</span>
+  currency    TEXT NOT NULL DEFAULT 'KRW', <span class="comment">-- 'USD', 'KRW'</span>
+  parent_id   INTEGER REFERENCES entities(id),
+  is_active   INTEGER NOT NULL DEFAULT 1,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+<span class="comment">-- 초기 데이터</span>
+INSERT INTO entities (code, name, type, currency, parent_id) VALUES
+  ('HOI', 'HOI Inc.', 'US_CORP', 'USD', NULL),
+  ('HAK', '주식회사 한아원코리아', 'KR_CORP', 'KRW', 1),
+  ('HAR', '주식회사 한아원리테일', 'KR_CORP', 'KRW', 2);</pre>
+
+<h3>2. members — 팀 멤버</h3>
+<pre>CREATE TABLE members (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity_id   INTEGER NOT NULL REFERENCES entities(id),
+  name        TEXT NOT NULL,
+  role        TEXT DEFAULT 'staff',  <span class="comment">-- 'admin', 'staff', 'readonly'</span>
+  is_active   INTEGER NOT NULL DEFAULT 1,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);</pre>
+
+<h3>3. standard_accounts — K-GAAP 표준계정</h3>
+<pre>CREATE TABLE standard_accounts (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  code         TEXT NOT NULL UNIQUE,   <span class="comment">-- '10100', '40000' (5자리 K-GAAP)</span>
+  name         TEXT NOT NULL,          <span class="comment">-- '현금및현금성자산', '매출'</span>
+  category     TEXT NOT NULL,          <span class="comment">-- '자산','부채','자본','수익','비용'</span>
+  subcategory  TEXT,                   <span class="comment">-- '유동자산','비유동자산' 등</span>
+  normal_side  TEXT NOT NULL,          <span class="comment">-- 'debit','credit'</span>
+  parent_code  TEXT REFERENCES standard_accounts(code),
+  sort_order   INTEGER NOT NULL DEFAULT 0,
+  is_active    INTEGER NOT NULL DEFAULT 1
+);
+<span class="comment">-- v1 seed_data/kgaap_accounts.py 재활용</span></pre>
+
+<h3>4. internal_accounts — 내부 계정과목</h3>
+<pre>CREATE TABLE internal_accounts (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity_id           INTEGER NOT NULL REFERENCES entities(id),
+  code                TEXT NOT NULL,
+  name                TEXT NOT NULL,
+  standard_account_id INTEGER REFERENCES standard_accounts(id),
+  parent_id           INTEGER REFERENCES internal_accounts(id),
+  sort_order          INTEGER NOT NULL DEFAULT 0,
+  is_active           INTEGER NOT NULL DEFAULT 1,
+  UNIQUE(entity_id, code)
+);</pre>
+
+<h3>5. uploaded_files — 업로드 파일 추적</h3>
+<pre>CREATE TABLE uploaded_files (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity_id    INTEGER NOT NULL REFERENCES entities(id),
+  filename     TEXT NOT NULL,
+  source_type  TEXT NOT NULL,  <span class="comment">-- 'lotte_card','woori_card','woori_bank','shinhan_card','manual'</span>
+  file_path    TEXT NOT NULL,
+  row_count    INTEGER,
+  status       TEXT NOT NULL DEFAULT 'pending',  <span class="comment">-- 'pending','processed','error'</span>
+  uploaded_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  uploaded_by  INTEGER REFERENCES members(id)
+);</pre>
+
+<h3>6. transactions — 거래내역 (핵심)</h3>
+<pre>CREATE TABLE transactions (
+  id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity_id              INTEGER NOT NULL REFERENCES entities(id),
+  file_id                INTEGER REFERENCES uploaded_files(id),
+
+  <span class="comment">-- 기본 정보</span>
+  date                   TEXT NOT NULL,            <span class="comment">-- 'YYYY-MM-DD'</span>
+  amount                 REAL NOT NULL,             <span class="comment">-- 항상 양수</span>
+  currency               TEXT NOT NULL DEFAULT 'KRW',
+  type                   TEXT NOT NULL,             <span class="comment">-- 'in','out'</span>
+  description            TEXT NOT NULL,
+  counterparty           TEXT,
+  member_id              INTEGER REFERENCES members(id),
+  source_type            TEXT NOT NULL,
+
+  <span class="comment">-- 계정과목 매핑</span>
+  internal_account_id    INTEGER REFERENCES internal_accounts(id),
+  standard_account_id    INTEGER REFERENCES standard_accounts(id),
+  mapping_confidence     REAL,                      <span class="comment">-- 0.0~1.0 AI 신뢰도</span>
+  mapping_source         TEXT,                      <span class="comment">-- 'ai','manual','rule'</span>
+  is_confirmed           INTEGER NOT NULL DEFAULT 0,
+
+  <span class="comment">-- 법인 간 거래</span>
+  is_intercompany        INTEGER NOT NULL DEFAULT 0,
+  counterparty_entity_id INTEGER REFERENCES entities(id),
+  intercompany_pair_id   INTEGER,                   <span class="comment">-- 양측 거래 연결</span>
+
+  <span class="comment">-- 중복 제거</span>
+  is_duplicate           INTEGER NOT NULL DEFAULT 0,
+  duplicate_of_id        INTEGER REFERENCES transactions(id),
+
+  note                   TEXT,
+  created_at             TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_tx_entity_date ON transactions(entity_id, date);
+CREATE INDEX idx_tx_standard ON transactions(standard_account_id);
+CREATE INDEX idx_tx_confirmed ON transactions(is_confirmed);</pre>
+
+<h3>7. balance_snapshots — 잔고 스냅샷</h3>
+<pre>CREATE TABLE balance_snapshots (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity_id     INTEGER NOT NULL REFERENCES entities(id),
+  date          TEXT NOT NULL,             <span class="comment">-- 'YYYY-MM-DD' (보통 월말)</span>
+  account_name  TEXT NOT NULL,             <span class="comment">-- '우리은행 법인통장', '롯데카드 결제계좌'</span>
+  account_type  TEXT NOT NULL,             <span class="comment">-- 'bank','card_settlement'</span>
+  balance       REAL NOT NULL,
+  currency      TEXT NOT NULL DEFAULT 'KRW',
+  source        TEXT NOT NULL DEFAULT 'manual',
+  note          TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(entity_id, date, account_name)
+);</pre>
+
+<h3>8. forecasts — 예측 수입/지출</h3>
+<pre>CREATE TABLE forecasts (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity_id        INTEGER NOT NULL REFERENCES entities(id),
+  year             INTEGER NOT NULL,
+  month            INTEGER NOT NULL,
+  category         TEXT NOT NULL,    <span class="comment">-- '매출','인건비','임차료','구독' 등</span>
+  subcategory      TEXT,             <span class="comment">-- '마트약국 시스템 사용료' 등</span>
+  type             TEXT NOT NULL,    <span class="comment">-- 'in','out'</span>
+  forecast_amount  REAL NOT NULL DEFAULT 0,
+  actual_amount    REAL,             <span class="comment">-- 월 마감 후 채워짐</span>
+  is_recurring     INTEGER NOT NULL DEFAULT 0,  <span class="comment">-- 1이면 매월 자동 복사</span>
+  note             TEXT,
+  created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(entity_id, year, month, category, subcategory, type)
+);</pre>
+
+<h3>9. exchange_rates — 환율</h3>
+<pre>CREATE TABLE exchange_rates (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  date          TEXT NOT NULL,
+  from_currency TEXT NOT NULL,  <span class="comment">-- 'USD'</span>
+  to_currency   TEXT NOT NULL,  <span class="comment">-- 'KRW'</span>
+  rate          REAL NOT NULL,
+  source        TEXT NOT NULL DEFAULT 'manual',  <span class="comment">-- 'manual','bok_api'</span>
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(date, from_currency, to_currency)
+);</pre>
+
+<h3>10. financial_statements — 재무제표 헤더</h3>
+<pre>CREATE TABLE financial_statements (
+  id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity_id                 INTEGER NOT NULL REFERENCES entities(id),
+  fiscal_year               INTEGER NOT NULL,
+  ki_num                    INTEGER NOT NULL DEFAULT 3,
+  start_month               INTEGER NOT NULL DEFAULT 1,
+  end_month                 INTEGER NOT NULL DEFAULT 12,
+  is_consolidated           INTEGER NOT NULL DEFAULT 0,  <span class="comment">-- 연결재무제표 여부</span>
+  company_name              TEXT,
+  representative_name       TEXT,
+  business_registration_no  TEXT,
+  corporate_registration_no TEXT,
+  company_address           TEXT,
+  business_type             TEXT,
+  business_item             TEXT,
+  auditor_name              TEXT,
+  notes                     TEXT,
+  status                    TEXT NOT NULL DEFAULT 'draft',  <span class="comment">-- 'draft','review','final'</span>
+  created_at                TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at                TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(entity_id, fiscal_year, ki_num, start_month, end_month)
+);</pre>
+
+<h3>11. financial_statement_line_items — 재무제표 항목</h3>
+<pre>CREATE TABLE financial_statement_line_items (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  statement_id      INTEGER NOT NULL REFERENCES financial_statements(id) ON DELETE CASCADE,
+  statement_type    TEXT NOT NULL,  <span class="comment">-- 'balance_sheet','income_statement','trial_balance','deficit_treatment'</span>
+  account_code      TEXT,
+  line_key          TEXT NOT NULL,
+  label             TEXT NOT NULL,
+  sort_order        INTEGER NOT NULL DEFAULT 0,
+  is_section_header INTEGER NOT NULL DEFAULT 0,
+  auto_amount       REAL NOT NULL DEFAULT 0,   <span class="comment">-- 거래에서 자동 계산</span>
+  auto_debit        REAL NOT NULL DEFAULT 0,
+  auto_credit       REAL NOT NULL DEFAULT 0,
+  manual_amount     REAL,                      <span class="comment">-- 수동 오버라이드 (입력 시 우선)</span>
+  manual_debit      REAL,
+  manual_credit     REAL,
+  note              TEXT,
+  UNIQUE(statement_id, statement_type, line_key)
+);</pre>
+
+<h3>12. settings — 앱 설정</h3>
+<pre>CREATE TABLE settings (
+  key        TEXT NOT NULL,
+  value      TEXT NOT NULL,
+  entity_id  INTEGER REFERENCES entities(id),  <span class="comment">-- NULL이면 전역 설정</span>
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (key, COALESCE(entity_id, 0))
+);
+
+INSERT INTO settings (key, value, entity_id) VALUES
+  ('min_cash_buffer', '5000000', 2),      <span class="comment">-- 한아원코리아 최소 운영 잔고</span>
+  ('min_cash_buffer', '3000000', 3),      <span class="comment">-- 한아원리테일</span>
+  ('api_woori_bank_enabled', 'false', NULL),
+  ('api_lotte_card_enabled', 'false', NULL),
+  ('default_exchange_rate_usd', '1482', NULL),
+  ('notebooklm_enabled', 'false', NULL),
+  ('obsidian_vault_path', '', NULL);</pre>
+
+<h3>13. mapping_rules — AI 매핑 학습</h3>
+<pre>CREATE TABLE mapping_rules (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity_id            INTEGER REFERENCES entities(id),  <span class="comment">-- NULL이면 전체 적용</span>
+  counterparty_pattern TEXT NOT NULL,   <span class="comment">-- '마트약국', 'SLACK%', 'ANTHROPIC%'</span>
+  standard_account_id  INTEGER NOT NULL REFERENCES standard_accounts(id),
+  internal_account_id  INTEGER REFERENCES internal_accounts(id),
+  confidence           REAL NOT NULL DEFAULT 1.0,
+  hit_count            INTEGER NOT NULL DEFAULT 0,  <span class="comment">-- 적중 횟수로 우선순위 결정</span>
+  created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at           TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_mapping_pattern ON mapping_rules(counterparty_pattern);</pre>
+
+<h3>14. gaap_mapping — US GAAP ↔ K-GAAP 매핑</h3>
+<pre>CREATE TABLE gaap_mapping (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  us_gaap_code          TEXT NOT NULL,         <span class="comment">-- QuickBooks 계정 코드</span>
+  us_gaap_name          TEXT NOT NULL,         <span class="comment">-- 'Cash and Cash Equivalents'</span>
+  standard_account_id   INTEGER REFERENCES standard_accounts(id),  <span class="comment">-- K-GAAP 매핑</span>
+  category              TEXT NOT NULL,         <span class="comment">-- 'Assets','Liabilities','Equity','Revenue','Expenses'</span>
+  mapping_source        TEXT DEFAULT 'ai',     <span class="comment">-- 'ai','manual' (초기 Claude 제안 → CEO 확정)</span>
+  is_confirmed          INTEGER NOT NULL DEFAULT 0,
+  created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(us_gaap_code)
+);
+<span class="comment">-- 초기 매핑: Claude API가 US GAAP → K-GAAP 자동 제안 → CEO 검토 후 is_confirmed=1</span>
+<span class="comment">-- 이후 QuickBooks 데이터 가져올 때 자동 변환 적용</span>
+<span class="comment">-- 장기 목표: QuickBooks와 FinanceOne 재무제표 차이 0%로 수렴 → Mercury만으로 전환 가능</span></pre>
+</section>
+
+<!-- LEARNING LOOP DETAIL -->
+<section id="learning-loop">
+<h2>AI 학습 루프 상세</h2>
+
+<h3>Obsidian Vault 구조</h3>
+<pre>financeone-vault/
+  ├── 월별 리포트/
+  │     ├── 2026-01.md    ← Claude Code가 월 마감 시 자동 생성
+  │     ├── 2026-02.md
+  │     └── 2026-03.md
+  ├── 거래처/
+  │     ├── 마트약국.md   ← 계약 조건, 결제 패턴, 분류 이유 축적
+  │     ├── 스마트스토어.md
+  │     └── ...
+  ├── 이상거래/
+  │     └── 미확인_카드사용_2026-02.md  ← 자동 감지 시 생성
+  └── 회계법인_피드백/
+        └── 새로회계법인_2025결산.md</pre>
+
+<div class="callout callout-green">
+  <strong>매핑 정확도 향상 메커니즘</strong>
+  1. 거래 확정 → mapping_rules DB 업데이트 (단기 학습)<br>
+  2. 거래처 컨텍스트 → Obsidian 노트 축적 (중기 학습)<br>
+  3. AI 매핑 시 → mapping_rules 조회 + 관련 Obsidian 노트를 컨텍스트로 제공<br>
+  → 동일 거래처는 다음부터 신뢰도 0.95+ 로 자동 분류
+</div>
+
+<h3>notebooklm-py 월간 파이프라인</h3>
+<pre><span class="comment"># scripts/monthly_briefing.py — 월 마감 시 자동 실행</span>
+
+<span class="comment"># 1. FinanceOne에서 월별 재무 데이터 PDF Export</span>
+pdf_path = export_monthly_report(year, month)
+
+<span class="comment"># 2. NotebookLM에 업로드 & 분석 요청</span>
+nb = notebooklm.NotebookLM()
+notebook = nb.create_notebook(f"{year}년 {month}월 재무 브리핑")
+notebook.add_source(pdf_path)
+<span class="comment"># Obsidian 최근 노트도 소스로 추가</span>
+notebook.add_source(f"{vault_path}/월별 리포트/{year}-{month:02d}.md")
+
+<span class="comment"># 3. 분석 항목</span>
+analysis = notebook.query([
+    "이번 달 전월 대비 주요 변화는?",
+    "예측과 실제 지출의 가장 큰 차이 항목은?",
+    "다음 달 주의해야 할 지출 패턴은?",
+    "이상 거래나 분류 오류가 의심되는 항목은?"
+])
+
+<span class="comment"># 4. CEO용 오디오 브리핑 생성</span>
+audio = notebook.generate_audio_overview()
+audio.save(f"/tmp/briefing_{year}{month:02d}.mp3")
+
+<span class="comment"># 5. 분석 결과를 Obsidian에 저장</span>
+save_to_obsidian(analysis, year, month)
+
+<span class="comment"># 6. 예측 모델 보정 (분석 결과 → forecasts 테이블 업데이트 제안)</span>
+suggest_forecast_updates(analysis)</pre>
+
+<div class="callout callout-purple">
+  <strong>예측 정확도 향상 메커니즘</strong>
+  NotebookLM이 3~12개월 데이터에서 계절성, 반복 패턴, 이상치를 발견 → 예측값 보정 제안 → 담당자 승인 후 forecasts 테이블 업데이트 → 다음 달 예측 정확도 향상
+</div>
+</section>
+
+<hr>
+
+<!-- UI -->
+<section id="ui-skill">
+<h2>UI/UX — UI UX Pro Max Skill</h2>
+
+<div class="callout callout-blue">
+  <strong>설치 방법 (Antigravity)</strong>
+  <code>npm install -g uipro-cli</code> → <code>uipro init --ai antigravity</code>
+</div>
+
+<h4>FinanceOne 디자인 시스템 생성</h4>
+<pre><span class="comment"># 프로젝트 루트에서 실행</span>
+python3 .claude/skills/ui-ux-pro-max/scripts/search.py \
+  "fintech accounting dashboard multi-entity dark KRW" \
+  --design-system -p "FinanceOne" -f markdown --persist
+
+<span class="comment"># 생성 후 design-system/MASTER.md 확인</span>
+<span class="comment"># 이 파일을 Antigravity Context에 추가하면 매 화면 개발 시 자동 참조</span></pre>
+
+<h4>적용 스타일</h4>
+<table>
+  <tr><th>용도</th><th>스타일</th><th>이유</th></tr>
+  <tr><td>대시보드, 거래내역</td><td>Financial Dashboard (#9)</td><td>데이터 밀도 높은 재무 UI에 최적</td></tr>
+  <tr><td>대시보드 카드 레이아웃</td><td>Bento Box Grid (#21)</td><td>잔고/수입/지출/예측 카드 나란히 배치</td></tr>
+  <tr><td>재무제표</td><td>Executive Dashboard (#3)</td><td>공식 문서 스타일, 프린트 친화적</td></tr>
+</table>
+
+<h4>페이지별 Override 구조</h4>
+<pre>design-system/
+  ├── MASTER.md           ← 전체 컬러, 타이포, 컴포넌트 (글로벌)
+  └── pages/
+      ├── dashboard.md    ← 카드, 차트 전용 override
+      ├── transactions.md ← Dense table 전용
+      └── statements.md   ← 공식 문서 스타일 override</pre>
+
+<div class="callout callout-blue">
+  <strong>Antigravity에서 사용법</strong>
+  화면 개발 시 프롬프트에: "design-system/MASTER.md와 design-system/pages/dashboard.md를 참조해서 대시보드 컴포넌트를 만들어줘"
+</div>
+</section>
+
+<section id="screens">
+<h2>화면 목록</h2>
+<table>
+  <tr><th>화면</th><th>URL</th><th>설명</th><th>Priority</th></tr>
+  <tr><td>대시보드</td><td><code>/</code></td><td>현금흐름 요약, 잔고, 예측, 알림</td><td class="p1">P1</td></tr>
+  <tr><td>현금흐름표</td><td><code>/cashflow</code></td><td>월별 수입/지출, 예측 vs 실제</td><td class="p1">P1</td></tr>
+  <tr><td>거래내역</td><td><code>/transactions</code></td><td>거래 목록, 분류, 검색/필터</td><td class="p1">P1</td></tr>
+  <tr><td>업로드</td><td><code>/upload</code></td><td>카드/은행 Excel 업로드</td><td class="p1">P1</td></tr>
+  <tr><td>재무제표</td><td><code>/statements</code></td><td>재무상태표, 손익계산서 등</td><td class="p2">P2</td></tr>
+  <tr><td>리포트</td><td><code>/reports</code></td><td>월별/분기별, Excel/PDF Export</td><td class="p2">P2</td></tr>
+  <tr><td>계정과목</td><td><code>/accounts</code></td><td>K-GAAP 계정과목 관리</td><td class="p2">P2</td></tr>
+  <tr><td>설정</td><td><code>/settings</code></td><td>법인 관리, API 토글, 환율, 멤버</td><td class="p2">P2</td></tr>
+</table>
+</section>
+
+<hr>
+
+<!-- DB ERD -->
+<section id="db-erd">
+<h2>DB 스키마 ERD</h2>
+<p>14개 테이블 전체 관계도. 색상 그룹별로 역할 구분: 파란색(법인/멤버), 보라색(계정과목), 빨간색(거래 핵심), 초록색(파일/설정), 노란색(재무/예측), 진보라색(재무제표), 주황색(AI 학습).</p>
+
+<div style="background:var(--color-background-secondary); border:1px solid var(--color-border-tertiary); border-radius:12px; padding:8px; overflow-x:auto; margin:16px 0;">
+<svg width="100%" viewBox="0 0 1100 900" xmlns="http://www.w3.org/2000/svg" style="max-width:1100px; display:block; margin:0 auto;">
+<defs>
+  <marker id="erd-arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="erd-arr-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#3b82f6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="erd-arr-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#10b981" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="erd-arr-orange" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#f97316" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+<!-- entities -->
+<g><rect x="40" y="40" width="180" height="200" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/><rect x="40" y="40" width="180" height="36" rx="10" fill="#3b82f6"/><rect x="40" y="64" width="180" height="12" rx="0" fill="#3b82f6"/><text x="130" y="63" text-anchor="middle" font-size="13" font-weight="700" fill="white" font-family="system-ui,sans-serif">entities</text><text x="52" y="96" font-size="11" fill="#1e40af" font-weight="600" font-family="system-ui,sans-serif">🔑 id</text><text x="52" y="112" font-size="11" fill="#1e40af" font-family="system-ui,sans-serif">code (HOI/HAK/HAR)</text><text x="52" y="128" font-size="11" fill="#1e40af" font-family="system-ui,sans-serif">name</text><text x="52" y="144" font-size="11" fill="#1e40af" font-family="system-ui,sans-serif">type (US_CORP/KR_CORP)</text><text x="52" y="160" font-size="11" fill="#1e40af" font-family="system-ui,sans-serif">currency (USD/KRW)</text><text x="52" y="176" font-size="11" fill="#3b82f6" font-weight="600" font-family="system-ui,sans-serif">🔗 parent_id → self</text><text x="52" y="192" font-size="11" fill="#1e40af" font-family="system-ui,sans-serif">is_active</text><rect x="52" y="210" width="150" height="16" rx="4" fill="#dbeafe"/><text x="127" y="222" text-anchor="middle" font-size="10" fill="#1d4ed8" font-family="system-ui,sans-serif">HOI · 한아원코리아 · 리테일</text></g>
+<!-- members -->
+<g><rect x="260" y="40" width="190" height="150" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/><rect x="260" y="40" width="190" height="36" rx="10" fill="#3b82f6"/><rect x="260" y="64" width="190" height="12" fill="#3b82f6"/><text x="355" y="63" text-anchor="middle" font-size="13" font-weight="700" fill="white" font-family="system-ui,sans-serif">members</text><text x="272" y="96" font-size="11" fill="#1e40af" font-weight="600" font-family="system-ui,sans-serif">🔑 id</text><text x="272" y="112" font-size="11" fill="#3b82f6" font-weight="600" font-family="system-ui,sans-serif">🔗 entity_id → entities</text><text x="272" y="128" font-size="11" fill="#1e40af" font-family="system-ui,sans-serif">name</text><text x="272" y="144" font-size="11" fill="#1e40af" font-family="system-ui,sans-serif">role (admin/staff/readonly)</text><text x="272" y="160" font-size="11" fill="#1e40af" font-family="system-ui,sans-serif">is_active</text></g>
+<!-- settings -->
+<g><rect x="260" y="220" width="190" height="130" rx="10" fill="#f0fdf4" stroke="#10b981" stroke-width="1.5"/><rect x="260" y="220" width="190" height="36" rx="10" fill="#10b981"/><rect x="260" y="244" width="190" height="12" fill="#10b981"/><text x="355" y="243" text-anchor="middle" font-size="13" font-weight="700" fill="white" font-family="system-ui,sans-serif">settings</text><text x="272" y="276" font-size="11" fill="#065f46" font-weight="600" font-family="system-ui,sans-serif">🔑 key</text><text x="272" y="292" font-size="11" fill="#065f46" font-family="system-ui,sans-serif">value</text><text x="272" y="308" font-size="11" fill="#10b981" font-weight="600" font-family="system-ui,sans-serif">🔗 entity_id (nullable)</text><text x="272" y="324" font-size="11" fill="#065f46" font-family="system-ui,sans-serif">updated_at</text><rect x="272" y="334" width="160" height="14" rx="3" fill="#dcfce7"/><text x="352" y="345" text-anchor="middle" font-size="10" fill="#166534" font-family="system-ui,sans-serif">API 토글·환율·최소잔고</text></g>
+<!-- exchange_rates -->
+<g><rect x="40" y="270" width="185" height="140" rx="10" fill="#fefce8" stroke="#f59e0b" stroke-width="1.5"/><rect x="40" y="270" width="185" height="36" rx="10" fill="#f59e0b"/><rect x="40" y="294" width="185" height="12" fill="#f59e0b"/><text x="132" y="293" text-anchor="middle" font-size="13" font-weight="700" fill="white" font-family="system-ui,sans-serif">exchange_rates</text><text x="52" y="326" font-size="11" fill="#78350f" font-weight="600" font-family="system-ui,sans-serif">🔑 id</text><text x="52" y="342" font-size="11" fill="#78350f" font-family="system-ui,sans-serif">date · from_currency</text><text x="52" y="358" font-size="11" fill="#78350f" font-family="system-ui,sans-serif">to_currency · rate</text><text x="52" y="374" font-size="11" fill="#78350f" font-family="system-ui,sans-serif">source (manual/bok_api)</text><rect x="52" y="382" width="160" height="14" rx="3" fill="#fef9c3"/><text x="132" y="393" text-anchor="middle" font-size="10" fill="#92400e" font-family="system-ui,sans-serif">USD ↔ KRW 환율 기록</text></g>
+<!-- standard_accounts -->
+<g><rect x="480" y="40" width="195" height="195" rx="10" fill="#fdf4ff" stroke="#a855f7" stroke-width="1.5"/><rect x="480" y="40" width="195" height="36" rx="10" fill="#a855f7"/><rect x="480" y="64" width="195" height="12" fill="#a855f7"/><text x="577" y="63" text-anchor="middle" font-size="13" font-weight="700" fill="white" font-family="system-ui,sans-serif">standard_accounts</text><text x="492" y="96" font-size="11" fill="#581c87" font-weight="600" font-family="system-ui,sans-serif">🔑 id</text><text x="492" y="112" font-size="11" fill="#581c87" font-family="system-ui,sans-serif">code (10100~99999)</text><text x="492" y="128" font-size="11" fill="#581c87" font-family="system-ui,sans-serif">name · category</text><text x="492" y="144" font-size="11" fill="#581c87" font-family="system-ui,sans-serif">subcategory</text><text x="492" y="160" font-size="11" fill="#581c87" font-family="system-ui,sans-serif">normal_side (debit/credit)</text><text x="492" y="176" font-size="11" fill="#a855f7" font-weight="600" font-family="system-ui,sans-serif">🔗 parent_code → self</text><text x="492" y="192" font-size="11" fill="#581c87" font-family="system-ui,sans-serif">sort_order · is_active</text><rect x="492" y="202" width="165" height="14" rx="3" fill="#f3e8ff"/><text x="574" y="213" text-anchor="middle" font-size="10" fill="#7e22ce" font-family="system-ui,sans-serif">v1 kgaap_accounts.py 재활용</text></g>
+<!-- internal_accounts -->
+<g><rect x="480" y="265" width="195" height="160" rx="10" fill="#fdf4ff" stroke="#a855f7" stroke-width="1.5"/><rect x="480" y="265" width="195" height="36" rx="10" fill="#c084fc"/><rect x="480" y="289" width="195" height="12" fill="#c084fc"/><text x="577" y="288" text-anchor="middle" font-size="13" font-weight="700" fill="white" font-family="system-ui,sans-serif">internal_accounts</text><text x="492" y="320" font-size="11" fill="#581c87" font-weight="600" font-family="system-ui,sans-serif">🔑 id</text><text x="492" y="336" font-size="11" fill="#a855f7" font-weight="600" font-family="system-ui,sans-serif">🔗 entity_id → entities</text><text x="492" y="352" font-size="11" fill="#581c87" font-family="system-ui,sans-serif">code · name</text><text x="492" y="368" font-size="11" fill="#a855f7" font-weight="600" font-family="system-ui,sans-serif">🔗 standard_account_id</text><text x="492" y="384" font-size="11" fill="#a855f7" font-weight="600" font-family="system-ui,sans-serif">🔗 parent_id → self</text><text x="492" y="400" font-size="11" fill="#581c87" font-family="system-ui,sans-serif">sort_order · is_active</text></g>
+<!-- mapping_rules -->
+<g><rect x="480" y="455" width="195" height="170" rx="10" fill="#fff7ed" stroke="#f97316" stroke-width="1.5"/><rect x="480" y="455" width="195" height="36" rx="10" fill="#f97316"/><rect x="480" y="479" width="195" height="12" fill="#f97316"/><text x="577" y="478" text-anchor="middle" font-size="13" font-weight="700" fill="white" font-family="system-ui,sans-serif">mapping_rules</text><rect x="492" y="485" width="80" height="14" rx="3" fill="#fed7aa"/><text x="532" y="496" text-anchor="middle" font-size="9" fill="#9a3412" font-family="system-ui,sans-serif">AI 학습 핵심</text><text x="492" y="516" font-size="11" fill="#7c2d12" font-weight="600" font-family="system-ui,sans-serif">🔑 id</text><text x="492" y="532" font-size="11" fill="#f97316" font-weight="600" font-family="system-ui,sans-serif">🔗 entity_id</text><text x="492" y="548" font-size="11" fill="#7c2d12" font-family="system-ui,sans-serif">counterparty_pattern</text><text x="492" y="564" font-size="11" fill="#f97316" font-weight="600" font-family="system-ui,sans-serif">🔗 standard_account_id</text><text x="492" y="580" font-size="11" fill="#f97316" font-weight="600" font-family="system-ui,sans-serif">🔗 internal_account_id</text><text x="492" y="596" font-size="11" fill="#7c2d12" font-family="system-ui,sans-serif">confidence · hit_count</text></g>
+<!-- uploaded_files -->
+<g><rect x="730" y="40" width="200" height="165" rx="10" fill="#f0fdf4" stroke="#10b981" stroke-width="1.5"/><rect x="730" y="40" width="200" height="36" rx="10" fill="#10b981"/><rect x="730" y="64" width="200" height="12" fill="#10b981"/><text x="830" y="63" text-anchor="middle" font-size="13" font-weight="700" fill="white" font-family="system-ui,sans-serif">uploaded_files</text><text x="742" y="96" font-size="11" fill="#065f46" font-weight="600" font-family="system-ui,sans-serif">🔑 id</text><text x="742" y="112" font-size="11" fill="#10b981" font-weight="600" font-family="system-ui,sans-serif">🔗 entity_id → entities</text><text x="742" y="128" font-size="11" fill="#065f46" font-family="system-ui,sans-serif">filename · source_type</text><text x="742" y="144" font-size="11" fill="#065f46" font-family="system-ui,sans-serif">file_path · row_count</text><text x="742" y="160" font-size="11" fill="#065f46" font-family="system-ui,sans-serif">status (pending/processed)</text><text x="742" y="176" font-size="11" fill="#10b981" font-weight="600" font-family="system-ui,sans-serif">🔗 uploaded_by → members</text></g>
+<!-- transactions CORE -->
+<g><rect x="730" y="235" width="200" height="380" rx="10" fill="#fff1f2" stroke="#e11d48" stroke-width="2"/><rect x="730" y="235" width="200" height="36" rx="10" fill="#e11d48"/><rect x="730" y="259" width="200" height="12" fill="#e11d48"/><text x="830" y="258" text-anchor="middle" font-size="13" font-weight="700" fill="white" font-family="system-ui,sans-serif">transactions ★</text><rect x="742" y="265" width="70" height="14" rx="3" fill="#fecdd3"/><text x="777" y="276" text-anchor="middle" font-size="9" fill="#9f1239" font-family="system-ui,sans-serif">핵심 테이블</text><text x="742" y="296" font-size="11" fill="#881337" font-weight="600" font-family="system-ui,sans-serif">🔑 id</text><text x="742" y="312" font-size="11" fill="#e11d48" font-weight="600" font-family="system-ui,sans-serif">🔗 entity_id → entities</text><text x="742" y="328" font-size="11" fill="#e11d48" font-weight="600" font-family="system-ui,sans-serif">🔗 file_id → uploaded_files</text><line x1="742" y1="336" x2="922" y2="336" stroke="#fca5a5" stroke-width="0.5" stroke-dasharray="3,3"/><text x="742" y="352" font-size="11" fill="#881337" font-family="system-ui,sans-serif">date · amount · currency</text><text x="742" y="368" font-size="11" fill="#881337" font-family="system-ui,sans-serif">type (in/out)</text><text x="742" y="384" font-size="11" fill="#881337" font-family="system-ui,sans-serif">description · counterparty</text><text x="742" y="400" font-size="11" fill="#e11d48" font-weight="600" font-family="system-ui,sans-serif">🔗 member_id</text><line x1="742" y1="408" x2="922" y2="408" stroke="#fca5a5" stroke-width="0.5" stroke-dasharray="3,3"/><text x="742" y="424" font-size="11" fill="#e11d48" font-weight="600" font-family="system-ui,sans-serif">🔗 internal_account_id</text><text x="742" y="440" font-size="11" fill="#e11d48" font-weight="600" font-family="system-ui,sans-serif">🔗 standard_account_id</text><text x="742" y="456" font-size="11" fill="#881337" font-family="system-ui,sans-serif">mapping_confidence 0~1</text><text x="742" y="472" font-size="11" fill="#881337" font-family="system-ui,sans-serif">is_confirmed</text><line x1="742" y1="480" x2="922" y2="480" stroke="#fca5a5" stroke-width="0.5" stroke-dasharray="3,3"/><text x="742" y="496" font-size="11" fill="#881337" font-family="system-ui,sans-serif">is_intercompany</text><text x="742" y="512" font-size="11" fill="#e11d48" font-weight="600" font-family="system-ui,sans-serif">🔗 counterparty_entity_id</text><text x="742" y="528" font-size="11" fill="#881337" font-family="system-ui,sans-serif">is_duplicate · note</text></g>
+<!-- balance_snapshots -->
+<g><rect x="40" y="440" width="195" height="170" rx="10" fill="#fef9c3" stroke="#eab308" stroke-width="1.5"/><rect x="40" y="440" width="195" height="36" rx="10" fill="#eab308"/><rect x="40" y="464" width="195" height="12" fill="#eab308"/><text x="137" y="463" text-anchor="middle" font-size="13" font-weight="700" fill="white" font-family="system-ui,sans-serif">balance_snapshots</text><text x="52" y="496" font-size="11" fill="#713f12" font-weight="600" font-family="system-ui,sans-serif">🔑 id</text><text x="52" y="512" font-size="11" fill="#eab308" font-weight="600" font-family="system-ui,sans-serif">🔗 entity_id → entities</text><text x="52" y="528" font-size="11" fill="#713f12" font-family="system-ui,sans-serif">date (월말)</text><text x="52" y="544" font-size="11" fill="#713f12" font-family="system-ui,sans-serif">account_name · type</text><text x="52" y="560" font-size="11" fill="#713f12" font-family="system-ui,sans-serif">balance · currency</text><text x="52" y="576" font-size="11" fill="#713f12" font-family="system-ui,sans-serif">source (manual/api)</text></g>
+<!-- forecasts -->
+<g><rect x="260" y="380" width="195" height="190" rx="10" fill="#fef9c3" stroke="#eab308" stroke-width="1.5"/><rect x="260" y="380" width="195" height="36" rx="10" fill="#ca8a04"/><rect x="260" y="404" width="195" height="12" fill="#ca8a04"/><text x="357" y="403" text-anchor="middle" font-size="13" font-weight="700" fill="white" font-family="system-ui,sans-serif">forecasts</text><text x="272" y="436" font-size="11" fill="#713f12" font-weight="600" font-family="system-ui,sans-serif">🔑 id</text><text x="272" y="452" font-size="11" fill="#eab308" font-weight="600" font-family="system-ui,sans-serif">🔗 entity_id → entities</text><text x="272" y="468" font-size="11" fill="#713f12" font-family="system-ui,sans-serif">year · month</text><text x="272" y="484" font-size="11" fill="#713f12" font-family="system-ui,sans-serif">category · subcategory</text><text x="272" y="500" font-size="11" fill="#713f12" font-family="system-ui,sans-serif">type (in/out)</text><text x="272" y="516" font-size="11" fill="#713f12" font-family="system-ui,sans-serif">forecast_amount</text><text x="272" y="532" font-size="11" fill="#713f12" font-family="system-ui,sans-serif">actual_amount</text><text x="272" y="548" font-size="11" fill="#713f12" font-family="system-ui,sans-serif">is_recurring (매월 자동복사)</text></g>
+<!-- financial_statements -->
+<g><rect x="40" y="640" width="200" height="220" rx="10" fill="#fdf4ff" stroke="#7c3aed" stroke-width="1.5"/><rect x="40" y="640" width="200" height="36" rx="10" fill="#7c3aed"/><rect x="40" y="664" width="200" height="12" fill="#7c3aed"/><text x="140" y="663" text-anchor="middle" font-size="12" font-weight="700" fill="white" font-family="system-ui,sans-serif">financial_statements</text><text x="52" y="696" font-size="11" fill="#581c87" font-weight="600" font-family="system-ui,sans-serif">🔑 id</text><text x="52" y="712" font-size="11" fill="#7c3aed" font-weight="600" font-family="system-ui,sans-serif">🔗 entity_id → entities</text><text x="52" y="728" font-size="11" fill="#581c87" font-family="system-ui,sans-serif">fiscal_year · ki_num</text><text x="52" y="744" font-size="11" fill="#581c87" font-family="system-ui,sans-serif">start_month · end_month</text><text x="52" y="760" font-size="11" fill="#581c87" font-family="system-ui,sans-serif">is_consolidated</text><text x="52" y="776" font-size="11" fill="#581c87" font-family="system-ui,sans-serif">company_name</text><text x="52" y="792" font-size="11" fill="#581c87" font-family="system-ui,sans-serif">business_registration_no</text><text x="52" y="808" font-size="11" fill="#581c87" font-family="system-ui,sans-serif">status (draft/review/final)</text></g>
+<!-- fin_statement_line_items -->
+<g><rect x="270" y="600" width="195" height="210" rx="10" fill="#fdf4ff" stroke="#9333ea" stroke-width="1.5"/><rect x="270" y="600" width="195" height="36" rx="10" fill="#9333ea"/><rect x="270" y="624" width="195" height="12" fill="#9333ea"/><text x="367" y="623" text-anchor="middle" font-size="11" font-weight="700" fill="white" font-family="system-ui,sans-serif">fin_statement_line_items</text><text x="282" y="656" font-size="11" fill="#581c87" font-weight="600" font-family="system-ui,sans-serif">🔑 id</text><text x="282" y="672" font-size="11" fill="#9333ea" font-weight="600" font-family="system-ui,sans-serif">🔗 statement_id</text><text x="282" y="688" font-size="11" fill="#581c87" font-family="system-ui,sans-serif">statement_type</text><text x="282" y="704" font-size="11" fill="#581c87" font-family="system-ui,sans-serif">line_key · label</text><text x="282" y="720" font-size="11" fill="#581c87" font-family="system-ui,sans-serif">auto_amount (자동계산)</text><text x="282" y="736" font-size="11" fill="#581c87" font-family="system-ui,sans-serif">manual_amount (오버라이드)</text><text x="282" y="752" font-size="11" fill="#581c87" font-family="system-ui,sans-serif">auto_debit · auto_credit</text><text x="282" y="768" font-size="11" fill="#581c87" font-family="system-ui,sans-serif">is_section_header</text></g>
+<!-- Relationship lines -->
+<line x1="260" y1="105" x2="220" y2="105" stroke="#3b82f6" stroke-width="1" stroke-dasharray="5,3" marker-end="url(#erd-arr-blue)"/>
+<line x1="260" y1="300" x2="225" y2="300" stroke="#10b981" stroke-width="1" stroke-dasharray="5,3" marker-end="url(#erd-arr-green)"/>
+<line x1="130" y1="240" x2="130" y2="440" stroke="#eab308" stroke-width="1" stroke-dasharray="5,3" marker-end="url(#erd-arr)"/>
+<line x1="170" y1="410" x2="280" y2="420" stroke="#eab308" stroke-width="1" stroke-dasharray="5,3" marker-end="url(#erd-arr)"/>
+<line x1="120" y1="240" x2="90" y2="640" stroke="#7c3aed" stroke-width="1" stroke-dasharray="5,3" marker-end="url(#erd-arr)"/>
+<line x1="440" y1="150" x2="730" y2="110" stroke="#10b981" stroke-width="1" stroke-dasharray="5,3" marker-end="url(#erd-arr-green)"/>
+<line x1="440" y1="175" x2="730" y2="360" stroke="#e11d48" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#erd-arr)"/>
+<line x1="830" y1="205" x2="830" y2="235" stroke="#10b981" stroke-width="1" stroke-dasharray="5,3" marker-end="url(#erd-arr-green)"/>
+<line x1="577" y1="235" x2="577" y2="265" stroke="#a855f7" stroke-width="1" stroke-dasharray="5,3" marker-end="url(#erd-arr)"/>
+<line x1="577" y1="425" x2="577" y2="455" stroke="#f97316" stroke-width="1" stroke-dasharray="5,3" marker-end="url(#erd-arr-orange)"/>
+<line x1="675" y1="340" x2="730" y2="424" stroke="#a855f7" stroke-width="1" stroke-dasharray="5,3" marker-end="url(#erd-arr)"/>
+<line x1="675" y1="160" x2="730" y2="440" stroke="#a855f7" stroke-width="1" stroke-dasharray="5,3" marker-end="url(#erd-arr)"/>
+<line x1="240" y1="730" x2="270" y2="730" stroke="#9333ea" stroke-width="1" stroke-dasharray="5,3" marker-end="url(#erd-arr)"/>
+<!-- Legend -->
+<rect x="40" y="855" width="1020" height="35" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+<text x="58" y="877" font-size="11" fill="#475569" font-weight="600" font-family="system-ui,sans-serif">범례:</text>
+<rect x="95" y="864" width="12" height="12" rx="2" fill="#3b82f6"/>
+<text x="113" y="875" font-size="11" fill="#475569" font-family="system-ui,sans-serif">법인/멤버</text>
+<rect x="185" y="864" width="12" height="12" rx="2" fill="#a855f7"/>
+<text x="203" y="875" font-size="11" fill="#475569" font-family="system-ui,sans-serif">계정과목</text>
+<rect x="270" y="864" width="12" height="12" rx="2" fill="#e11d48"/>
+<text x="288" y="875" font-size="11" fill="#475569" font-family="system-ui,sans-serif">거래 핵심</text>
+<rect x="360" y="864" width="12" height="12" rx="2" fill="#10b981"/>
+<text x="378" y="875" font-size="11" fill="#475569" font-family="system-ui,sans-serif">파일/설정</text>
+<rect x="445" y="864" width="12" height="12" rx="2" fill="#eab308"/>
+<text x="463" y="875" font-size="11" fill="#475569" font-family="system-ui,sans-serif">재무/예측</text>
+<rect x="530" y="864" width="12" height="12" rx="2" fill="#7c3aed"/>
+<text x="548" y="875" font-size="11" fill="#475569" font-family="system-ui,sans-serif">재무제표</text>
+<rect x="613" y="864" width="12" height="12" rx="2" fill="#f97316"/>
+<text x="631" y="875" font-size="11" fill="#475569" font-family="system-ui,sans-serif">AI 학습</text>
+<line x1="700" y1="870" x2="720" y2="870" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,2"/>
+<text x="728" y="875" font-size="11" fill="#475569" font-family="system-ui,sans-serif">🔗 = 외래키</text>
+<text x="900" y="875" font-size="11" fill="#94a3b8" font-family="system-ui,sans-serif">총 14개 테이블 · Neon PostgreSQL</text>
+</svg>
+</div>
+</section>
+
+<!-- OBSIDIAN + NOTEBOOKLM DETAIL -->
+<section id="knowledge-loop">
+<h2>Obsidian + NotebookLM — 실제 작동 방식</h2>
+
+<div class="callout callout-purple">
+  <strong>핵심 목적</strong>
+  Obsidian과 NotebookLM은 단순 메모 도구가 아니다. <strong>Claude Code가 거래 데이터와 과거 패턴을 연결해서 매핑 정확도와 현금흐름 예측 정확도를 시간이 지날수록 높이는 자기학습 루프</strong>의 핵심이다.
+</div>
+
+<h3>영상의 워크플로우 → FinanceOne 적용</h3>
+<p>Chase AI 영상의 구조는 이렇다: <strong>Claude Code → (데이터 수집) → NotebookLM → (분석 결과) → Obsidian</strong>. FinanceOne에선 이걸 재무 자동화에 맞게 재해석한다.</p>
+
+<table>
+  <tr><th>도구</th><th>역할</th><th>FinanceOne에서 하는 일</th></tr>
+  <tr>
+    <td><strong>Claude Code</strong></td>
+    <td>실행 에이전트</td>
+    <td>
+      · 거래 데이터 처리 + 재무제표 생성<br>
+      · 월 마감 시 자동으로 파이프라인 실행<br>
+      · Obsidian에 노트 저장, NotebookLM에 소스 업로드
+    </td>
+  </tr>
+  <tr>
+    <td><strong>NotebookLM</strong><br><small>(notebooklm-py)</small></td>
+    <td>심층 분석 엔진</td>
+    <td>
+      · 재무제표 PDF + Obsidian 노트를 소스로 받아서 분석<br>
+      · "이번 달 전월 대비 이상 지출은?" 질의<br>
+      · <strong>CEO용 오디오 브리핑 자동 생성</strong> (팟캐스트 형식)<br>
+      · 예측 오차 패턴 분석 → 다음달 보정값 제안
+    </td>
+  </tr>
+  <tr>
+    <td><strong>Obsidian</strong></td>
+    <td>컨텍스트 저장소</td>
+    <td>
+      · 월별 재무 요약 자동 저장<br>
+      · 거래처 배경 노트 (계약 조건, 결제 패턴)<br>
+      · <strong>AI 매핑 시 거래처 노트를 컨텍스트로 제공</strong><br>
+      · Backlink로 "마트약국" ↔ 관련 거래 ↔ 계약 노트 연결
+    </td>
+  </tr>
+</table>
+
+<h3>월 마감 자동 파이프라인 (Claude Code 실행)</h3>
+<pre>월 마감 트리거 (수동 또는 cron)
+        │
+        ▼
+[1] FinanceOne DB에서 해당 월 거래 데이터 추출
+        │
+        ▼
+[2] 월별 재무 요약 생성 → Obsidian에 저장
+    financeone-vault/월별 리포트/2026-03.md
+        │
+        ▼
+[3] PDF 리포트 생성 (재무제표 + 현금흐름)
+        │
+        ▼
+[4] notebooklm-py → NotebookLM에 업로드
+    소스 1: 이번달 PDF
+    소스 2: Obsidian 최근 3개월 노트
+    소스 3: mapping_rules 패턴 요약
+        │
+        ▼
+[5] NotebookLM에 분석 질의
+    ├ "예측 vs 실제 가장 큰 차이 항목은?"
+    ├ "이상한 패턴의 거래처가 있는가?"
+    └ "다음달 주의해야 할 고정비 변동은?"
+        │
+        ▼
+[6] 오디오 브리핑 생성 (CEO용 팟캐스트)
+        │
+        ▼
+[7] 분석 결과 → Obsidian에 저장
+    financeone-vault/월별 리포트/2026-03-분석.md
+        │
+        ▼
+[8] 분석 결과에서 예측 보정값 추출
+    → forecasts 테이블 업데이트 제안
+    → 담당자 승인 후 적용</pre>
+
+<h3>AI 매핑 정확도 향상 메커니즘</h3>
+<pre>거래 업로드: "ANTHROPIC SAN FRANCISCO USA · ₩167,145"
+        │
+        ▼
+[1단계] mapping_rules 테이블 조회
+    → ANTHROPIC% 패턴 매칭 → 표준계정 82100 (AI 구독)
+    → confidence: 0.95, hit_count: 47회
+        │
+        ▼ (신뢰도 낮은 경우만 2단계로)
+[2단계] Obsidian 거래처 노트 조회
+    financeone-vault/거래처/ANTHROPIC.md 읽기
+    → "Claude AI 구독, 법인카드 체크우리, 매달 25일 결제"
+    → 이 컨텍스트를 Claude API 프롬프트에 추가
+        │
+        ▼
+[3단계] Claude API 매핑 (컨텍스트 포함)
+    → 더 정확한 분류 + 신뢰도 0.99
+        │
+        ▼
+[4단계] 담당자 확인 후 확정
+    → mapping_rules hit_count 증가
+    → Obsidian 거래처 노트 업데이트 (자동)</pre>
+
+<div class="callout callout-green">
+  <strong>결과</strong>
+  3개월 사용 후: 신규 거래처 제외 95%+ 자동 분류. 6개월 후: 계절성 패턴 학습으로 현금흐름 예측 오차 ±10% 이내.
+</div>
+
+<h3>Obsidian Vault 구조 (자동 생성되는 파일들)</h3>
+<pre>financeone-vault/
+  ├── 월별 리포트/
+  │     ├── 2026-03.md          ← 월 마감 시 Claude Code가 자동 생성
+  │     └── 2026-03-분석.md     ← NotebookLM 분석 결과 자동 저장
+  ├── 거래처/
+  │     ├── 마트약국.md          ← 새 거래처 첫 등장 시 자동 생성
+  │     └── ANTHROPIC.md        ← 분류 패턴, 결제 주기 자동 기록
+  ├── 이상거래/
+  │     └── 2026-03-미확인.md   ← 신뢰도 낮은 거래 감지 시 자동 생성
+  └── conversations/
+        └── 2026-03-22.md       ← Claude Code 대화 자동 저장 (↓ 아래 참조)</pre>
+</section>
+
+<!-- CLAUDE.md RULES -->
+<section id="claude-md-rules">
+<h2>CLAUDE.md 규칙 — 대화 자동 저장</h2>
+
+<div class="callout callout-amber">
+  <strong>왜 필요한가</strong>
+  Claude Code와의 대화에서 중요한 설계 결정, 버그 해결 과정, 비즈니스 로직 설명이 나온다. 이걸 Obsidian에 자동 저장해두면 NotebookLM이 나중에 "왜 이렇게 설계했는지"도 학습할 수 있다.
+</div>
+
+<h4>CLAUDE.md에 추가할 대화 저장 규칙</h4>
+<pre># 대화 자동 저장 규칙
+
+## Conversation Auto-Save
+- 30분 이상 대화 없음이 감지되면 현재 세션 대화를 저장
+- 저장 위치: obsidian-vault/conversations/YYYY-MM-DD-HH.md
+- 저장 형식: 날짜, 주요 결정 사항, 코드 변경 요약, 미해결 이슈
+- 저장 후 Obsidian Backlink: 관련 거래처/기능 노트에 자동 링크
+- NotebookLM 소스로 추가 가능 (월 마감 파이프라인에서 활용)
+
+## 저장 트리거
+1. 유저가 "저장해줘", "save", "대화 정리해줘" 명령 시 즉시 저장
+2. 태스크 완료 (git commit) 후 자동 저장
+3. 에러 해결 후 자동 저장 (버그 케이스로 분류)
+4. 30분+ 비활성 감지 시 저장
+
+## 저장 템플릿
+---
+date: {{datetime}}
+session_type: development | debug | design | review
+tags: [financeone, {{affected_files}}]
+---
+# 세션 요약
+## 주요 결정 사항
+## 변경된 파일 및 이유
+## 해결한 이슈
+## 미해결 / 다음 세션 이어받기</pre>
+
+<div class="callout callout-blue">
+  <strong>NotebookLM과의 연동</strong>
+  월 마감 파이프라인에서 <code>conversations/</code> 폴더의 이번달 대화 파일들도 NotebookLM 소스로 추가. "이번달에 어떤 기능을 만들었고 어떤 이슈가 있었는지"를 AI가 학습해서 다음 개발 세션에 컨텍스트로 제공 가능.
+</div>
+</section>
+
+<hr>
+
+<!-- 5 REPOS -->
+<section id="five-repos">
+<h2>핵심 도구 레포 5종 — 영상 참고</h2>
+
+<div class="callout callout-blue">
+  <strong>출처</strong>
+  Chase AI — "5 Github Repos That Will 10x Your Next Claude Code Project" (Shorts, 2026.02.24). 5개 중 UUPM·Obsidian Skills는 이미 PRD에 포함. 아래 3개를 추가 반영.
+</div>
+
+<table>
+  <tr><th>#</th><th>레포</th><th>역할</th><th>FinanceOne 활용</th><th>PRD 반영</th></tr>
+  <tr>
+    <td>1</td>
+    <td><strong>UI UX Pro Max</strong><br><code>nextlevelbuilder/ui-ux-pro-max-skill</code></td>
+    <td>디자인 시스템 자동 생성, 161개 UX 규칙</td>
+    <td>FinanceOne 전체 UI</td>
+    <td>✅ 포함</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td><strong>GSD — Get Shit Done</strong><br><code>gsd-build/get-shit-done</code></td>
+    <td>Spec-driven development, 컨텍스트 엔지니어링, 서브에이전트 오케스트레이션</td>
+    <td>PRD → 자동 Phase 분해 → 실행</td>
+    <td>✅ 아래 상세</td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td><strong>n8n-MCP</strong><br><code>czlonkowski/n8n-mcp</code> + <code>czlonkowski/n8n-skills</code></td>
+    <td>1,084개 n8n 노드를 Claude Code에서 직접 제어</td>
+    <td>월 마감 자동화, Codef 스케줄링</td>
+    <td>✅ 아래 상세</td>
+  </tr>
+  <tr>
+    <td>4</td>
+    <td><strong>Obsidian Skills</strong><br><code>kepano/obsidian-skills</code></td>
+    <td>Claude Code ↔ Obsidian vault 직접 연동 skill set</td>
+    <td>AI 학습 루프, vault 자동 저장</td>
+    <td>✅ 포함</td>
+  </tr>
+  <tr>
+    <td>5</td>
+    <td><strong>awesome-claude-code</strong><br><code>hesreallyhim/awesome-claude-code</code></td>
+    <td>Skills·Hooks·Commands·CLAUDE.md 큐레이션 레포</td>
+    <td>개발 세팅 참고 레퍼런스</td>
+    <td>✅ 아래 상세</td>
+  </tr>
+</table>
+
+<h3>2. GSD — Get Shit Done ❌ FinanceOne에서 미사용</h3>
+<div class="callout callout-amber">
+  <strong>결론: 제외</strong>
+  GSD의 18개 에이전트(planner, executor, verifier, ui-auditor 등)가 Antigravity 기본 기능과 중복됨. 토큰 4:1 오버헤드 (코드 1 토큰 대비 오케스트레이션 4 토큰)가 비용 과다. FinanceOne PRD HTML이 이미 Phase·요구사항을 완전히 정의하므로 별도 로드맵 생성 에이전트 불필요.
+</div>
+
+<table>
+  <tr><th>GSD 에이전트</th><th>FinanceOne 대체 방법</th><th>결론</th></tr>
+  <tr><td>gsd-roadmapper, gsd-planner</td><td>PRD HTML이 Phase 1~5 완전 정의</td><td>❌ 불필요</td></tr>
+  <tr><td>gsd-executor</td><td>Claude Code 자체</td><td>❌ 중복</td></tr>
+  <tr><td>gsd-verifier, gsd-plan-checker</td><td>Playwright E2E 테스트 + CLAUDE.md 검증 규칙</td><td>❌ 중복</td></tr>
+  <tr><td>gsd-ui-auditor, gsd-nyquist-auditor</td><td>UUPM Pre-Delivery Checklist 자동 적용</td><td>❌ 중복</td></tr>
+  <tr><td>gsd-debugger</td><td>Claude Code 자체 디버깅</td><td>❌ 중복</td></tr>
+  <tr><td>컨텍스트 rot 방지</td><td>CLAUDE.md + 세션별 /clear + MEMORY.md</td><td>✅ 직접 관리</td></tr>
+</table>
+
+<h3>3. n8n-MCP — <code>czlonkowski/n8n-mcp</code></h3>
+<div class="callout callout-amber">
+  <strong>실제 레포명 확인</strong>
+  영상에서 n8n-MCP로 소개됐으나, 공식 n8n-io가 아닌 <code>czlonkowski/n8n-mcp</code>. 1,084개 n8n 노드 지식을 Claude Code에 제공하는 MCP 서버. 별도 companion skill set인 <code>czlonkowski/n8n-skills</code> (7개 skill)도 함께 설치.
+</div>
+
+<h4>FinanceOne에서 활용할 시나리오 (Phase 4+)</h4>
+<table>
+  <tr><th>시나리오</th><th>n8n 역할</th></tr>
+  <tr><td>월 마감 파이프라인</td><td>스케줄러 → PDF 생성 → NotebookLM 업로드 → Obsidian 저장 → Slack 알림</td></tr>
+  <tr><td>Codef.io 정기 수집</td><td>매일 새벽 한국 은행/카드 거래내역 자동 수집 → FinanceOne API 전송</td></tr>
+  <tr><td>ExpenseOne Webhook</td><td>승인 완료 이벤트 → FinanceOne DB 자동 저장</td></tr>
+</table>
+
+<h4>설치 (Phase 4 시점)</h4>
+<pre><span class="comment"># 1. n8n-MCP 서버 등록</span>
+claude mcp add n8n-mcp --scope project
+
+<span class="comment"># 2. n8n-skills 설치 (7개 skill: expression, patterns, validation 등)</span>
+/plugin marketplace add czlonkowski/n8n-skills
+/plugin install n8n-mcp-skills
+
+<span class="comment"># 3. .claude.json에 MCP 설정 추가</span>
+{
+  "mcpServers": {
+    "n8n-mcp": {
+      "command": "npx",
+      "args": ["-y", "n8n-mcp"],
+      "env": { "N8N_MCP_MODE": "stdio" }
+    }
+  }
+}</pre>
+
+<h3>4. kepano/obsidian-skills — FinanceOne Vault 연동</h3>
+<div class="callout callout-green">
+  <strong>설치 방법</strong>
+  Claude Code가 Obsidian vault 폴더에서 실행될 때 자동 활성화. vault 루트에 <code>/.claude</code> 폴더에 설치.
+</div>
+
+<h4>5개 skill 목록 및 FinanceOne 활용</h4>
+<table>
+  <tr><th>Skill</th><th>기능</th><th>FinanceOne 활용</th></tr>
+  <tr><td><strong>obsidian-markdown</strong></td><td>Obsidian Flavored Markdown — wikilinks, callouts, frontmatter</td><td>월별 재무 요약 노트 자동 생성</td></tr>
+  <tr><td><strong>obsidian-bases</strong></td><td>Bases DB — 필터, 정렬, 뷰 관리</td><td>거래처 CRM, 이상거래 트래커</td></tr>
+  <tr><td><strong>json-canvas</strong></td><td>JSON Canvas — 노드, 엣지, 그룹</td><td>법인 관계도, 재무 흐름 시각화</td></tr>
+  <tr><td><strong>obsidian-cli</strong></td><td>Obsidian CLI 명령어 — 검색, 파일 조작</td><td>자동화 스크립트에서 vault 접근</td></tr>
+  <tr><td><strong>defuddle</strong></td><td>웹 → 깔끔한 Markdown 변환</td><td>회계법인 자료 웹페이지 → vault 저장</td></tr>
+</table>
+
+<div class="callout callout-amber">
+  <strong>설치 주의사항</strong>
+  <code>obsidian-bases</code> skill의 <code>!</code> 문자가 Claude Code bash 명령으로 오인될 수 있는 이슈(GitHub Issue #10) 있음. 최신 버전에서 수정됨. 설치 후 테스트 필요.
+</div>
+
+<pre><span class="comment"># FinanceOne vault 루트(~/Documents/financeone-vault)에서</span>
+/plugin marketplace add kepano/obsidian-skills
+/plugin install obsidian@obsidian-skills
+
+<span class="comment"># 또는 수동 설치</span>
+cd ~/Documents/financeone-vault
+git clone https://github.com/kepano/obsidian-skills.git .claude-obsidian
+cp -r .claude-obsidian/skills .claude/skills/</pre>
+
+<h3>5. awesome-claude-code</h3>
+<div class="callout callout-blue">
+  <strong>역할</strong>
+  Skills, Hooks, Commands, CLAUDE.md 예제 큐레이션. 개발 세팅 시 참고 레퍼런스. 특히 Hooks에서 자동화 스크립트 발굴. ⭐30k
+</div>
+
+<h4>FinanceOne에서 참고할 카테고리</h4>
+<table>
+  <tr><th>카테고리</th><th>참고 용도</th></tr>
+  <tr><td><strong>HOOKS</strong></td><td>PostToolUse — 거래 확정 시 자동 Obsidian 저장, git commit 시 세션 요약</td></tr>
+  <tr><td><strong>SKILLS</strong></td><td>K-Dense Claude Scientific Skills — finance 섹션 참고 가능</td></tr>
+  <tr><td><strong>CLAUDE.md</strong></td><td>잘 작성된 예제 참고 → FinanceOne CLAUDE.md 품질 향상</td></tr>
+  <tr><td><strong>STATUS</strong></td><td>claudia-statusline — 토큰 소모, 컨텍스트 진행률 실시간 확인</td></tr>
+</table>
+</section>
+
+<!-- AGENT SKILL WORKFLOW MAP -->
+<section id="agent-skill-map">
+<h2>Agent & Skill 워크플로우 맵</h2>
+
+<div class="callout callout-purple">
+  <strong>핵심 원칙</strong>
+  Claude Code 개발 시 각 단계에서 적절한 skill을 명시적으로 호출해야 품질이 보장된다. "그냥 코딩"이 아니라 UUPM → 설계 → 구현 → 검증 순서로 skill을 체계적으로 사용.
+</div>
+
+<h3>설치할 Skill 전체 목록</h3>
+<table>
+  <tr><th>Skill</th><th>설치 명령</th><th>활성화 시점</th></tr>
+  <tr><td><strong>UI UX Pro Max</strong></td><td><code>uipro init --ai antigravity</code></td><td>모든 UI 관련 작업</td></tr>
+  <tr><td><strong>kepano/obsidian-skills</strong> (5종)</td><td><code>/plugin install obsidian@obsidian-skills</code></td><td>Obsidian vault 작업</td></tr>
+  <tr><td><strong>czlonkowski/n8n-skills</strong> (7종)</td><td><code>/plugin install czlonkowski/n8n-skills</code></td><td>Phase 4+ n8n 자동화</td></tr>
+</table>
+
+<h3>Phase별 Agent / Skill 사용 가이드</h3>
+
+<h4>Phase 0 — 프로젝트 세팅 (Day 1)</h4>
+<table>
+  <tr><th>작업</th><th>사용 Skill / Tool</th><th>방법</th></tr>
+  <tr><td>DB 스키마 생성</td><td>직접 (스키마 PRD에 완성)</td><td>schema.sql 실행 → Alembic init</td></tr>
+  <tr><td>디자인 시스템 생성</td><td><strong>UUPM</strong></td><td><code>python3 search.py "fintech accounting dark" --design-system --persist</code></td></tr>
+  <tr><td>Obsidian vault 설정</td><td><strong>obsidian-markdown</strong>, <strong>obsidian-cli</strong></td><td>vault 폴더 구조 + 템플릿 생성</td></tr>
+  <tr><td>CLAUDE.md 작성</td><td>awesome-claude-code 참고</td><td>프로젝트 규칙, DB 원칙, UI 가이드 포함</td></tr>
+</table>
+
+<h4>Phase 1 — 현금흐름 대시보드</h4>
+<table>
+  <tr><th>작업</th><th>사용 Skill</th><th>CLAUDE.md 지시문</th></tr>
+  <tr><td>FastAPI 라우터 작성</td><td>없음 (Claude Code 직접)</td><td>"entity_id 없는 엔드포인트 금지"</td></tr>
+  <tr><td>대시보드 UI 컴포넌트</td><td><strong>UUPM</strong> (Financial Dashboard 스타일)</td><td>"design-system/MASTER.md 먼저 읽고 구현"</td></tr>
+  <tr><td>현금흐름 차트</td><td><strong>UUPM</strong> (chart 도메인)</td><td>"Recharts 사용, UUPM chart 가이드 적용"</td></tr>
+  <tr><td>Excel 파서 포팅</td><td>없음 (v1 코드 재활용)</td><td>"v1 파서 로직 변경 금지, 정규화만 수정"</td></tr>
+  <tr><td>Neon DB 연결 검증</td><td>없음 (Playwright)</td><td>"매 Phase 완료 시 E2E 테스트 실행"</td></tr>
+</table>
+
+<h4>Phase 2 — 재무제표 정확도</h4>
+<table>
+  <tr><th>작업</th><th>사용 Skill</th><th>CLAUDE.md 지시문</th></tr>
+  <tr><td>복식부기 엔진</td><td>없음 (직접 구현)</td><td>"sum(debit)==sum(credit) 실패 시 즉시 중단"</td></tr>
+  <tr><td>재무상태표 생성 로직</td><td>없음 (직접 구현)</td><td>"당기순이익을 이익잉여금에 자동 반영 필수"</td></tr>
+  <tr><td>재무제표 UI</td><td><strong>UUPM</strong> (Executive Dashboard)</td><td>"design-system/pages/statements.md 우선 참조"</td></tr>
+  <tr><td>Mercury API 연동</td><td>없음 (직접 구현)</td><td>"Read-only 토큰만 사용, 쓰기 절대 금지"</td></tr>
+  <tr><td>Codef 샌드박스 테스트</td><td>없음 (직접 구현)</td><td>"SANDBOX 환경에서만 테스트, 정식 데이터 접근 금지"</td></tr>
+  <tr><td>PDF/Excel Export</td><td>없음 (직접 구현)</td><td>"K-GAAP 양식 준수"</td></tr>
+</table>
+
+<h4>Phase 3 — 3개 법인 연결</h4>
+<table>
+  <tr><th>작업</th><th>사용 Skill</th><th>CLAUDE.md 지시문</th></tr>
+  <tr><td>내부거래 감지 로직</td><td>없음 (직접 구현)</td><td>"is_intercompany=1 설정 시 counterparty_entity_id 필수"</td></tr>
+  <tr><td>연결재무제표</td><td>없음 (직접 구현)</td><td>"내부거래 상계 후 합산, 환율 평균환율 적용"</td></tr>
+  <tr><td>통합 대시보드 UI</td><td><strong>UUPM</strong></td><td>"법인 전환 시 데이터 완전 재로딩 필수"</td></tr>
+</table>
+
+<h4>Phase 4 — Obsidian + NotebookLM 자동화</h4>
+<table>
+  <tr><th>작업</th><th>사용 Skill</th><th>방법</th></tr>
+  <tr><td>월별 재무 요약 노트 생성</td><td><strong>obsidian-markdown</strong></td><td>frontmatter, wikilinks, callouts 정확한 문법 적용</td></tr>
+  <tr><td>거래처 노트 자동 생성</td><td><strong>obsidian-markdown</strong></td><td>새 거래처 첫 등장 시 자동 생성 훅</td></tr>
+  <tr><td>Vault 검색 및 조회</td><td><strong>obsidian-cli</strong></td><td><code>obsidian search query="..."</code> 명령으로 컨텍스트 검색</td></tr>
+  <tr><td>거래처 DB 관리</td><td><strong>obsidian-bases</strong></td><td>Bases 필터·정렬로 거래처 현황 관리</td></tr>
+  <tr><td>NotebookLM 파이프라인</td><td>없음 (notebooklm-py 직접)</td><td>scripts/monthly_briefing.py 실행</td></tr>
+</table>
+
+<h4>Phase 5 — n8n 자동화</h4>
+<table>
+  <tr><th>작업</th><th>사용 Skill</th><th>방법</th></tr>
+  <tr><td>n8n 워크플로우 설계</td><td><strong>n8n-skills</strong> (patterns, mcp-tools)</td><td>5가지 검증된 패턴 중 선택</td></tr>
+  <tr><td>스케줄러 설정</td><td><strong>n8n-skills</strong> (expression, node-config)</td><td>cron 표현식 정확한 문법 적용</td></tr>
+  <tr><td>Webhook 설정</td><td><strong>n8n-skills</strong> (workflow-patterns)</td><td>ExpenseOne → FinanceOne 연동</td></tr>
+  <tr><td>에러 처리</td><td><strong>n8n-skills</strong> (validation-expert)</td><td>실패 시 Slack 알림 자동화</td></tr>
+</table>
+
+<h3>CLAUDE.md에 추가할 Agent/Skill 규칙</h3>
+<pre>## Skills & Agents 사용 규칙
+
+### UI 작업 시 필수
+- 모든 새 화면 개발 전: design-system/MASTER.md 읽기
+- 화면별 override 확인: design-system/pages/[screen].md
+- UUPM Pre-Delivery Checklist 통과 후 커밋
+
+### Obsidian 작업 시 필수
+- obsidian-markdown skill 활성화 후 노트 생성
+- frontmatter 형식: date, tags, entity 포함 필수
+- wikilinks 문법: [[노트명]] (대괄호 2개)
+
+### n8n 작업 시 (Phase 4+)
+- n8n-mcp MCP 서버 활성 상태 확인
+- n8n-skills 로드 후 워크플로우 설계
+- 프로덕션 워크플로우 직접 수정 절대 금지
+- 항상 복사본에서 테스트 후 적용
+
+### 세션 관리
+- 컨텍스트 70% 이상: /clear 후 CLAUDE.md + 현재 Phase 파일 재로드
+- Phase 완료 시: MEMORY.md 업데이트 + git commit
+- 30분+ 비활성: conversations/ 폴더에 세션 요약 저장</pre>
+</section>
+
+<hr>
+
+<!-- SETUP -->
+
+<h3>Step 1. 기본 도구</h3>
+<pre><span class="comment"># Node.js v20+ 확인</span>
+node --version
+
+<span class="comment"># Python 3.10+ 확인</span>
+python3 --version
+
+<span class="comment"># gh CLI (GitHub)</span>
+brew install gh
+gh auth login
+
+<span class="comment"># 리포지토리 생성</span>
+mkdir ~/Desktop/financeone-v2 && cd ~/Desktop/financeone-v2
+gh repo create financeone-v2 --private
+git init && git remote add origin https://github.com/[your-name]/financeone-v2</pre>
+
+<h3>Step 2. UI UX Pro Max Skill</h3>
+<pre><span class="comment"># CLI 설치</span>
+npm install -g uipro-cli
+
+<span class="comment"># Antigravity용으로 초기화</span>
+cd ~/Desktop/financeone-v2
+uipro init --ai antigravity
+
+<span class="comment"># 디자인 시스템 생성</span>
+python3 .claude/skills/ui-ux-pro-max/scripts/search.py \
+  "fintech accounting dashboard multi-entity dark" \
+  --design-system -p "FinanceOne" -f markdown --persist
+
+<span class="comment"># 확인</span>
+ls design-system/MASTER.md</pre>
+
+<h3>Step 3. 기타 CLI 도구</h3>
+<pre><span class="comment"># Vercel (팀 공유용 배포)</span>
+npm install -g vercel
+vercel login
+
+<span class="comment"># Playwright (재무제표 항등식 E2E 테스트)</span>
+npm install -g @playwright/test
+npx playwright install chromium
+
+<span class="comment"># LLMFit (AI 매핑 토큰 최적화)</span>
+pip3 install llmfit --break-system-packages</pre>
+</section>
+
+<section id="setup-obsidian">
+<h2>개발 환경 세팅 — Obsidian 설정</h2>
+
+<h3>Step 4. Obsidian 설치 & Vault 구조</h3>
+<pre><span class="comment"># Obsidian 설치</span>
+brew install --cask obsidian
+
+<span class="comment"># Vault 폴더 구조 생성</span>
+mkdir -p ~/Documents/financeone-vault
+cd ~/Documents/financeone-vault
+mkdir -p "월별 리포트/2026"
+mkdir -p "거래처"
+mkdir -p "이상거래"
+mkdir -p "회계법인_피드백"
+mkdir -p "templates"
+
+<span class="comment"># 프로젝트에서 symlink</span>
+cd ~/Desktop/financeone-v2
+ln -s ~/Documents/financeone-vault obsidian-vault
+
+<span class="comment"># Obsidian 실행 → Open folder as vault → ~/Documents/financeone-vault 선택</span></pre>
+
+<h3>월별 리포트 템플릿</h3>
+<pre><span class="comment"># templates/월별-재무-요약.md</span>
+---
+tags: [월별리포트, 재무]
+year: {{year}}
+month: {{month}}
+---
+
+# {{year}}년 {{month}}월 재무 요약
+
+## 현금흐름
+- 기초 잔고:
+- 수입 합계:
+- 지출 합계:
+- 기말 잔고:
+- 예측 대비 오차:
+
+## 주요 이슈
+
+## NotebookLM 분석 링크
+
+## 다음 달 액션</pre>
+
+<div class="callout callout-green">
+  <strong>FinanceOne → Obsidian 자동 저장</strong>
+  Settings에서 <code>obsidian_vault_path</code>를 <code>/Users/admin/Documents/financeone-vault</code>로 설정하면 월 마감 시 자동으로 Markdown 파일이 생성됨.
+</div>
+</section>
+
+<section id="setup-notebooklm">
+<h2>개발 환경 세팅 — notebooklm-py</h2>
+
+<h3>Step 5. notebooklm-py 설치</h3>
+<pre><span class="comment"># 설치</span>
+pip3 install notebooklm-py --break-system-packages
+
+<span class="comment"># Google 계정 인증 (Chrome 로그인 상태에서 쿠키 추출)</span>
+<span class="comment"># 자세한 방법: https://github.com/teng-lin/notebooklm-py</span>
+
+<span class="comment"># 연결 테스트</span>
+python3 -c "
+import notebooklm
+nb = notebooklm.NotebookLM()
+print('연결 성공:', nb.list_notebooks())
+"
+
+<span class="comment"># Settings에서 활성화</span>
+<span class="comment">-- UPDATE settings SET value='true' WHERE key='notebooklm_enabled';</span></pre>
+
+<h3>월간 브리핑 스크립트 배치</h3>
+<pre><span class="comment"># scripts/monthly_briefing.py 생성 후</span>
+<span class="comment"># 매월 마지막 날 실행 (cron 또는 수동)</span>
+python3 scripts/monthly_briefing.py --year 2026 --month 3
+
+<span class="comment"># 출력: NotebookLM 분석 URL + 오디오 브리핑 파일 생성</span>
+<span class="comment"># ✅ 브리핑 완료: https://notebooklm.google.com/notebook/...</span></pre>
+
+<div class="callout callout-purple">
+  <strong>Phase 1에서는 수동으로 OK</strong>
+  Phase 1~2 개발 중에는 수동으로 PDF를 NotebookLM에 올려도 됨. 자동화 파이프라인은 Phase 4에서 구현.
+</div>
+</section>
+
+<section id="setup-project">
+<h2>개발 환경 세팅 — 프로젝트 초기화</h2>
+
+<h3>Step 6. 폴더 구조 & CLAUDE.md</h3>
+<pre><span class="comment"># 폴더 구조</span>
+cd ~/Desktop/financeone-v2
+mkdir -p frontend/src/{app,components,lib}
+mkdir -p backend/{models,routers,services,seed_data}
+mkdir -p scripts
+
+<span class="comment"># v1 파서 재활용</span>
+cp -r ~/Desktop/claude_accountant/backend/services/parsing backend/services/
+cp ~/Desktop/claude_accountant/backend/seed_data/kgaap_accounts.py backend/seed_data/</pre>
+
+<h3>CLAUDE.md (Antigravity 가이드)</h3>
+<pre><span class="comment"># 프로젝트 루트에 CLAUDE.md 생성</span>
+cat > CLAUDE.md << 'EOF'
+# FinanceOne v2 — Antigravity 가이드
+
+## 프로젝트
+한아원 그룹 (HOI, 한아원코리아, 한아원리테일) 내부 회계 BPO 시스템
+
+## 핵심 원칙
+1. 모든 테이블에 entity_id 포함 — 절대 빠뜨리지 말 것
+2. 재무제표: sum(debit) == sum(credit) 항상 검증
+3. 현금흐름: 기말잔고 = 기초잔고 + 수입 - 지출 루프 검증
+4. AI 매핑: mapping_rules 테이블 우선 조회 후 Claude API 호출
+5. HOI = US GAAP (QuickBooks 기본), 한국 법인 = K-GAAP (직접 생성)
+6. 연결재무제표 = US GAAP 기준 (모회사 HOI). K-GAAP 뷰 토글 지원
+7. US GAAP ↔ K-GAAP 변환: gaap_mapping 테이블 사용
+
+## 디자인 참조
+- 항상 design-system/MASTER.md 먼저 확인
+- 화면별: design-system/pages/[screen].md 있으면 우선 적용
+- 컴포넌트: shadcn/ui / 차트: Recharts / 아이콘: Lucide
+
+## DB
+- 스키마: backend/database/schema.sql
+- 연결: DATABASE_URL (Neon dev 브랜치 connection string)
+- 로컬 개발도 Neon dev 브랜치 사용 — SQLite 사용 금지
+- 3개 법인 초기 데이터: seed.py 실행
+
+## 스택
+Frontend: Next.js 14 App Router | Backend: FastAPI | DB: Neon PostgreSQL (dev/prod 브랜치 분리)
+
+## 디렉토리
+- frontend/src/app: Next.js 페이지
+- backend/routers: FastAPI 라우터
+- backend/services: 비즈니스 로직
+- scripts/: 월별 브리핑 등 자동화
+- design-system/: UI 디자인 시스템
+- obsidian-vault/: financeone-vault symlink
+EOF</pre>
+
+<h3>환경변수 & DB 초기화</h3>
+<pre><span class="comment"># .env 파일 — Neon dev 브랜치 connection string 사용</span>
+<span class="comment"># neon.tech → 프로젝트 생성 → dev 브랜치 → Connection string 복사</span>
+cat > .env << 'EOF'
+DATABASE_URL=postgresql://user:pass@ep-xxx.ap-southeast-1.aws.neon.tech/financeone?sslmode=require
+ANTHROPIC_API_KEY=sk-ant-...
+SECRET_KEY=your-secret-key-here
+EOF
+
+<span class="comment"># .env.local (Next.js)</span>
+echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > frontend/.env.local
+
+<span class="comment"># Neon DB 연결 확인</span>
+cd backend
+python3 -c "
+import psycopg2, os
+conn = psycopg2.connect(os.environ['DATABASE_URL'])
+print('✅ Neon 연결 성공')
+conn.close()
+"
+
+<span class="comment"># Alembic 초기화 + 마이그레이션</span>
+alembic init alembic
+alembic revision --autogenerate -m "init schema"
+alembic upgrade head
+echo "✅ DB 스키마 생성 완료 (Neon)"
+
+<span class="comment"># 초기 데이터 시드 (K-GAAP 계정과목 + 3개 법인)</span>
+python3 seed.py
+
+<span class="comment"># 첫 커밋</span>
+cd ..
+git add . && git commit -m "init: FinanceOne v2 project setup"</pre>
+</section>
+
+<section id="checklist">
+<h2>개발 시작 전 체크리스트</h2>
+<ul class="checklist">
+  <li><strong>Node.js v20+</strong> 설치 확인</li>
+  <li><strong>Python 3.10+</strong> 설치 확인</li>
+  <li><strong>gh CLI</strong> 설치 & GitHub 인증 완료</li>
+  <li><strong>Claude Code Agent/Skill</strong> — 내장 22+ Agent 타입 + /plan-eng-review, /codex 등 Skill 활용 (GSD 대체)</li>
+  <li><strong>awesome-claude-code</strong> 북마크 — github.com/hesreallyhim/awesome-claude-code</li>
+  <li><strong>uipro init --ai antigravity</strong> 실행 완료</li>
+  <li><strong>design-system/MASTER.md</strong> 생성 확인</li>
+  <li><strong>Obsidian</strong> 설치 & <code>financeone-vault</code> 폴더 구조 생성</li>
+  <li><strong>Obsidian에서 vault</strong> 열기 확인</li>
+  <li><strong>notebooklm-py</strong> 설치 & Google 인증 완료</li>
+  <li><strong>Vercel CLI</strong> 설치 (<code>npm install -g vercel</code>)</li>
+  <li><strong>Playwright</strong> 설치 & Chromium 다운로드</li>
+  <li><strong>LLMFit</strong> 설치 (<code>pip3 install llmfit</code>)</li>
+  <li><strong>Neon 프로젝트 생성</strong> — neon.tech에서 dev 브랜치 connection string 발급</li>
+  <li><strong>.env에 DATABASE_URL</strong> 입력 (Neon dev 브랜치)</li>
+  <li><strong>Alembic 마이그레이션</strong> 완료 (<code>alembic upgrade head</code>)</li>
+  <li><strong>seed.py 실행</strong> 완료 (K-GAAP 계정과목 + 3개 법인)</li>
+  <li>Antigravity에서 <strong>CLAUDE.md 확인</strong> 후 코딩 시작!</li>
+</ul>
+</section>
+
+<hr>
+
+<!-- PHASES -->
+<section id="phases">
+<h2>개발 페이즈</h2>
+
+<div class="callout callout-green">
+  <strong>타임라인 근거</strong>
+  Claude Code 기반 개발. 인간이 직접 코딩하는 시간이 아님. DB 스키마·PRD가 이미 완성됐고, v1 파서를 재활용하므로 기존 예상 대비 3~4배 빠름. 총 예상 기간: <strong>약 2~3주</strong>.
+</div>
+
+<div class="phases">
+  <div class="phase">
+    <div class="phase-dot">
+      <div class="phase-circle">1</div>
+      <div class="phase-line"></div>
+    </div>
+    <div class="phase-content">
+      <div class="phase-title">현금흐름 대시보드</div>
+      <div class="phase-dur">3~4일 | Day 1: DB 스키마 완성, Day 2~3: 대시보드 동작, Day 4: E2E 검증</div>
+      <ul class="phase-items">
+        <li>프로젝트 셋업 & Neon DB 스키마 전체 생성 (entity_id 포함)</li>
+        <li>법인 선택 UI — UUPM Financial Dashboard 스타일 적용</li>
+        <li>잔고 스냅샷 입력 + 예측 수입/지출 (고정비 반복)</li>
+        <li>현금흐름 대시보드 (Recharts, 예측 vs 실제)</li>
+        <li>v1 Excel 파서 5종 마이그레이션 (코드 재활용)</li>
+      </ul>
+    </div>
+  </div>
+  <div class="phase">
+    <div class="phase-dot">
+      <div class="phase-circle">2</div>
+      <div class="phase-line"></div>
+    </div>
+    <div class="phase-content">
+      <div class="phase-title">재무제표 + API 검증</div>
+      <div class="phase-dur">4~5일 | 목표: 회계법인 자료와 ±5% 이내, Mercury API 병렬 검증</div>
+      <ul class="phase-items">
+        <li>복식부기 엔진 (차변=대변 검증, Playwright 자동 테스트)</li>
+        <li>재무상태표 (항등식 보장 + 당기순이익 자동 반영)</li>
+        <li>손익계산서 / 합계잔액시산표 / Excel·PDF Export</li>
+        <li>Mercury API 연동 + Excel 병렬 비교 검증</li>
+        <li>Codef 샌드박스 테스트 (데모 승인 후)</li>
+        <li>AI 매핑 정확도 개선 (mapping_rules 학습)</li>
+      </ul>
+    </div>
+  </div>
+  <div class="phase">
+    <div class="phase-dot">
+      <div class="phase-circle">3</div>
+      <div class="phase-line"></div>
+    </div>
+    <div class="phase-content">
+      <div class="phase-title">3개 법인 연결</div>
+      <div class="phase-dur">3~4일</div>
+      <ul class="phase-items">
+        <li>법인 간 내부거래 자동 감지 & 태깅</li>
+        <li>환율 처리 (USD ↔ KRW, 한국은행 API 선택적)</li>
+        <li>법인별 개별 재무제표 + 연결재무제표</li>
+        <li>통합 대시보드 (3개 법인 합산 뷰)</li>
+      </ul>
+    </div>
+  </div>
+  <div class="phase">
+    <div class="phase-dot">
+      <div class="phase-circle">4</div>
+      <div class="phase-line"></div>
+    </div>
+    <div class="phase-content">
+      <div class="phase-title">Obsidian + NotebookLM 자동화</div>
+      <div class="phase-dur">1~2일</div>
+      <ul class="phase-items">
+        <li>obsidian-skills 기반 월별 재무 요약 노트 자동 생성</li>
+        <li>notebooklm-py 월간 브리핑 파이프라인</li>
+        <li>이상 거래 → Obsidian 이슈 노트 자동 생성</li>
+        <li>CEO용 오디오 브리핑 자동 생성</li>
+      </ul>
+    </div>
+  </div>
+  <div class="phase">
+    <div class="phase-dot">
+      <div class="phase-circle">5</div>
+    </div>
+    <div class="phase-content">
+      <div class="phase-title">n8n 자동화 & 알림</div>
+      <div class="phase-dur">1~2일</div>
+      <ul class="phase-items">
+        <li>n8n-mcp + n8n-skills 기반 자동화 워크플로우</li>
+        <li>Codef.io 정기 수집 스케줄러</li>
+        <li>Slack 알림 (잔고 부족 경고)</li>
+        <li>회계법인 공유용 리포트 자동 발송</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- EXPENSEONE INTEGRATION -->
+<section id="expenseone">
+<h2>ExpenseOne 연동</h2>
+
+<div class="callout callout-blue">
+  <strong>ExpenseOne이란</strong>
+  한아원코리아 팀원들이 법카 사용 내역과 입금 요청을 제출·승인하는 사내 경비 관리 앱 (expenseone.vercel.app). 팀원이 제출 → 관리자(하승완) 승인 → 확정된 경비가 FinanceOne로 들어오는 구조.
+</div>
+
+<h4>ExpenseOne 데이터 구조</h4>
+<table>
+  <tr><th>필드</th><th>값 예시</th><th>FinanceOne 매핑</th></tr>
+  <tr><td>제목</td><td>"법카 테스트", "테스트입금"</td><td>transactions.description</td></tr>
+  <tr><td>유형</td><td>법카사용 / 입금요청</td><td>source_type = 'expenseone_card' / 'expenseone_reimbursement'</td></tr>
+  <tr><td>금액</td><td>86,063원</td><td>transactions.amount</td></tr>
+  <tr><td>카테고리</td><td>마트/약국, 거래처미팅</td><td>AI 매핑 힌트로 활용</td></tr>
+  <tr><td>상태</td><td>승인 / 대기</td><td>is_confirmed = 1 (승인된 것만 import)</td></tr>
+  <tr><td>제출일</td><td>2026.03.15</td><td>transactions.date</td></tr>
+  <tr><td>제출자</td><td>하승완</td><td>members 테이블 매핑</td></tr>
+</table>
+
+<h4>연동 전략 — 2단계</h4>
+<table>
+  <tr><th>단계</th><th>방법</th><th>시점</th><th>설명</th></tr>
+  <tr>
+    <td><strong>Phase 1</strong></td>
+    <td>CSV Export → FinanceOne 업로드</td>
+    <td>즉시 가능</td>
+    <td>ExpenseOne 리포트 → CSV 다운로드 → FinanceOne 업로드 화면에서 처리. source_type='expenseone'으로 자동 인식.</td>
+  </tr>
+  <tr>
+    <td><strong>Phase 4+</strong></td>
+    <td>Webhook 또는 DB 직접 연동</td>
+    <td>추후</td>
+    <td>둘 다 Vercel + Neon 구조이므로, 승인 완료 시 ExpenseOne → FinanceOne API 자동 POST. 또는 같은 Neon DB를 공유 스키마로 직접 조회.</td>
+  </tr>
+</table>
+
+<h4>ExpenseOne 경비 → 재무제표 흐름</h4>
+<pre>팀원이 법카 사용 → ExpenseOne에 제출
+        │
+        ▼ 관리자 승인 (ExpenseOne)
+        │
+Phase 1: CSV 다운로드 → FinanceOne 업로드
+Phase 4: Webhook → FinanceOne API 자동 수신
+        │
+        ▼ FinanceOne에서
+AI 계정과목 매핑 (카테고리 힌트 활용)
+        │
+        ▼
+transactions 테이블 저장
+        │
+        ▼
+재무제표 반영 (비용 계정 처리)</pre>
+</section>
+
+<!-- API INTEGRATIONS -->
+<section id="api-integrations">
+<h2>거래 API 연동 전략</h2>
+
+<div class="callout callout-amber">
+  <strong>핵심 원칙 — Excel 먼저, API 나중</strong>
+  Phase 1~2는 Excel 업로드로 시작. Phase 2에서 API를 병렬로 연결해 "Excel 결과 vs API 결과"를 비교 검증. 오차가 허용 범위 내면 API로 전환, 아니면 계속 Excel 유지. API는 설정에서 법인별로 On/Off 토글 가능.
+</div>
+
+<h3>연동 API 목록</h3>
+<table>
+  <tr><th>API</th><th>법인</th><th>역할</th><th>비용</th><th>난이도</th></tr>
+  <tr>
+    <td><strong>Mercury API</strong></td>
+    <td>HOI (미국)</td>
+    <td>은행 잔고 + USD 거래내역 자동 조회</td>
+    <td>무료</td>
+    <td>🟢 쉬움 — API 토큰만 있으면 됨</td>
+  </tr>
+  <tr>
+    <td><strong>QuickBooks API</strong></td>
+    <td>HOI (미국)</td>
+    <td>회계 데이터 동기화, 재무제표 검증</td>
+    <td>QuickBooks 구독 필요</td>
+    <td>🟡 중간 — OAuth 2.0</td>
+  </tr>
+  <tr>
+    <td><strong>Codef.io API</strong></td>
+    <td>한아원코리아, 한아원리테일</td>
+    <td>우리은행 + 롯데카드/우리카드 거래내역</td>
+    <td>건당 유료 (데모 신청 완료 ✅)</td>
+    <td>🟡 중간 — 데모 승인 후 샌드박스 바로 시작</td>
+  </tr>
+  <tr>
+    <td><strong>ExpenseOne Webhook</strong></td>
+    <td>한아원코리아</td>
+    <td>승인된 경비 자동 수신</td>
+    <td>무료 (자체 개발)</td>
+    <td>🟡 중간 — 양쪽 개발 필요</td>
+  </tr>
+</table>
+
+<h3>Mercury API (HOI — 즉시 연동 추천)</h3>
+<div class="callout callout-green">
+  <strong>가장 쉽고 무료 — Phase 2에서 먼저 연동</strong>
+  Mercury Dashboard → Settings → API → Read-only 토큰 발급 → FinanceOne 설정에 입력. IP whitelist 불필요.
+</div>
+<pre><span class="comment"># Mercury API 연동 (backend/services/integrations/mercury.py)</span>
+BASE_URL = "https://api.mercury.com/api/v1"
+
+<span class="comment"># 잔고 조회</span>
+GET /accounts
+→ { accounts: [{ id, name, currentBalance, currency }] }
+
+<span class="comment"># 거래내역 조회 (페이지네이션)</span>
+GET /account/{account_id}/transactions?limit=500&offset=0
+→ {
+    transactions: [{
+      id, amount, createdAt,
+      counterpartyName,   <span class="comment"># 거래처명 → AI 매핑에 활용</span>
+      bankDescription,    <span class="comment"># 은행 설명</span>
+      kind,               <span class="comment"># 'credit' / 'debit'</span>
+      status              <span class="comment"># 'sent' / 'pending'</span>
+    }]
+  }
+
+<span class="comment"># FinanceOne 처리 흐름</span>
+mercury_transactions → normalize() → transactions 테이블
+  entity_id = 1 (HOI)
+  currency = 'USD'
+  source_type = 'mercury_api'</pre>
+
+<h3>QuickBooks API (HOI — 검증 + 초기 AI 학습 데이터)</h3>
+<div class="callout callout-blue">
+  <strong>역할: 검증 + AI 학습 기준점</strong>
+  HOI 회계는 FinanceOne이 직접 처리 (US GAAP). QuickBooks는 두 가지 역할: (1) FinanceOne이 만든 재무제표를 cross-check하는 검증 기준, (2) 초기 AI 학습 데이터 소스 — QuickBooks의 이미 분류된 거래 데이터가 gaap_mapping 및 mapping_rules의 "정답지" 역할. 장기적으로 FinanceOne 정확도가 올라가면 QuickBooks 의존 제거 가능 (Mercury API만으로 전환).
+</div>
+
+<h4>API 비용</h4>
+<table>
+  <tr><th>API 유형</th><th>용도</th><th>비용</th></tr>
+  <tr><td><strong>Core API</strong> (쓰기)</td><td>거래 생성/수정</td><td>무료, 무제한</td></tr>
+  <tr><td><strong>CorePlus API</strong> (읽기)</td><td>재무제표 조회, 거래 조회</td><td>월 500,000 크레딧 무료 (Builder 티어)</td></tr>
+  <tr><td><strong>Mercury API</strong> (읽기)</td><td>HOI 거래내역, 잔고 조회</td><td>무료 (Mercury 계정 포함)</td></tr>
+</table>
+<p style="color:var(--text2); font-size:13px;">→ 월 1~2회 검증용 조회 수준이라 전부 무료 티어로 충분.</p>
+
+<h4>QuickBooks 활용 로드맵</h4>
+<pre><span class="comment"># Phase 2 (초기 학습기)</span>
+<span class="comment"># QuickBooks에서 HOI 거래 + 재무제표 가져오기</span>
+<span class="comment"># → 이미 분류된 US GAAP 데이터 = AI 학습용 "정답지"</span>
+<span class="comment"># → gaap_mapping 초기 매핑 생성의 기준점</span>
+<span class="comment"># → FinanceOne이 같은 거래를 직접 분류 → QuickBooks 결과와 비교 → 차이 학습</span>
+
+<span class="comment"># 1. OAuth 인증</span>
+GET https://appcenter.intuit.com/connect/oauth2
+
+<span class="comment"># 2. HOI 재무제표 검증용 (월말/월초 1회)</span>
+GET /reports/ProfitAndLoss?start_date=2026-01-01&end_date=2026-03-31
+GET /reports/BalanceSheet?as_of=2026-03-31
+
+<span class="comment"># 3. HOI 거래 + 분류 데이터 (AI 학습용)</span>
+GET /query?query=SELECT * FROM Transaction WHERE TxnDate >= '2026-03-01'
+
+<span class="comment"># Phase 3~: cross-check 빈도 감소 (월1회 → 분기1회)</span>
+<span class="comment"># 장기: FinanceOne 재무제표 = QuickBooks 재무제표 → Mercury만으로 전환</span></pre>
+
+<h3>Codef.io API (한국 법인 — Phase 2 준비 중 ✅)</h3>
+<div class="callout callout-green">
+  <strong>데모 신청 완료 — 샌드박스 테스트 바로 시작 가능</strong>
+  데모 서비스 승인 후 <code>codef.io/#/account/keys</code>에서 Client ID / Client Secret / Public Key 확인. 샌드박스는 고정 응답값 반환 → 코드 완성 후 정식 전환.
+</div>
+<pre><span class="comment"># Codef.io 연동 (easycodefpy 라이브러리)</span>
+pip install easycodefpy
+
+<span class="comment"># 1단계: Connected ID 발급 (최초 1회)</span>
+<span class="comment">#   - 법인 인증서(.der, .key) 업로드</span>
+<span class="comment">#   - 은행/카드사별 Connected ID 발급</span>
+
+<span class="comment"># 2단계: 거래내역 조회</span>
+<span class="comment"># 우리은행 법인 거래내역</span>
+endpoint = "/v1/kr/bank/b/account/transaction-list"
+params = {
+  "connectedId": WOORI_CONNECTED_ID,
+  "organization": "0020",  <span class="comment"># 우리은행 코드</span>
+  "startDate": "20260101",
+  "endDate": "20260331",
+  "clientType": "B"        <span class="comment"># 기업 고객</span>
+}
+
+<span class="comment"># 롯데카드 법인 승인내역</span>
+endpoint = "/v1/kr/card/b/account/approval-list"
+params = {
+  "connectedId": LOTTE_CARD_CONNECTED_ID,
+  "organization": "0301",  <span class="comment"># 롯데카드 코드</span>
+  "startDate": "20260101",
+  "endDate": "20260331"
+}
+
+<span class="comment"># 지원 카드사: KB, 현대, 삼성, NH, BC, 신한, 우리, 롯데, 하나 등 14개</span>
+<span class="comment"># FinanceOne: 기존 파서(lotte_card_parser.py 등)와 동일한 정규화 로직 재사용</span></pre>
+
+<h4>Codef 데모 → 정식 전환 체크리스트</h4>
+<ul class="checklist">
+  <li><strong>데모 신청 완료</strong> ✅ — 승인 이메일 대기</li>
+  <li>승인 후 <code>codef.io/#/account/keys</code>에서 <strong>Client ID, Client Secret, Public Key</strong> 발급 확인</li>
+  <li><code>pip install easycodefpy</code> 설치</li>
+  <li>샌드박스에서 우리은행 거래내역 테스트 (<code>EasyCodefServiceType.SANDBOX</code>)</li>
+  <li>샌드박스 결과 → <strong>Excel 결과와 비교 (오차 ±1% 검증)</strong></li>
+  <li>법인 공인인증서 준비 (.der + .key 파일) — 정식 전환 시 필요</li>
+  <li>Connected ID 발급 (최초 계정 등록 시 1회)</li>
+  <li>정식 서비스 신청 → 운영 환경 전환</li>
+</ul>
+
+<h4>기관코드 (FinanceOne 사용 카드/은행)</h4>
+<pre><span class="comment"># 우리은행:  0020  (법인 BK)</span>
+<span class="comment"># 롯데카드:  0301  (법인 CD)</span>
+<span class="comment"># 우리카드:  0315  (법인 CD)</span>
+<span class="comment"># 신한카드:  0309  (법인 CD) — 추후 추가 시</span></pre>
+
+<h3>전체 데이터 수집 순서도</h3>
+<pre>
+┌─────────────────────────────────────────────────────────────────┐
+│                    PHASE 1 — Excel 기반 (즉시)                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  [HOI - 미국]                    [한국 법인]                     │
+│  Mercury 거래 CSV 다운로드         우리은행 Excel 다운로드         │
+│  QuickBooks 내보내기 CSV           롯데카드/우리카드 Excel         │
+│        │                          ExpenseOne CSV Export          │
+│        └──────────────────────────────┘                         │
+│                          │                                       │
+│                    FinanceOne 업로드 화면                             │
+│                    (파서 자동 감지)                               │
+│                          │                                       │
+│              AI 계정과목 매핑 + 검토                              │
+│                          │                                       │
+│              재무제표 생성 (수동 검증)                             │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│         PHASE 2 — Excel + API 병렬 비교 검증 (Codef 데모 준비됨)  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Mercury API ──┐                                                 │
+│                ├── 비교 → 오차 확인 → 신뢰도 검증               │
+│  Mercury CSV ──┘                                                 │
+│                                                                  │
+│  Codef API ────┐                                                 │
+│                ├── 비교 → 오차 확인 → 신뢰도 검증               │
+│  은행/카드 CSV ─┘                                                │
+│                                                                  │
+│  ✅ 오차 ±1% 이내 → Phase 3에서 API 전환                         │
+│  ⚠️ 오차 크면 → Excel 방식 유지, 원인 분석                       │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                 PHASE 3+ — API 자동화 (검증 후)                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  [HOI]                           [한국 법인]                     │
+│  Mercury API ──────────────────▶ Neon DB                        │
+│  QuickBooks API (재무 검증)        Codef.io API ───────────────▶ │
+│                                  ExpenseOne Webhook ──────────▶ │
+│                                                                  │
+│  스케줄러: 매일 자동 수집 (cron)                                  │
+│  설정 토글: 법인별 API On/Off                                     │
+│  이상 감지: 전일 대비 큰 변동 시 알림                             │
+└─────────────────────────────────────────────────────────────────┘</pre>
+
+<h4>settings 테이블 — API 토글 구조</h4>
+<pre><span class="comment">-- API 연동 On/Off (설정 화면에서 토글)</span>
+INSERT INTO settings (key, value, entity_id) VALUES
+  <span class="comment">-- HOI (entity_id=1)</span>
+  ('api_mercury_enabled', 'false', 1),
+  ('api_mercury_token', '', 1),          <span class="comment">-- Read-only 토큰</span>
+  ('api_mercury_account_id', '', 1),
+  ('api_quickbooks_enabled', 'false', 1),
+  ('api_quickbooks_realm_id', '', 1),
+
+  <span class="comment">-- 한아원코리아 (entity_id=2)</span>
+  ('api_codef_woori_bank_enabled', 'false', 2),
+  ('api_codef_woori_card_enabled', 'false', 2),
+  ('api_codef_lotte_card_enabled', 'false', 2),
+  ('api_expenseone_webhook_enabled', 'false', 2),
+
+  <span class="comment">-- 한아원리테일 (entity_id=3)</span>
+  ('api_codef_enabled', 'false', 3);</pre>
+</section>
+
+<hr>
+
+<section id="success">
+<h2>성공 지표</h2>
+<table>
+  <tr><th>지표</th><th>현재</th><th>목표</th></tr>
+  <tr><td>현재 잔고 파악 시간</td><td>5분+</td><td>30초</td></tr>
+  <tr><td>재무제표 생성 시간</td><td>2일 (회계법인 대기)</td><td>1시간</td></tr>
+  <tr><td>회계법인 자료 vs 내부 차이</td><td>미파악</td><td>±5% 이내</td></tr>
+  <tr><td>다음달 현금 예측 정확도</td><td>미파악</td><td>±10% 이내</td></tr>
+  <tr><td>AI 매핑 정확도 (3개월 후)</td><td>~70%</td><td>95%+</td></tr>
+  <tr><td>월간 재무 브리핑 준비 시간</td><td>수동</td><td>자동화</td></tr>
+  <tr><td>Mercury API vs Excel 거래 오차</td><td>미검증</td><td>±1% 이내 (Phase 2 검증)</td></tr>
+  <tr><td>Codef API vs Excel 오차</td><td>미검증</td><td>±1% 이내 (Phase 2 검증)</td></tr>
+  <tr><td>ExpenseOne → FinanceOne 연동</td><td>수동 CSV</td><td>자동 Webhook (Phase 4)</td></tr>
+</table>
+</section>
+
+<div style="margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--border); color: var(--text3); font-size: 12px; font-family: var(--mono);">
+  FinanceOne v2 PRD · v1.2 · 2026-03-22 · 한아원코리아
+</div>
+
+</main>
+
+<script>
+  // Active nav link on scroll
+  const sections = document.querySelectorAll('section[id]');
+  const navLinks = document.querySelectorAll('nav a');
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        navLinks.forEach(link => {
+          link.classList.remove('active');
+          if (link.getAttribute('href') === '#' + entry.target.id) {
+            link.classList.add('active');
+          }
+        });
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+
+  sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>

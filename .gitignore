@@ -1,0 +1,33 @@
+# Environment
+.env
+.env.local
+.env.production
+
+# Node
+node_modules/
+.next/
+out/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Neon
+*.db
+*.sqlite
+
+# Claude Code (local only)
+.claude/settings.local.json
+
+# Obsidian vault (symlinked, managed separately)
+obsidian-vault/
