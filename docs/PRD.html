@@ -1645,6 +1645,8 @@ cp -r .claude-obsidian/skills .claude/skills/</pre>
 <hr>
 
 <!-- SETUP -->
+<section id="setup-tools">
+<h2>개발 환경 세팅 — CLI 도구 설치</h2>
 
 <h3>Step 1. 기본 도구</h3>
 <pre><span class="comment"># Node.js v20+ 확인</span>
@@ -1687,8 +1689,14 @@ vercel login
 npm install -g @playwright/test
 npx playwright install chromium
 
-<span class="comment"># LLMFit (AI 매핑 토큰 최적화)</span>
-pip3 install llmfit --break-system-packages</pre>
+<span class="comment"># LLMFit (Rust CLI — 하드웨어 LLM 호환성 분석)</span>
+brew install llmfit
+
+<span class="comment"># Railway CLI (백엔드 배포)</span>
+brew install railway
+
+<span class="comment"># Alembic (DB 마이그레이션)</span>
+pip3 install alembic --break-system-packages</pre>
 </section>
 
 <section id="setup-obsidian">
@@ -1880,7 +1888,9 @@ git add . && git commit -m "init: FinanceOne v2 project setup"</pre>
   <li><strong>notebooklm-py</strong> 설치 & Google 인증 완료</li>
   <li><strong>Vercel CLI</strong> 설치 (<code>npm install -g vercel</code>)</li>
   <li><strong>Playwright</strong> 설치 & Chromium 다운로드</li>
-  <li><strong>LLMFit</strong> 설치 (<code>pip3 install llmfit</code>)</li>
+  <li><strong>LLMFit</strong> 설치 (<code>brew install llmfit</code>)</li>
+  <li><strong>Railway CLI</strong> 설치 (<code>brew install railway</code>)</li>
+  <li><strong>Alembic</strong> 설치 (<code>pip3 install alembic</code>)</li>
   <li><strong>Neon 프로젝트 생성</strong> — neon.tech에서 dev 브랜치 connection string 발급</li>
   <li><strong>.env에 DATABASE_URL</strong> 입력 (Neon dev 브랜치)</li>
   <li><strong>Alembic 마이그레이션</strong> 완료 (<code>alembic upgrade head</code>)</li>
