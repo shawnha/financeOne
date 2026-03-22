@@ -1135,6 +1135,31 @@ python3 .claude/skills/ui-ux-pro-max/scripts/search.py \
   <tr><td>현금흐름표</td><td><code>/cashflow</code></td><td>월별 수입/지출, 예측 vs 실제</td><td class="p1">P1</td></tr>
   <tr><td>거래내역</td><td><code>/transactions</code></td><td>거래 목록, 분류, 검색/필터</td><td class="p1">P1</td></tr>
   <tr><td>업로드</td><td><code>/upload</code></td><td>카드/은행 Excel 업로드</td><td class="p1">P1</td></tr>
+</table>
+
+<h3>거래내역 (/transactions) 테이블 컬럼 상세</h3>
+<table>
+  <tr><th>#</th><th>컬럼</th><th>DB 필드</th><th>Width</th><th>설명</th></tr>
+  <tr><td>1</td><td>☑</td><td>-</td><td>40px</td><td>일괄 선택 체크박스</td></tr>
+  <tr><td>2</td><td>날짜</td><td><code>date</code></td><td>100px</td><td>YYYY-MM-DD, 정렬 가능</td></tr>
+  <tr><td>3</td><td>출처</td><td><code>source_type</code></td><td>90px</td><td>아이콘+라벨 (롯데카드/우리카드/우리은행)</td></tr>
+  <tr><td>4</td><td>회원</td><td><code>member_id</code> → JOIN members</td><td>80px</td><td>카드 사용자 (은행 거래는 빈값)</td></tr>
+  <tr><td>5</td><td>내역</td><td><code>description</code></td><td>flex</td><td>거래 설명</td></tr>
+  <tr><td>6</td><td>거래처</td><td><code>counterparty</code></td><td>140px</td><td>가맹점/상대방, 정렬 가능</td></tr>
+  <tr><td>7</td><td>수입</td><td><code>amount</code> (type='in')</td><td>120px</td><td>green, tabular-nums, IBM Plex Mono</td></tr>
+  <tr><td>8</td><td>지출</td><td><code>amount</code> (type='out')</td><td>120px</td><td>red, tabular-nums, IBM Plex Mono</td></tr>
+  <tr><td>9</td><td>내부 계정</td><td><code>internal_account_id</code> → JOIN</td><td>120px</td><td>클릭하여 인라인 변경</td></tr>
+  <tr><td>10</td><td>표준 계정</td><td><code>standard_account_id</code> → JOIN</td><td>120px</td><td>클릭하여 인라인 변경</td></tr>
+  <tr><td>11</td><td>신뢰</td><td><code>mapping_confidence</code></td><td>60px</td><td>AI 매핑 신뢰도 badge (0~100%)</td></tr>
+</table>
+<p style="color:var(--text2); font-size:13px;">
+  확정 여부(<code>is_confirmed</code>): 별도 컬럼 없이 체크박스 일괄 확정 + 행 클릭 편집.<br>
+  중복 거래(<code>is_duplicate</code>): 회색 처리 + 취소선. 체크카드 = 우리은행 적요 '체크우리' ↔ 우리카드 매출구분 '체크계좌' 매칭 → 은행 쪽 중복 마킹.<br>
+  필터: 검색(내역·거래처·메모), 기간, 회원, 표준계정, 내부계정, 미분류만, 출처 토글.
+</p>
+
+<table>
+  <tr><th>화면</th><th>URL</th><th>설명</th><th>Priority</th></tr>
   <tr><td>재무제표</td><td><code>/statements</code></td><td>재무상태표, 손익계산서 등</td><td class="p2">P2</td></tr>
   <tr><td>리포트</td><td><code>/reports</code></td><td>월별/분기별, Excel/PDF Export</td><td class="p2">P2</td></tr>
   <tr><td>계정과목</td><td><code>/accounts</code></td><td>K-GAAP 계정과목 관리</td><td class="p2">P2</td></tr>
