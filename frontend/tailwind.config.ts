@@ -57,6 +57,11 @@ const config = {
           "4": "hsl(var(--chart-4))",
           "5": "hsl(var(--chart-5))",
         },
+        profit: "hsl(var(--profit))",
+        loss: "hsl(var(--loss))",
+        warning: "hsl(var(--warning))",
+        "ai-accent": "hsl(var(--ai-accent))",
+        neutral: "hsl(var(--neutral))",
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -64,7 +69,8 @@ const config = {
         sm: "calc(var(--radius) - 4px)",
       },
       fontFamily: {
-        sans: ["var(--font-sans)", "system-ui", "sans-serif"],
+        sans: ["var(--font-sans)", "IBM Plex Sans", "sans-serif"],
+        mono: ["var(--font-mono)", "IBM Plex Mono", "monospace"],
       },
       keyframes: {
         "accordion-down": {

@@ -2,55 +2,77 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 240 5.9% 10%;
-    --radius: 0.5rem;
-    --chart-1: 12 76% 61%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
-  }
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
-  .dark {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
+@layer base {
+  /* Dark-mode-first: :root IS the dark theme (OLED) */
+  :root {
+    /* MASTER.md: Dark OLED palette */
+    --background: 222 47% 4%;        /* #020617 */
+    --foreground: 210 40% 98%;       /* #F8FAFC */
+
+    --card: 217 33% 17%;             /* #1E293B */
+    --card-foreground: 210 40% 98%;  /* #F8FAFC */
+
+    --popover: 217 33% 17%;          /* #1E293B */
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 222 47% 11%;          /* #0F172A */
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 217 33% 17%;        /* #1E293B */
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217 33% 17%;            /* #1E293B */
+    --muted-foreground: 220 9% 46%;  /* #6B7280 */
+
+    --accent: 142 71% 45%;           /* #22C55E — CTA green */
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;        /* #EF4444 — loss/expense */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 217 19% 27%;           /* #334155 */
+    --input: 217 19% 27%;            /* #334155 */
+    --ring: 142 71% 45%;             /* #22C55E — focus ring = CTA */
+
+    --radius: 0.75rem;               /* 12px — MASTER.md card-radius */
+
+    /* MASTER.md: Semantic Financial Colors */
+    --profit: 142 71% 45%;           /* #22C55E */
+    --loss: 0 84% 60%;               /* #EF4444 */
+    --warning: 38 92% 50%;           /* #F59E0B */
+    --ai-accent: 239 84% 67%;        /* #6366F1 */
+    --neutral: 220 9% 46%;           /* #6B7280 */
+
+    /* MASTER.md: Chart Colors */
+    --chart-1: 142 71% 45%;          /* #22C55E — profit */
+    --chart-2: 0 84% 60%;            /* #EF4444 — loss */
+    --chart-3: 217 91% 60%;          /* #3B82F6 — series 1 */
+    --chart-4: 258 90% 66%;          /* #8B5CF6 — series 2 */
+    --chart-5: 38 92% 50%;           /* #F59E0B — series 3 */
+
+    /* MASTER.md: Spacing */
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+    --space-2xl: 48px;
+
+    /* MASTER.md: Shadows (dark bg) */
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 6px rgba(0,0,0,0.4);
+    --shadow-lg: 0 10px 15px rgba(0,0,0,0.4);
+
+    /* MASTER.md: Layout */
+    --sidebar-width: 280px;
+    --sidebar-collapsed: 68px;
+    --header-height: 56px;
+    --table-row-height: 36px;
+    --kpi-font-size: 48px;
+    --sparkline-height: 32px;
+    --grid-gap: 16px;
   }
 }
 
@@ -60,5 +82,10 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  /* MASTER.md: tabular-nums for financial data */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
   }
 }
