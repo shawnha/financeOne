@@ -229,7 +229,7 @@ function CashFlowContent() {
         </CardHeader>
         <CardContent className="p-0">
           <div className="h-[400px]">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <ComposedChart
                 data={monthsData}
                 margin={{ top: 10, right: 10, left: 10, bottom: 5 }}
