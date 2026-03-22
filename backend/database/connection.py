@@ -1,7 +1,9 @@
 """Database connection pool using psycopg2"""
 
 import os
+from collections.abc import Generator
 from psycopg2 import pool
+from psycopg2.extensions import connection as PgConnection
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -22,12 +24,12 @@ async def close_pool():
         _pool = None
 
 
-def get_conn():
+def get_db() -> Generator[PgConnection, None, None]:
+    """FastAPI Depends() generator for DB connections."""
     if _pool is None:
         raise RuntimeError("Connection pool not initialized")
-    return _pool.getconn()
-
-
-def put_conn(conn):
-    if _pool:
+    conn = _pool.getconn()
+    try:
+        yield conn
+    finally:
         _pool.putconn(conn)

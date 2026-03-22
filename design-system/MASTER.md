@@ -82,7 +82,8 @@ fontFamily: {
 
 | Element | Font | Size | Weight |
 |---------|------|------|--------|
-| KPI Value | IBM Plex Mono | 48px | 700 |
+| KPI Value (standalone) | IBM Plex Mono | 48px | 700 |
+| KPI Value (inline cards) | IBM Plex Mono | 28px | 700 |
 | H1 (페이지 제목) | IBM Plex Sans | 30px | 700 |
 | H2 (섹션 제목) | IBM Plex Sans | 24px | 600 |
 | H3 (카드 제목) | IBM Plex Sans | 18px | 600 |
@@ -320,6 +321,28 @@ fontFamily: {
 
 ---
 
+## Accessibility (A11y)
+
+| Requirement | Spec |
+|-------------|------|
+| ARIA Landmarks | `<nav>` (sidebar), `<main>` (content), `<header>` (entity tab bar) |
+| Keyboard | Tab: 모든 인터랙티브 요소 접근. Enter/Space: 활성화. Escape: 모달 닫기 |
+| Focus Ring | `focus-visible:ring-2 ring-offset-2 ring-[#22C55E]` |
+| Touch Target | 44px 최소 (모바일 버튼, 체크박스, 메뉴 아이템) |
+| Color Contrast | 4.5:1 최소 (WCAG AA) |
+| Reduced Motion | `prefers-reduced-motion: reduce` → 모든 애니메이션 비활성화 |
+| Screen Reader | 금액은 `aria-label`로 전체 값 제공 (예: "총 잔고 1,234,567원") |
+
+## Responsive Strategy (Desktop-first)
+
+| Breakpoint | Layout |
+|------------|--------|
+| lg (1024px+) | 전체 기능. Sidebar 280px 고정. 12col 그리드 |
+| md (768px) | Sidebar slide-over. 그리드 축소 (6col). 테이블 컬럼 축소 |
+| sm (375px) | Sidebar hamburger. 1col stacked. 차트 축소. 테이블 핵심 컬럼만 |
+
+---
+
 ## Anti-Patterns (UUPM + Financial)
 
 - Emojis as icons — use Lucide SVG only
@@ -356,3 +379,7 @@ Before delivering any UI code, verify:
 - [ ] Tables: sortable, overflow-x-auto, sticky headers
 - [ ] All 5 interaction states implemented (loading/empty/error/success/partial)
 - [ ] Export to Excel functionality where applicable
+- [ ] ARIA landmarks (`<nav>`, `<main>`, `<header>`)
+- [ ] Touch target 44px minimum
+- [ ] Screen reader: 금액에 `aria-label` 제공
+- [ ] shadcn 기본 테마 색상이 아닌 MASTER.md 토큰 사용 (chart-1 대신 --chart-profit 등)
