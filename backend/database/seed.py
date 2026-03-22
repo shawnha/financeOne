@@ -30,8 +30,8 @@ def seed():
     cur.execute("""
         INSERT INTO entities (code, name, type, currency, parent_id) VALUES
           ('HOI', 'HOI Inc.', 'US_CORP', 'USD', NULL),
-          ('HAK', '주식회사 한아원코리아', 'KR_CORP', 'KRW', 1),
-          ('HAR', '주식회사 한아원리테일', 'KR_CORP', 'KRW', 2)
+          ('HOK', '주식회사 한아원코리아', 'KR_CORP', 'KRW', 1),
+          ('HOR', '주식회사 한아원리테일', 'KR_CORP', 'KRW', 2)
         ON CONFLICT (code) DO NOTHING
     """)
 
