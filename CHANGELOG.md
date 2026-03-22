@@ -27,5 +27,5 @@ All notable changes to FinanceOne will be documented in this file.
 - notebooklm-py v0.3.4 설치
 - Obsidian vault 구조 생성 (obsidian-vault/ 내 6개 폴더 + 템플릿)
 - Vercel CLI v50, Playwright v1.58 설치
-- LLMFit: PyPI 미존재 (스킵)
-- ccstatusline: 인터랙티브 설정 필요 (수동 실행 대기)
+- LLMFit v0.8.1 설치 (brew — Rust CLI 도구)
+- Statusline: 기존 ~/.claude/statusline-command.sh 확인 (model, branch, ctx%)
