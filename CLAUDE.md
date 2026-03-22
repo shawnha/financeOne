@@ -79,6 +79,7 @@
 - 작업 시작 전: git pull origin main
 - 작업 완료 후: 자동 commit + push
 - CHANGELOG.md 업데이트 필수
+- **거래 데이터 파일 절대 커밋 금지**: *.xls, *.xlsx, *.csv, transaction_sample/, uploads/ 는 .gitignore에 등록됨. git add 시 거래 데이터가 포함되지 않았는지 반드시 확인할 것
 
 ## Agent/Skill Workflow (상세: docs/PRD.html #agent-skill-map)
 
