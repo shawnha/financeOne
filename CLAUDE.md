@@ -36,10 +36,11 @@
 ## Directory
 - frontend/src/app: Next.js 페이지
 - backend/routers: FastAPI 라우터
-- backend/services: 비즈니스 로직 (bookkeeping_engine, mapping_service 등)
+- backend/services: 비즈니스 로직 (bookkeeping_engine, mapping_service, slack/ 등)
+- backend/services/slack/: Slack 매칭 엔진 (v1 포팅, 상세: docs/slack-matching-engine.md)
 - scripts/: 월별 브리핑 등 자동화
 - design-system/: UI 디자인 시스템 (UUPM 생성)
-- docs/: PRD, 설계 문서
+- docs/: PRD, 설계 문서 (slack-matching-engine.md 포함)
 
 ## Error Handling Rules
 - Claude API JSONParseError → mapping_rules fallback + 수동 매핑 UI
@@ -48,6 +49,8 @@
 - ConnectionPoolError → exponential backoff (1s, 2s, 4s) 재시도 + '서버 연결 지연' 메시지
 - 프롬프트 인젝션 → 거래처명 sanitize 후 Claude API 전달
 - OAuth 토큰 만료 → refresh token 로직 + 재인증 안내
+- Slack API 에러 → invalid_auth/token_revoked/ratelimited 별 처리 (docs/slack-matching-engine.md)
+- Slack 매칭 실패 → 수동 매칭 UI 유도, AI 매칭 결과 ai_reasoning에 기록
 
 ## Edge Case Rules
 - 거래 0건인 월 → 빈 재무제표 생성 (0원, 정상 표시)
@@ -70,6 +73,7 @@
 - AI 매핑 로그: 거래→계정, 신뢰도, 출처 (rule/ai/manual)
 - 복식부기 검증 로그: 항등식 성공/실패
 - API 연동 로그: Mercury/QuickBooks/Codef 호출 성공/실패/응답시간
+- Slack 매칭 로그: 규칙 매칭/AI 검증/수동 매칭 결과, 신뢰도
 
 ## Git Workflow
 - 작업 시작 전: git pull origin main
