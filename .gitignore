@@ -34,3 +34,7 @@ claude_2/
 
 # Obsidian vault (symlinked, managed separately)
 obsidian-vault/
+.gstack/
+
+# Transaction sample files (실제 거래 데이터)
+transaction_sample/
