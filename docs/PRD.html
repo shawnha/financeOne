@@ -1129,15 +1129,24 @@ python3 .claude/skills/ui-ux-pro-max/scripts/search.py \
 
 <section id="screens">
 <h2>화면 목록</h2>
+
+<h3>사이드바 메뉴 구조</h3>
 <table>
-  <tr><th>화면</th><th>URL</th><th>설명</th><th>Priority</th></tr>
-  <tr><td>대시보드</td><td><code>/</code></td><td>현금흐름 요약, 잔고, 예측, 알림</td><td class="p1">P1</td></tr>
-  <tr><td>현금흐름표</td><td><code>/cashflow</code></td><td>월별 수입/지출, 예측 vs 실제</td><td class="p1">P1</td></tr>
-  <tr><td>거래내역</td><td><code>/transactions</code></td><td>거래 목록, 분류, 검색/필터</td><td class="p1">P1</td></tr>
+  <tr><th>섹션</th><th>메뉴</th><th>URL</th><th>설명</th><th>Priority</th></tr>
+  <tr><td rowspan="4"><strong>요약</strong></td><td>대시보드</td><td><code>/</code></td><td>현금흐름 요약, 잔고, 예측, 알림</td><td class="p1">P1</td></tr>
+  <tr><td>현금 흐름표</td><td><code>/cashflow</code></td><td>월별 수입/지출, 예측 vs 실제</td><td class="p1">P1</td></tr>
+  <tr><td>재무제표</td><td><code>/statements</code></td><td>재무상태표, 손익계산서 등</td><td class="p2">P2</td></tr>
+  <tr><td>리포트</td><td><code>/reports</code></td><td>월별/분기별, Excel/PDF Export</td><td class="p2">P2</td></tr>
+  <tr><td rowspan="3"><strong>데이터</strong></td><td>거래 내역</td><td><code>/transactions</code></td><td>거래 목록, 분류, 검색/필터</td><td class="p1">P1</td></tr>
   <tr><td>업로드</td><td><code>/upload</code></td><td>카드/은행 Excel 업로드</td><td class="p1">P1</td></tr>
+  <tr><td>Slack 매칭</td><td><code>/slack-match</code></td><td>Slack 영수증/메모 → 거래 매칭 (4월 ExpenseOne 전환 전까지)</td><td class="p1">P1</td></tr>
+  <tr><td rowspan="2"><strong>계정</strong></td><td>내부 계정</td><td><code>/accounts/internal</code></td><td>법인별 내부 계정과목 추가/수정/표준계정 매핑</td><td class="p2">P2</td></tr>
+  <tr><td>표준 계정</td><td><code>/accounts/standard</code></td><td>K-GAAP 표준계정 조회/추가/수정 (68개)</td><td class="p2">P2</td></tr>
+  <tr><td rowspan="2"><strong>관리</strong></td><td>멤버 관리</td><td><code>/settings/members</code></td><td>팀 멤버 추가/권한 관리</td><td class="p2">P2</td></tr>
+  <tr><td>설정</td><td><code>/settings</code></td><td>법인 관리, API 토글, 환율</td><td class="p2">P2</td></tr>
 </table>
 
-<h3>거래내역 (/transactions) 테이블 컬럼 상세</h3>
+<h3>거래내역 (<code>/transactions</code>) 테이블 컬럼 상세</h3>
 <table>
   <tr><th>#</th><th>컬럼</th><th>DB 필드</th><th>Width</th><th>설명</th></tr>
   <tr><td>1</td><td>☑</td><td>-</td><td>40px</td><td>일괄 선택 체크박스</td></tr>
@@ -1157,14 +1166,6 @@ python3 .claude/skills/ui-ux-pro-max/scripts/search.py \
   중복 거래(<code>is_duplicate</code>): 회색 처리 + 취소선. 체크카드 = 우리은행 적요 '체크우리' ↔ 우리카드 매출구분 '체크계좌' 매칭 → 은행 쪽 중복 마킹.<br>
   필터: 검색(내역·거래처·메모), 기간, 회원, 표준계정, 내부계정, 미분류만, 출처 토글.
 </p>
-
-<table>
-  <tr><th>화면</th><th>URL</th><th>설명</th><th>Priority</th></tr>
-  <tr><td>재무제표</td><td><code>/statements</code></td><td>재무상태표, 손익계산서 등</td><td class="p2">P2</td></tr>
-  <tr><td>리포트</td><td><code>/reports</code></td><td>월별/분기별, Excel/PDF Export</td><td class="p2">P2</td></tr>
-  <tr><td>계정과목</td><td><code>/accounts</code></td><td>K-GAAP 계정과목 관리</td><td class="p2">P2</td></tr>
-  <tr><td>설정</td><td><code>/settings</code></td><td>법인 관리, API 토글, 환율, 멤버</td><td class="p2">P2</td></tr>
-</table>
 </section>
 
 <hr>
