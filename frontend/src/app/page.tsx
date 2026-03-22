@@ -402,7 +402,7 @@ function DashboardContent() {
             <div className="flex justify-end mt-2">
               <Link
                 href="/cashflow"
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1 py-2 min-h-[44px]"
               >
                 상세 보기
                 <ChevronRight className="h-3 w-3" />
@@ -469,7 +469,7 @@ function DashboardContent() {
             <div className="flex justify-end mt-3">
               <Link
                 href={`/transactions?entity=${entityId}`}
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1 py-2 min-h-[44px]"
               >
                 전체 보기
                 <ChevronRight className="h-3 w-3" />
