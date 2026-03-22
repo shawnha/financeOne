@@ -29,5 +29,8 @@ Thumbs.db
 # Claude Code (local only)
 .claude/settings.local.json
 
+# Stale directories
+claude_2/
+
 # Obsidian vault (symlinked, managed separately)
 obsidian-vault/

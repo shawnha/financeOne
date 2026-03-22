@@ -14,3 +14,18 @@ All notable changes to FinanceOne will be documented in this file.
 - 참고 아키텍처 3종 추가 (Bigcapital, Frappe Books, hledger)
 - GSD 제거 → Claude Code 내장 Agent/Skill로 대체
 - Git 초기화 + 프로젝트 구조 생성
+
+### 2026-03-22 — Phase 0 Infrastructure
+- Neon dev 브랜치 생성 (ap-southeast-1)
+- DB 스키마 14개 테이블 생성 (PostgreSQL)
+- seed.py: 3개 법인, 68개 K-GAAP 표준계정, 28개 US GAAP 매핑, 7개 설정
+- Frontend: Next.js 14 + Tailwind v3 + shadcn/ui v2 + Recharts + Lucide
+- Backend: FastAPI + psycopg2 + 6개 라우터 (entities, transactions, accounts, upload, dashboard, statements)
+- UUPM 설치 (ui-ux-pro-max skill)
+- Obsidian Skills 설치 (5종: defuddle, json-canvas, obsidian-bases, obsidian-cli, obsidian-markdown)
+- 디자인 시스템: MASTER.md + 페이지별 가이드 (dashboard, transactions)
+- notebooklm-py v0.3.4 설치
+- Obsidian vault 구조 생성 (obsidian-vault/ 내 6개 폴더 + 템플릿)
+- Vercel CLI v50, Playwright v1.58 설치
+- LLMFit: PyPI 미존재 (스킵)
+- ccstatusline: 인터랙티브 설정 필요 (수동 실행 대기)
