@@ -1,5 +1,5 @@
 -- FinanceOne v2 — DB Schema (Neon PostgreSQL)
--- 14개 테이블, 모든 테이블에 entity_id 포함 원칙
+-- 16개 테이블 (14 + slack_messages + transaction_slack_match), 모든 테이블에 entity_id 포함 원칙
 -- PRD SQLite 문법 → PostgreSQL 변환
 
 BEGIN;
