@@ -29,3 +29,5 @@ All notable changes to FinanceOne will be documented in this file.
 - Vercel CLI v50, Playwright v1.58 설치
 - LLMFit v0.8.1 설치 (brew — Rust CLI 도구)
 - Statusline: 기존 ~/.claude/statusline-command.sh 확인 (model, branch, ctx%)
+- Alembic v1.14 초기화 + stamp head (기존 스키마 인식)
+- Railway CLI v4.33 설치 (백엔드 배포용)
