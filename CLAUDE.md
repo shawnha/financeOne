@@ -84,6 +84,59 @@
 - 배포 → /ship
 - 버그 → /investigate
 - 재무 로직 정확도 → /codex (적대적 검증)
+- Phase 완료 후 → 리뷰 (/plan-eng-review + /design-review + /review)
+
+## Phase별 Agent/Skill 사용 (상세: docs/PRD.html #agent-skill-map)
+
+### Phase 1 — 현금흐름 대시보드
+- FastAPI 라우터: Claude Code 직접 ("entity_id 없는 엔드포인트 금지")
+- 대시보드 UI: **UUPM** Financial Dashboard 스타일 ("design-system/MASTER.md 먼저 읽고 구현")
+- 현금흐름 차트: **UUPM** chart 도메인 ("Recharts 사용, UUPM chart 가이드 적용")
+- Excel 파서: v1 코드 재활용 ("v1 파서 로직 변경 금지, 정규화만 수정")
+- E2E 검증: Playwright ("매 Phase 완료 시 E2E 테스트 실행")
+
+### Phase 2 — 재무제표 정확도
+- 복식부기 엔진: 직접 구현 ("sum(debit)==sum(credit) 실패 시 즉시 중단")
+- 재무제표 UI: **UUPM** Executive Dashboard
+- Mercury API: 직접 구현 ("Read-only 토큰만, 쓰기 절대 금지")
+- Codef 샌드박스: 직접 구현 ("SANDBOX 환경에서만 테스트")
+
+### Phase 3 — 3개 법인 연결
+- 내부거래 감지: 직접 구현 ("is_intercompany=1 시 counterparty_entity_id 필수")
+- 연결재무제표: 직접 구현 ("내부거래 상계 후 합산, 환율 평균환율 적용")
+- 통합 대시보드 UI: **UUPM** ("법인 전환 시 데이터 완전 재로딩 필수")
+
+### Phase 4 — Obsidian + NotebookLM 자동화
+- 월별 재무 요약: **obsidian-markdown** (frontmatter, wikilinks, callouts)
+- 거래처 노트: **obsidian-markdown** (새 거래처 첫 등장 시 자동 생성)
+- Vault 검색: **obsidian-cli** (`obsidian search query="..."`)
+- 거래처 DB: **obsidian-bases** (Bases 필터/정렬)
+- NotebookLM: notebooklm-py (scripts/monthly_briefing.py)
+
+### Phase 5 — n8n 자동화
+- 워크플로우 설계: **n8n-skills** (patterns, mcp-tools)
+- 스케줄러/Webhook/에러처리: **n8n-skills**
+
+## Skills & Agents 사용 규칙
+
+### UI 작업 시 필수
+- 모든 새 화면 개발 전: design-system/MASTER.md 읽기
+- 화면별 override 확인: design-system/pages/[screen].md
+- UUPM Pre-Delivery Checklist 통과 후 커밋
+
+### Obsidian 작업 시 필수 (Phase 4+)
+- obsidian-markdown skill 활성화 후 노트 생성
+- frontmatter 형식: date, tags, entity 포함 필수
+- wikilinks 문법: [[노트명]] (대괄호 2개)
+
+### n8n 작업 시 (Phase 5)
+- n8n-mcp MCP 서버 활성 상태 확인
+- 프로덕션 워크플로우 직접 수정 절대 금지 — 항상 복사본에서 테스트 후 적용
+
+### 세션 관리
+- 컨텍스트 70% 이상: /clear 후 CLAUDE.md + 현재 Phase 파일 재로드
+- Phase 완료 시: MEMORY.md 업데이트 + git commit
+- 30분+ 비활성: conversations/ 폴더에 세션 요약 저장
 
 ## Reference Architecture
 - Bigcapital: PostgreSQL 재무제표 생성 쿼리 패턴
