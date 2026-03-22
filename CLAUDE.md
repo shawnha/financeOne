@@ -76,53 +76,55 @@
 - 작업 완료 후: 자동 commit + push
 - CHANGELOG.md 업데이트 필수
 
-## Agent/Skill Workflow
+## Agent/Skill Workflow (상세: docs/PRD.html #agent-skill-map)
+
+### Phase 공통 워크플로우 (① → ⑤ 순서 필수)
+1. **①설계**: Software Architect agent + /plan-eng-review
+2. **②구현**: Backend/Frontend/AI agent 병렬 실행
+3. **③검증**: /qa + /design-review + /codex (재무 로직)
+4. **④배포**: /ship → /land-and-deploy → /canary
+5. **⑤회고**: /retro + /document-release + /plan-ceo-review
+
+### Skill 사용 시점
 - Phase 시작 → /plan-eng-review
 - 비즈니스 로직 변경 → /plan-ceo-review
-- UI 구현 완료 → /design-review
-- PR 머지 전 → /review
-- 배포 → /ship
+- UI 설계 전 → /plan-design-review
+- UI 완료 → /design-review
+- 재무 로직 정확도 → /codex (적대적 검증, Phase 2·3 필수)
+- QA 테스트 → /qa (모든 Phase 완료 시)
+- PR 머지 전 → /review (Code Reviewer agent 병행)
+- 배포 → /ship → /land-and-deploy → /canary
 - 버그 → /investigate
-- 재무 로직 정확도 → /codex (적대적 검증)
-- Phase 완료 후 → 리뷰 (/plan-eng-review + /design-review + /review)
+- Phase 완료 → /retro + /document-release
+- 프로덕션 데이터 → /guard (careful + freeze)
+- 성능 측정 → /benchmark (Phase 2·3)
+- AI 매핑 코드 → /claude-api
+- 모호한 회계 규칙 → /office-hours
 
-## Phase별 Agent/Skill 사용 (상세: docs/PRD.html #agent-skill-map)
+### Agent 사용 시점
+- 설계: **Software Architect**, **Plan**
+- 백엔드: **Backend Architect**, **Database Optimizer**
+- 프론트: **Frontend Developer**, **UX Architect**, **UI Designer**
+- AI/데이터: **AI Engineer**, **Data Engineer**
+- 보안: **Security Engineer** (API 토큰, .env, SQL injection)
+- 테스트: **API Tester**, **Performance Benchmarker**, **Accessibility Auditor**
+- 규정: **Compliance Auditor** (K-GAAP/US GAAP, Phase 2·3)
+- 리뷰: **Code Reviewer**
+- 인프라: **DevOps Automator**, **SRE**
+- 문서: **Technical Writer**, **Document Generator**
 
-### Phase 1 — 현금흐름 대시보드
-- FastAPI 라우터: Claude Code 직접 ("entity_id 없는 엔드포인트 금지")
-- 대시보드 UI: **UUPM** Financial Dashboard 스타일 ("design-system/MASTER.md 먼저 읽고 구현")
-- 현금흐름 차트: **UUPM** chart 도메인 ("Recharts 사용, UUPM chart 가이드 적용")
-- Excel 파서: v1 코드 재활용 ("v1 파서 로직 변경 금지, 정규화만 수정")
-- E2E 검증: Playwright ("매 Phase 완료 시 E2E 테스트 실행")
-
-### Phase 2 — 재무제표 정확도
-- 복식부기 엔진: 직접 구현 ("sum(debit)==sum(credit) 실패 시 즉시 중단")
-- 재무제표 UI: **UUPM** Executive Dashboard
-- Mercury API: 직접 구현 ("Read-only 토큰만, 쓰기 절대 금지")
-- Codef 샌드박스: 직접 구현 ("SANDBOX 환경에서만 테스트")
-
-### Phase 3 — 3개 법인 연결
-- 내부거래 감지: 직접 구현 ("is_intercompany=1 시 counterparty_entity_id 필수")
-- 연결재무제표: 직접 구현 ("내부거래 상계 후 합산, 환율 평균환율 적용")
-- 통합 대시보드 UI: **UUPM** ("법인 전환 시 데이터 완전 재로딩 필수")
-
-### Phase 4 — Obsidian + NotebookLM 자동화
-- 월별 재무 요약: **obsidian-markdown** (frontmatter, wikilinks, callouts)
-- 거래처 노트: **obsidian-markdown** (새 거래처 첫 등장 시 자동 생성)
-- Vault 검색: **obsidian-cli** (`obsidian search query="..."`)
-- 거래처 DB: **obsidian-bases** (Bases 필터/정렬)
-- NotebookLM: notebooklm-py (scripts/monthly_briefing.py)
-
-### Phase 5 — n8n 자동화
-- 워크플로우 설계: **n8n-skills** (patterns, mcp-tools)
-- 스케줄러/Webhook/에러처리: **n8n-skills**
-
-## Skills & Agents 사용 규칙
+### Agent 사용 규칙
+- 독립적 작업은 Agent 병렬 실행 (Backend + Frontend 동시)
+- 설계 단계에서 반드시 Software Architect 또는 Plan agent 호출
+- 재무 로직은 Compliance Auditor agent로 규정 검증
+- API 연동은 Security Engineer agent로 보안 검토 필수
+- 프로덕션 데이터 접근 시 /guard 활성화
 
 ### UI 작업 시 필수
 - 모든 새 화면 개발 전: design-system/MASTER.md 읽기
 - 화면별 override 확인: design-system/pages/[screen].md
 - UUPM Pre-Delivery Checklist 통과 후 커밋
+- UI 완료 시: Accessibility Auditor agent + /design-review
 
 ### Obsidian 작업 시 필수 (Phase 4+)
 - obsidian-markdown skill 활성화 후 노트 생성
@@ -131,6 +133,7 @@
 
 ### n8n 작업 시 (Phase 5)
 - n8n-mcp MCP 서버 활성 상태 확인
+- n8n-skills 로드 후 워크플로우 설계
 - 프로덕션 워크플로우 직접 수정 절대 금지 — 항상 복사본에서 테스트 후 적용
 
 ### 세션 관리

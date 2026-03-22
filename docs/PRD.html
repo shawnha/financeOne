@@ -1547,90 +1547,233 @@ cp -r .claude-obsidian/skills .claude/skills/</pre>
 
 <div class="callout callout-purple">
   <strong>핵심 원칙</strong>
-  Claude Code 개발 시 각 단계에서 적절한 skill을 명시적으로 호출해야 품질이 보장된다. "그냥 코딩"이 아니라 UUPM → 설계 → 구현 → 검증 순서로 skill을 체계적으로 사용.
+  Claude Code 개발 시 각 단계에서 적절한 Skill(슬래시 커맨드)과 Agent(서브에이전트)를 명시적으로 호출해야 품질이 보장된다. "그냥 코딩"이 아니라 <strong>설계(Agent) → 구현(Agent 병렬) → 검증(Skill) → 배포(Skill)</strong> 순서로 체계적으로 사용.
 </div>
 
-<h3>설치할 Skill 전체 목록</h3>
+<h3>사용 가능한 Skill 전체 목록</h3>
+
+<h4>프로젝트 설치 Skill</h4>
 <table>
   <tr><th>Skill</th><th>설치 명령</th><th>활성화 시점</th></tr>
   <tr><td><strong>UI UX Pro Max</strong></td><td><code>uipro init --ai antigravity</code></td><td>모든 UI 관련 작업</td></tr>
-  <tr><td><strong>kepano/obsidian-skills</strong> (5종)</td><td><code>/plugin install obsidian@obsidian-skills</code></td><td>Obsidian vault 작업</td></tr>
-  <tr><td><strong>czlonkowski/n8n-skills</strong> (7종)</td><td><code>/plugin install czlonkowski/n8n-skills</code></td><td>Phase 4+ n8n 자동화</td></tr>
+  <tr><td><strong>kepano/obsidian-skills</strong> (5종)</td><td><code>/plugin install obsidian@obsidian-skills</code></td><td>Obsidian vault 작업 (Phase 4)</td></tr>
+  <tr><td><strong>czlonkowski/n8n-skills</strong> (7종)</td><td><code>/plugin install czlonkowski/n8n-skills</code></td><td>n8n 자동화 (Phase 5)</td></tr>
+</table>
+
+<h4>Claude Code 내장 Skill (슬래시 커맨드)</h4>
+<table>
+  <tr><th>카테고리</th><th>Skill</th><th>용도</th><th>FinanceOne 활용 Phase</th></tr>
+  <tr><td rowspan="4"><strong>설계 리뷰</strong></td><td><code>/plan-eng-review</code></td><td>아키텍처 리뷰, 데이터 흐름 검증</td><td>모든 Phase 시작</td></tr>
+  <tr><td><code>/plan-ceo-review</code></td><td>비즈니스 로직 검증, 스코프 확인</td><td>Phase 1 (30초 잔고 확인), Phase 2 (정확도), Phase 5 (최종)</td></tr>
+  <tr><td><code>/plan-design-review</code></td><td>디자인 플랜 리뷰</td><td>Phase 1, 2, 3 UI 설계 시</td></tr>
+  <tr><td><code>/office-hours</code></td><td>브레인스토밍, 모호한 요구사항 정리</td><td>회계 규칙 해석이 애매할 때</td></tr>
+  <tr><td rowspan="3"><strong>코드 검증</strong></td><td><code>/review</code></td><td>PR 코드 리뷰 (SQL 안전성, 신뢰 경계)</td><td>모든 Phase 머지 전</td></tr>
+  <tr><td><code>/codex</code></td><td>적대적 검증 (코드를 깨뜨려 보는 테스트)</td><td>Phase 2 (복식부기), Phase 3 (CTA/연결)</td></tr>
+  <tr><td><code>/investigate</code></td><td>버그 근본 원인 분석</td><td>모든 Phase (에러 발생 시)</td></tr>
+  <tr><td rowspan="2"><strong>QA 테스트</strong></td><td><code>/qa</code></td><td>체계적 QA + 버그 수정 루프</td><td>모든 Phase 완료 시</td></tr>
+  <tr><td><code>/qa-only</code></td><td>QA 리포트만 (수정 없음)</td><td>중간 점검 시</td></tr>
+  <tr><td rowspan="2"><strong>디자인 검증</strong></td><td><code>/design-review</code></td><td>UI 비주얼 QA + 자동 수정</td><td>Phase 1, 2, 3 UI 완료 시</td></tr>
+  <tr><td><code>/design-consultation</code></td><td>디자인 시스템 컨설팅</td><td>Phase 1 시작 (MASTER.md 보완)</td></tr>
+  <tr><td rowspan="3"><strong>배포</strong></td><td><code>/setup-deploy</code></td><td>배포 환경 설정 (Vercel/Railway 감지)</td><td>Phase 1 (최초 배포 설정)</td></tr>
+  <tr><td><code>/ship</code></td><td>테스트 → 리뷰 → VERSION → CHANGELOG → PR</td><td>모든 Phase 완료 시</td></tr>
+  <tr><td><code>/land-and-deploy</code></td><td>PR 머지 → CI → 프로덕션 배포 → 헬스체크</td><td>모든 Phase 배포 시</td></tr>
+  <tr><td rowspan="2"><strong>모니터링</strong></td><td><code>/canary</code></td><td>배포 후 카나리 모니터링 (콘솔 에러, 성능)</td><td>Phase 1+ 배포 후</td></tr>
+  <tr><td><code>/benchmark</code></td><td>성능 벤치마크 (페이지 로드, Core Web Vitals)</td><td>Phase 2, 3 (대량 데이터 처리)</td></tr>
+  <tr><td rowspan="2"><strong>브라우저 테스트</strong></td><td><code>/browse</code> / <code>/gstack</code></td><td>헤드리스 브라우저 QA, 스크린샷</td><td>모든 Phase UI 검증</td></tr>
+  <tr><td><code>/setup-browser-cookies</code></td><td>인증 페이지 테스트용 쿠키 임포트</td><td>Phase 2 (Mercury/Codef 인증 페이지)</td></tr>
+  <tr><td rowspan="3"><strong>안전 모드</strong></td><td><code>/careful</code></td><td>파괴적 명령 경고 (DROP, force-push)</td><td>Phase 2+ (프로덕션 DB 접근 시)</td></tr>
+  <tr><td><code>/guard</code></td><td>/careful + /freeze 결합 (최대 안전)</td><td>프로덕션 데이터 작업 시</td></tr>
+  <tr><td><code>/freeze</code></td><td>특정 디렉토리만 편집 허용</td><td>Phase 2 (bookkeeping_engine만 수정 시)</td></tr>
+  <tr><td rowspan="2"><strong>문서화</strong></td><td><code>/document-release</code></td><td>배포 후 README/CHANGELOG/CLAUDE.md 동기화</td><td>모든 Phase 완료 시</td></tr>
+  <tr><td><code>/retro</code></td><td>주간 회고 (커밋 분석, 품질 메트릭)</td><td>Phase 경계마다</td></tr>
+  <tr><td><strong>반복 실행</strong></td><td><code>/loop</code></td><td>주기적 명령 실행</td><td>Phase 5 (n8n 워크플로우 모니터링)</td></tr>
+  <tr><td><strong>API 개발</strong></td><td><code>/claude-api</code></td><td>Anthropic SDK 사용 코드</td><td>Phase 1 (AI 매핑 서비스)</td></tr>
+</table>
+
+<h4>사용 가능한 Agent (서브에이전트) 목록</h4>
+<table>
+  <tr><th>카테고리</th><th>Agent</th><th>용도</th><th>FinanceOne 활용 Phase</th></tr>
+  <tr><td rowspan="2"><strong>설계</strong></td><td><strong>Software Architect</strong></td><td>시스템 설계, 아키텍처 패턴, 기술 의사결정</td><td>모든 Phase 시작</td></tr>
+  <tr><td><strong>Plan</strong></td><td>구현 전략 수립, 단계별 계획</td><td>모든 Phase 시작</td></tr>
+  <tr><td rowspan="2"><strong>백엔드</strong></td><td><strong>Backend Architect</strong></td><td>API 설계, DB 아키텍처, 마이크로서비스</td><td>Phase 1 (라우터), Phase 2 (복식부기 엔진), Phase 3 (연결)</td></tr>
+  <tr><td><strong>Database Optimizer</strong></td><td>스키마 설계, 쿼리 최적화, 인덱스 전략</td><td>Phase 1 (현금흐름 쿼리), Phase 2 (재무제표 쿼리), Phase 3 (연결 JOIN)</td></tr>
+  <tr><td rowspan="3"><strong>프론트엔드</strong></td><td><strong>Frontend Developer</strong></td><td>React/Next.js 구현, UI 성능 최적화</td><td>Phase 1 (대시보드), Phase 2 (재무제표 UI), Phase 3 (통합 UI)</td></tr>
+  <tr><td><strong>UX Architect</strong></td><td>기술 아키텍처 + UX, CSS 시스템</td><td>Phase 1 (대시보드 레이아웃), Phase 3 (법인 전환 UX)</td></tr>
+  <tr><td><strong>UI Designer</strong></td><td>비주얼 디자인, 컴포넌트 라이브러리</td><td>Phase 1 (KPI 카드), Phase 2 (재무제표 레이아웃)</td></tr>
+  <tr><td rowspan="2"><strong>AI/데이터</strong></td><td><strong>AI Engineer</strong></td><td>ML 모델, AI 기능 통합</td><td>Phase 1 (AI 매핑 프롬프트), Phase 2 (매핑 정확도 향상)</td></tr>
+  <tr><td><strong>Data Engineer</strong></td><td>데이터 파이프라인, ETL</td><td>Phase 2 (Excel→DB 파이프라인), Phase 4 (월간 리포트 파이프라인)</td></tr>
+  <tr><td rowspan="3"><strong>보안/품질</strong></td><td><strong>Security Engineer</strong></td><td>위협 모델링, 보안 코드 리뷰</td><td>Phase 1 (.env, DB 연결), Phase 2 (Mercury/Codef API 토큰)</td></tr>
+  <tr><td><strong>Code Reviewer</strong></td><td>코드 리뷰 (정확성, 보안, 성능)</td><td>모든 Phase 완료 시</td></tr>
+  <tr><td><strong>Accessibility Auditor</strong></td><td>WCAG 감사, 접근성 테스트</td><td>Phase 1, 2, 3 UI 완료 시</td></tr>
+  <tr><td rowspan="2"><strong>테스트</strong></td><td><strong>API Tester</strong></td><td>API 검증, 성능 테스트</td><td>Phase 1 (엔드포인트), Phase 2 (Mercury/Codef)</td></tr>
+  <tr><td><strong>Performance Benchmarker</strong></td><td>성능 측정, 병목 분석</td><td>Phase 2 (재무제표 생성), Phase 3 (연결 쿼리)</td></tr>
+  <tr><td rowspan="2"><strong>인프라</strong></td><td><strong>DevOps Automator</strong></td><td>CI/CD, 클라우드 운영</td><td>Phase 1 (Vercel/Railway 설정), Phase 5 (n8n 인프라)</td></tr>
+  <tr><td><strong>SRE</strong></td><td>SLO, 모니터링, 장애 대응</td><td>Phase 5 (자동화 파이프라인 안정성)</td></tr>
+  <tr><td rowspan="2"><strong>문서/규정</strong></td><td><strong>Technical Writer</strong></td><td>API 문서, README, 튜토리얼</td><td>Phase 4 (월간 리포트 템플릿), Phase 5 (자동화 런북)</td></tr>
+  <tr><td><strong>Compliance Auditor</strong></td><td>규정 준수 감사 (K-GAAP, US GAAP)</td><td>Phase 2 (재무제표 양식), Phase 3 (연결 규정)</td></tr>
+  <tr><td><strong>탐색</strong></td><td><strong>Explore</strong></td><td>코드베이스 탐색, 키워드 검색</td><td>모든 Phase (코드 탐색)</td></tr>
 </table>
 
 <h3>Phase별 Agent / Skill 사용 가이드</h3>
 
-<h4>Phase 0 — 프로젝트 세팅 (Day 1)</h4>
+<div class="callout callout-blue">
+  <strong>워크플로우 순서</strong>
+  각 Phase: <strong>①설계</strong> (Plan/Architect Agent + /plan-eng-review) → <strong>②구현</strong> (Frontend/Backend Agent 병렬) → <strong>③검증</strong> (/codex + /qa + /review) → <strong>④배포</strong> (/ship + /land-and-deploy) → <strong>⑤회고</strong> (/retro + /document-release)
+</div>
+
+<h4>Phase 0 — 프로젝트 세팅 (Day 1) ✅ 완료</h4>
 <table>
-  <tr><th>작업</th><th>사용 Skill / Tool</th><th>방법</th></tr>
-  <tr><td>DB 스키마 생성</td><td>직접 (스키마 PRD에 완성)</td><td>schema.sql 실행 → Alembic init</td></tr>
-  <tr><td>디자인 시스템 생성</td><td><strong>UUPM</strong></td><td><code>python3 search.py "fintech accounting dark" --design-system --persist</code></td></tr>
-  <tr><td>Obsidian vault 설정</td><td><strong>obsidian-markdown</strong>, <strong>obsidian-cli</strong></td><td>vault 폴더 구조 + 템플릿 생성</td></tr>
-  <tr><td>CLAUDE.md 작성</td><td>awesome-claude-code 참고</td><td>프로젝트 규칙, DB 원칙, UI 가이드 포함</td></tr>
+  <tr><th>단계</th><th>작업</th><th>Skill / Agent</th><th>방법</th></tr>
+  <tr><td>설계</td><td>PRD 리뷰</td><td><code>/plan-ceo-review</code>, <code>/plan-eng-review</code></td><td>PRD 완성도 검증, cherry-pick 결정</td></tr>
+  <tr><td>구현</td><td>DB 스키마 생성</td><td>직접 (스키마 PRD에 완성)</td><td>schema.sql 실행 → Alembic init</td></tr>
+  <tr><td>구현</td><td>디자인 시스템 생성</td><td><strong>UUPM</strong></td><td><code>search.py "financial dashboard dark" --design-system --persist</code></td></tr>
+  <tr><td>구현</td><td>Obsidian vault 설정</td><td><strong>obsidian-markdown</strong>, <strong>obsidian-cli</strong></td><td>vault 폴더 구조 + 템플릿 생성</td></tr>
+  <tr><td>구현</td><td>CLAUDE.md 작성</td><td>awesome-claude-code 참고</td><td>프로젝트 규칙, DB 원칙, UI 가이드 포함</td></tr>
+  <tr><td>검증</td><td>디자인 리뷰</td><td><code>/plan-design-review</code></td><td>MASTER.md 완성도 검증</td></tr>
 </table>
 
-<h4>Phase 1 — 현금흐름 대시보드</h4>
+<h4>Phase 1 — 현금흐름 대시보드 (3~4일)</h4>
 <table>
-  <tr><th>작업</th><th>사용 Skill</th><th>CLAUDE.md 지시문</th></tr>
-  <tr><td>FastAPI 라우터 작성</td><td>없음 (Claude Code 직접)</td><td>"entity_id 없는 엔드포인트 금지"</td></tr>
-  <tr><td>대시보드 UI 컴포넌트</td><td><strong>UUPM</strong> (Financial Dashboard 스타일)</td><td>"design-system/MASTER.md 먼저 읽고 구현"</td></tr>
-  <tr><td>현금흐름 차트</td><td><strong>UUPM</strong> (chart 도메인)</td><td>"Recharts 사용, UUPM chart 가이드 적용"</td></tr>
-  <tr><td>Excel 파서 포팅</td><td>없음 (v1 코드 재활용)</td><td>"v1 파서 로직 변경 금지, 정규화만 수정"</td></tr>
-  <tr><td>Neon DB 연결 검증</td><td>없음 (Playwright)</td><td>"매 Phase 완료 시 E2E 테스트 실행"</td></tr>
+  <tr><th>단계</th><th>작업</th><th>Skill / Agent</th><th>지시문</th></tr>
+  <tr><td rowspan="3">①설계</td><td>API 아키텍처 설계</td><td><strong>Software Architect</strong> agent + <code>/plan-eng-review</code></td><td>엔드포인트 구조, 데이터 흐름 결정</td></tr>
+  <tr><td>DB 쿼리 전략</td><td><strong>Database Optimizer</strong> agent</td><td>현금흐름 집계 쿼리, 인덱스 전략</td></tr>
+  <tr><td>대시보드 레이아웃</td><td><strong>UX Architect</strong> agent + <code>/plan-design-review</code></td><td>Bento Grid 배치, 반응형 구조</td></tr>
+  <tr><td rowspan="5">②구현</td><td>FastAPI 라우터</td><td><strong>Backend Architect</strong> agent</td><td>"entity_id 없는 엔드포인트 금지"</td></tr>
+  <tr><td>대시보드 UI</td><td><strong>Frontend Developer</strong> agent + <strong>UUPM</strong></td><td>"design-system/MASTER.md 먼저 읽고 구현"</td></tr>
+  <tr><td>현금흐름 차트</td><td><strong>Frontend Developer</strong> agent + <strong>UUPM</strong> (chart)</td><td>"Recharts 사용, UUPM chart 가이드 적용"</td></tr>
+  <tr><td>Excel 파서 포팅</td><td>직접 (v1 코드 재활용)</td><td>"v1 파서 로직 변경 금지, 정규화만 수정"</td></tr>
+  <tr><td>AI 매핑 서비스</td><td><strong>AI Engineer</strong> agent + <code>/claude-api</code></td><td>"mapping_rules 우선 → Claude API fallback"</td></tr>
+  <tr><td rowspan="5">③검증</td><td>API 테스트</td><td><strong>API Tester</strong> agent</td><td>모든 엔드포인트 검증, 에러 케이스</td></tr>
+  <tr><td>보안 검토</td><td><strong>Security Engineer</strong> agent</td><td>.env 보호, SQL injection 방지, CORS 설정</td></tr>
+  <tr><td>접근성 감사</td><td><strong>Accessibility Auditor</strong> agent</td><td>WCAG AA, 금액 숫자 대비 비율</td></tr>
+  <tr><td>UI QA</td><td><code>/qa</code> + <code>/design-review</code></td><td>5가지 상태 커버리지, 반응형 테스트</td></tr>
+  <tr><td>코드 리뷰</td><td><strong>Code Reviewer</strong> agent + <code>/review</code></td><td>PR 머지 전 최종 리뷰</td></tr>
+  <tr><td rowspan="2">④배포</td><td>배포 환경 설정</td><td><code>/setup-deploy</code> + <strong>DevOps Automator</strong> agent</td><td>Vercel (frontend) + Railway (backend) 최초 설정</td></tr>
+  <tr><td>배포 + 모니터링</td><td><code>/ship</code> → <code>/land-and-deploy</code> → <code>/canary</code></td><td>PR 생성 → 머지 → 배포 → 헬스체크</td></tr>
+  <tr><td rowspan="2">⑤회고</td><td>CEO 검증</td><td><code>/plan-ceo-review</code></td><td>"30초 안에 잔고 파악" 요구사항 충족 확인</td></tr>
+  <tr><td>회고 + 문서화</td><td><code>/retro</code> + <code>/document-release</code></td><td>Phase 1 회고, CHANGELOG/README 동기화</td></tr>
 </table>
 
-<h4>Phase 2 — 재무제표 정확도</h4>
+<h4>Phase 2 — 재무제표 정확도 (4~5일)</h4>
 <table>
-  <tr><th>작업</th><th>사용 Skill</th><th>CLAUDE.md 지시문</th></tr>
-  <tr><td>복식부기 엔진</td><td>없음 (직접 구현)</td><td>"sum(debit)==sum(credit) 실패 시 즉시 중단"</td></tr>
-  <tr><td>재무상태표 생성 로직</td><td>없음 (직접 구현)</td><td>"당기순이익을 이익잉여금에 자동 반영 필수"</td></tr>
-  <tr><td>재무제표 UI</td><td><strong>UUPM</strong> (Executive Dashboard)</td><td>"design-system/pages/statements.md 우선 참조"</td></tr>
-  <tr><td>Mercury API 연동</td><td>없음 (직접 구현)</td><td>"Read-only 토큰만 사용, 쓰기 절대 금지"</td></tr>
-  <tr><td>Codef 샌드박스 테스트</td><td>없음 (직접 구현)</td><td>"SANDBOX 환경에서만 테스트, 정식 데이터 접근 금지"</td></tr>
-  <tr><td>PDF/Excel Export</td><td>없음 (직접 구현)</td><td>"K-GAAP 양식 준수"</td></tr>
+  <tr><th>단계</th><th>작업</th><th>Skill / Agent</th><th>지시문</th></tr>
+  <tr><td rowspan="2">①설계</td><td>복식부기 엔진 아키텍처</td><td><strong>Software Architect</strong> agent + <code>/plan-eng-review</code></td><td>트랜잭션 원자성, 전기이월 로직 설계</td></tr>
+  <tr><td>재무제표 쿼리 설계</td><td><strong>Database Optimizer</strong> agent</td><td>재무상태표/손익계산서 집계 최적화</td></tr>
+  <tr><td rowspan="6">②구현</td><td>복식부기 엔진</td><td><strong>Backend Architect</strong> agent</td><td>"sum(debit)==sum(credit) 실패 시 즉시 중단"</td></tr>
+  <tr><td>재무상태표 생성</td><td><strong>Backend Architect</strong> agent</td><td>"당기순이익을 이익잉여금에 자동 반영 필수"</td></tr>
+  <tr><td>재무제표 UI</td><td><strong>Frontend Developer</strong> agent + <strong>UUPM</strong> (Executive)</td><td>"design-system/pages/statements.md 우선 참조"</td></tr>
+  <tr><td>Mercury API 연동</td><td><strong>Backend Architect</strong> agent</td><td>"Read-only 토큰만 사용, 쓰기 절대 금지"</td></tr>
+  <tr><td>Codef 샌드박스</td><td><strong>Backend Architect</strong> agent</td><td>"SANDBOX 환경에서만 테스트"</td></tr>
+  <tr><td>PDF/Excel Export</td><td><strong>Document Generator</strong> agent</td><td>"K-GAAP 양식 준수"</td></tr>
+  <tr><td rowspan="6">③검증</td><td>복식부기 적대적 검증</td><td><code>/codex</code></td><td>debit≠credit 케이스, 소수점 반올림, 경계값 공격</td></tr>
+  <tr><td>재무제표 규정 검증</td><td><strong>Compliance Auditor</strong> agent</td><td>K-GAAP/US GAAP 양식 준수 여부</td></tr>
+  <tr><td>API 보안 검토</td><td><strong>Security Engineer</strong> agent + <code>/careful</code></td><td>Mercury OAuth 토큰, Codef API 키 관리</td></tr>
+  <tr><td>성능 벤치마크</td><td><strong>Performance Benchmarker</strong> agent + <code>/benchmark</code></td><td>대량 거래 시 재무제표 생성 속도</td></tr>
+  <tr><td>QA + 디자인 리뷰</td><td><code>/qa</code> + <code>/design-review</code></td><td>재무제표 항등식 E2E, T계정 시각화 UX</td></tr>
+  <tr><td>코드 리뷰</td><td><strong>Code Reviewer</strong> agent + <code>/review</code></td><td>PR 머지 전 최종 리뷰</td></tr>
+  <tr><td>④배포</td><td>배포 + 카나리</td><td><code>/ship</code> → <code>/land-and-deploy</code> → <code>/canary</code></td><td>재무 데이터 정확도 프로덕션 확인</td></tr>
+  <tr><td rowspan="2">⑤회고</td><td>정확도 CEO 검증</td><td><code>/plan-ceo-review</code></td><td>±5% 정확도 목표 vs 회계법인 데이터 비교</td></tr>
+  <tr><td>회고 + 문서화</td><td><code>/retro</code> + <code>/document-release</code></td><td>Phase 2 회고, 복식부기 엔진 문서화</td></tr>
 </table>
 
-<h4>Phase 3 — 3개 법인 연결</h4>
+<h4>Phase 3 — 3개 법인 연결 (3~4일)</h4>
 <table>
-  <tr><th>작업</th><th>사용 Skill</th><th>CLAUDE.md 지시문</th></tr>
-  <tr><td>내부거래 감지 로직</td><td>없음 (직접 구현)</td><td>"is_intercompany=1 설정 시 counterparty_entity_id 필수"</td></tr>
-  <tr><td>연결재무제표</td><td>없음 (직접 구현)</td><td>"내부거래 상계 후 합산, 환율 평균환율 적용"</td></tr>
-  <tr><td>통합 대시보드 UI</td><td><strong>UUPM</strong></td><td>"법인 전환 시 데이터 완전 재로딩 필수"</td></tr>
+  <tr><th>단계</th><th>작업</th><th>Skill / Agent</th><th>지시문</th></tr>
+  <tr><td rowspan="2">①설계</td><td>연결 로직 아키텍처</td><td><strong>Software Architect</strong> agent + <code>/plan-eng-review</code></td><td>내부거래 상계, CTA 계산, 환율 처리 설계</td></tr>
+  <tr><td>연결 쿼리 최적화</td><td><strong>Database Optimizer</strong> agent</td><td>3법인 JOIN + 집계 성능 최적화</td></tr>
+  <tr><td rowspan="3">②구현</td><td>내부거래 감지</td><td><strong>Backend Architect</strong> agent</td><td>"is_intercompany=1 설정 시 counterparty_entity_id 필수"</td></tr>
+  <tr><td>연결재무제표</td><td><strong>Backend Architect</strong> agent</td><td>"내부거래 상계 후 합산, 환율 평균환율 적용"</td></tr>
+  <tr><td>통합 대시보드 UI</td><td><strong>Frontend Developer</strong> agent + <strong>UUPM</strong></td><td>"법인 전환 시 데이터 완전 재로딩 필수"</td></tr>
+  <tr><td rowspan="5">③검증</td><td>CTA 적대적 검증</td><td><code>/codex</code></td><td>자산/부채=기말환율, 손익=평균환율, 자본=역사적환율 검증</td></tr>
+  <tr><td>연결 규정 감사</td><td><strong>Compliance Auditor</strong> agent</td><td>US GAAP 연결 규칙, CTA 공시 요건</td></tr>
+  <tr><td>성능 벤치마크</td><td><strong>Performance Benchmarker</strong> agent + <code>/benchmark</code></td><td>3법인 연결 쿼리 성능</td></tr>
+  <tr><td>안전 모드 작업</td><td><code>/guard</code></td><td>프로덕션 데이터 보호 (파괴적 명령 경고 + 디렉토리 잠금)</td></tr>
+  <tr><td>QA + 리뷰</td><td><code>/qa</code> + <code>/review</code> + <code>/design-review</code></td><td>법인 전환, 연결 vs 개별 토글, 부분 데이터 케이스</td></tr>
+  <tr><td>④배포</td><td>배포 + 카나리</td><td><code>/ship</code> → <code>/land-and-deploy</code> → <code>/canary</code></td><td>3법인 데이터 프로덕션 확인</td></tr>
+  <tr><td rowspan="2">⑤회고</td><td>CEO 최종 검증</td><td><code>/plan-ceo-review</code></td><td>연결재무제표 CEO 리포팅 니즈 충족 확인</td></tr>
+  <tr><td>회고 + 문서화</td><td><code>/retro</code> + <code>/document-release</code></td><td>Phase 3 회고, CTA 로직 문서화</td></tr>
 </table>
 
-<h4>Phase 4 — Obsidian + NotebookLM 자동화</h4>
+<h4>Phase 4 — Obsidian + NotebookLM 자동화 (1~2일)</h4>
 <table>
-  <tr><th>작업</th><th>사용 Skill</th><th>방법</th></tr>
-  <tr><td>월별 재무 요약 노트 생성</td><td><strong>obsidian-markdown</strong></td><td>frontmatter, wikilinks, callouts 정확한 문법 적용</td></tr>
+  <tr><th>단계</th><th>작업</th><th>Skill / Agent</th><th>방법</th></tr>
+  <tr><td>①설계</td><td>자동화 파이프라인 설계</td><td><strong>Data Engineer</strong> agent + <code>/plan-eng-review</code></td><td>월간 데이터 추출 → 노트 생성 → NotebookLM 업로드 흐름</td></tr>
+  <tr><td rowspan="5">②구현</td><td>월별 재무 요약 노트</td><td><strong>obsidian-markdown</strong></td><td>frontmatter, wikilinks, callouts 정확한 문법 적용</td></tr>
   <tr><td>거래처 노트 자동 생성</td><td><strong>obsidian-markdown</strong></td><td>새 거래처 첫 등장 시 자동 생성 훅</td></tr>
-  <tr><td>Vault 검색 및 조회</td><td><strong>obsidian-cli</strong></td><td><code>obsidian search query="..."</code> 명령으로 컨텍스트 검색</td></tr>
+  <tr><td>Vault 검색</td><td><strong>obsidian-cli</strong></td><td><code>obsidian search query="..."</code> 컨텍스트 검색</td></tr>
   <tr><td>거래처 DB 관리</td><td><strong>obsidian-bases</strong></td><td>Bases 필터·정렬로 거래처 현황 관리</td></tr>
-  <tr><td>NotebookLM 파이프라인</td><td>없음 (notebooklm-py 직접)</td><td>scripts/monthly_briefing.py 실행</td></tr>
+  <tr><td>NotebookLM 파이프라인</td><td>notebooklm-py + <strong>Technical Writer</strong> agent</td><td>scripts/monthly_briefing.py 월간 리포트 템플릿 품질</td></tr>
+  <tr><td rowspan="2">③검증</td><td>데이터 정확성 QA</td><td><code>/qa</code></td><td>노트에 올바른 수치, 올바른 법인 확인</td></tr>
+  <tr><td>CEO 브리핑 검증</td><td><code>/plan-ceo-review</code></td><td>오디오 브리핑 형식/내용 CEO 니즈 충족</td></tr>
+  <tr><td>④배포</td><td>배포 + 문서화</td><td><code>/ship</code> + <code>/document-release</code></td><td>자동화 파이프라인 문서화</td></tr>
 </table>
 
-<h4>Phase 5 — n8n 자동화</h4>
+<h4>Phase 5 — n8n 자동화 & 알림 (1~2일)</h4>
 <table>
-  <tr><th>작업</th><th>사용 Skill</th><th>방법</th></tr>
-  <tr><td>n8n 워크플로우 설계</td><td><strong>n8n-skills</strong> (patterns, mcp-tools)</td><td>5가지 검증된 패턴 중 선택</td></tr>
-  <tr><td>스케줄러 설정</td><td><strong>n8n-skills</strong> (expression, node-config)</td><td>cron 표현식 정확한 문법 적용</td></tr>
+  <tr><th>단계</th><th>작업</th><th>Skill / Agent</th><th>방법</th></tr>
+  <tr><td>①설계</td><td>워크플로우 아키텍처</td><td><strong>n8n-skills</strong> (patterns) + <code>/plan-eng-review</code></td><td>5가지 검증된 패턴 중 선택</td></tr>
+  <tr><td rowspan="4">②구현</td><td>스케줄러 설정</td><td><strong>n8n-skills</strong> (expression, node-config)</td><td>cron 표현식 정확한 문법 적용</td></tr>
   <tr><td>Webhook 설정</td><td><strong>n8n-skills</strong> (workflow-patterns)</td><td>ExpenseOne → FinanceOne 연동</td></tr>
-  <tr><td>에러 처리</td><td><strong>n8n-skills</strong> (validation-expert)</td><td>실패 시 Slack 알림 자동화</td></tr>
+  <tr><td>에러 처리 + 알림</td><td><strong>n8n-skills</strong> (validation-expert)</td><td>실패 시 Slack 알림 자동화</td></tr>
+  <tr><td>인프라 관리</td><td><strong>DevOps Automator</strong> agent + <strong>SRE</strong> agent</td><td>n8n 인스턴스 관리, Railway 리소스, 업타임 모니터링</td></tr>
+  <tr><td rowspan="3">③검증</td><td>워크플로우 보안</td><td><strong>Security Engineer</strong> agent</td><td>Webhook 인증, Slack 토큰 보안</td></tr>
+  <tr><td>파이프라인 E2E 테스트</td><td><code>/qa</code></td><td>Codef 수집 → DB 저장 → Slack 알림 전체 흐름</td></tr>
+  <tr><td>장애 대응 런북</td><td><code>/investigate</code> + <strong>Technical Writer</strong> agent</td><td>자동화 파이프라인 실패 시 대응 절차 문서화</td></tr>
+  <tr><td>④배포</td><td>최종 배포</td><td><code>/ship</code> → <code>/land-and-deploy</code></td><td>프로덕션 자동화 워크플로우 활성화</td></tr>
+  <tr><td rowspan="3">⑤회고</td><td>워크플로우 모니터링</td><td><code>/loop</code> + <code>/canary</code></td><td>주기적 헬스체크</td></tr>
+  <tr><td>CEO 최종 워크스루</td><td><code>/plan-ceo-review</code></td><td>전체 시스템 완성도 검증</td></tr>
+  <tr><td>최종 회고 + 문서화</td><td><code>/retro</code> + <code>/document-release</code></td><td>프로젝트 전체 회고, 모든 문서 최종 동기화</td></tr>
+</table>
+
+<h3>Phase 공통 워크플로우</h3>
+
+<div class="callout callout-green">
+  <strong>모든 Phase에 적용되는 공통 순서</strong>
+</div>
+
+<table>
+  <tr><th>#</th><th>타이밍</th><th>Skill / Agent</th><th>목적</th></tr>
+  <tr><td>1</td><td>Phase 시작</td><td><strong>Software Architect</strong> agent + <code>/plan-eng-review</code></td><td>아키텍처 설계 + 리뷰</td></tr>
+  <tr><td>2</td><td>UI 작업 전</td><td><strong>UUPM</strong> 검색 + design-system/MASTER.md 확인</td><td>디자인 시스템 준수</td></tr>
+  <tr><td>3</td><td>구현 중</td><td><strong>Backend/Frontend/AI</strong> agent 병렬</td><td>독립적 작업 동시 진행</td></tr>
+  <tr><td>4</td><td>구현 완료</td><td><code>/qa</code> + <code>/design-review</code></td><td>기능 + UI 동시 검증</td></tr>
+  <tr><td>5</td><td>재무 로직</td><td><code>/codex</code></td><td>적대적 검증 (Phase 2, 3 필수)</td></tr>
+  <tr><td>6</td><td>PR 생성</td><td><code>/ship</code></td><td>테스트 → 리뷰 → VERSION → CHANGELOG → PR</td></tr>
+  <tr><td>7</td><td>PR 머지 전</td><td><strong>Code Reviewer</strong> agent + <code>/review</code></td><td>최종 코드 리뷰</td></tr>
+  <tr><td>8</td><td>배포</td><td><code>/land-and-deploy</code> → <code>/canary</code></td><td>머지 → 배포 → 헬스체크</td></tr>
+  <tr><td>9</td><td>Phase 완료</td><td><code>/retro</code> + <code>/document-release</code></td><td>회고 + 문서 동기화</td></tr>
+  <tr><td>10</td><td>Phase 완료</td><td><code>/plan-ceo-review</code></td><td>CEO 비즈니스 요구사항 충족 확인</td></tr>
 </table>
 
 <h3>CLAUDE.md에 추가할 Agent/Skill 규칙</h3>
 <pre>## Skills & Agents 사용 규칙
 
+### Phase 공통 워크플로우
+- Phase 시작: Software Architect agent + /plan-eng-review
+- 구현: Backend/Frontend/AI agent 병렬 실행
+- 검증: /qa + /design-review + /codex (재무 로직)
+- 배포: /ship → /land-and-deploy → /canary
+- 회고: /retro + /document-release + /plan-ceo-review
+
+### Agent 사용 규칙
+- 독립적 작업은 Agent 병렬 실행 (Backend + Frontend 동시)
+- 설계 단계에서 반드시 Software Architect 또는 Plan agent 호출
+- 재무 로직은 Compliance Auditor agent로 규정 검증
+- API 연동은 Security Engineer agent로 보안 검토 필수
+- 프로덕션 데이터 접근 시 /guard (careful + freeze) 활성화
+
 ### UI 작업 시 필수
 - 모든 새 화면 개발 전: design-system/MASTER.md 읽기
 - 화면별 override 확인: design-system/pages/[screen].md
 - UUPM Pre-Delivery Checklist 통과 후 커밋
+- UI 완료 시: Accessibility Auditor agent + /design-review
 
-### Obsidian 작업 시 필수
+### Obsidian 작업 시 필수 (Phase 4+)
 - obsidian-markdown skill 활성화 후 노트 생성
 - frontmatter 형식: date, tags, entity 포함 필수
 - wikilinks 문법: [[노트명]] (대괄호 2개)
 
-### n8n 작업 시 (Phase 4+)
+### n8n 작업 시 (Phase 5)
 - n8n-mcp MCP 서버 활성 상태 확인
 - n8n-skills 로드 후 워크플로우 설계
 - 프로덕션 워크플로우 직접 수정 절대 금지
