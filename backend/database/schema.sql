@@ -236,4 +236,48 @@ CREATE TABLE gaap_mapping (
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 15. slack_messages — Slack 경비 메시지
+CREATE TABLE slack_messages (
+  id                        SERIAL PRIMARY KEY,
+  entity_id                 INTEGER REFERENCES entities(id),
+  ts                        TEXT NOT NULL UNIQUE,
+  channel                   TEXT NOT NULL,
+  user_id                   TEXT,
+  text                      TEXT,
+  parsed_amount             NUMERIC(18,2),
+  parsed_amount_vat_included NUMERIC(18,2),
+  vat_flag                  TEXT,
+  project_tag               TEXT,
+  is_completed              BOOLEAN NOT NULL DEFAULT FALSE,
+  raw_json                  TEXT,
+  date_override             DATE,
+  is_cancelled              BOOLEAN NOT NULL DEFAULT FALSE,
+  deposit_completed_date    DATE,
+  reply_count               INTEGER NOT NULL DEFAULT 0,
+  thread_replies_json       TEXT,
+  created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_slack_ts ON slack_messages(ts);
+CREATE INDEX idx_slack_entity ON slack_messages(entity_id);
+
+-- 16. transaction_slack_match — 거래 ↔ Slack 매칭
+CREATE TABLE transaction_slack_match (
+  id                   SERIAL PRIMARY KEY,
+  transaction_id       INTEGER NOT NULL REFERENCES transactions(id),
+  slack_message_id     INTEGER NOT NULL REFERENCES slack_messages(id),
+  match_confidence     NUMERIC(3,2),
+  is_manual            BOOLEAN NOT NULL DEFAULT FALSE,
+  is_confirmed         BOOLEAN NOT NULL DEFAULT FALSE,
+  ai_reasoning         TEXT,
+  note                 TEXT,
+  amount_override      NUMERIC(18,2),
+  text_override        TEXT,
+  project_tag_override TEXT,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_match_tx ON transaction_slack_match(transaction_id);
+CREATE INDEX idx_match_slack ON transaction_slack_match(slack_message_id);
+
 COMMIT;

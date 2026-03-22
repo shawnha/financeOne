@@ -24,7 +24,7 @@
 - 스키마: backend/database/schema.sql
 - 연결: DATABASE_URL (Neon dev 브랜치 connection string)
 - 로컬 개발도 Neon dev 브랜치 사용 — SQLite 사용 금지
-- 14개 테이블 (13 + gaap_mapping)
+- 16개 테이블 (14 + gaap_mapping + slack_messages + transaction_slack_match)
 - 3개 법인 초기 데이터: seed.py 실행
 
 ## Stack

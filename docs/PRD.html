@@ -395,7 +395,7 @@ Codef.io (한국법인)        (차변 = 대변)          →  Excel / PDF Expor
 ExpenseOne (경비)      →
                         ↓
                        Neon DB
-                       (14개 테이블)
+                       (16개 테이블)
                         ↓
               Obsidian (패턴 축적)
                         ↓
@@ -434,7 +434,7 @@ ExpenseOne (경비)      →
   <tr><th>항목</th><th>결정</th><th>이유</th></tr>
   <tr><td>DB</td><td><strong>Neon PostgreSQL — 처음부터</strong></td><td>SQLite → PostgreSQL 마이그레이션 시 미묘한 차이(타입, datetime 등)로 버그 발생. Neon dev 브랜치로 로컬/prod 완전 분리. 비용 동일($0).</td></tr>
   <tr><td>API 연동 시점</td><td><strong>Excel 먼저 → Phase 2에서 병렬 비교</strong></td><td>API 결과와 Excel 결과를 나란히 검증 후 결정. 오차 ±1% 이내면 전환, 아니면 Excel 유지.</td></tr>
-  <tr><td>DB 스키마</td><td><strong>Day 1에 14개 테이블 전체 완성</strong></td><td>entity_id 나중에 추가하면 v1처럼 전체 개편 필요. 처음에 설계 완성, 기능은 Phase별 구현.</td></tr>
+  <tr><td>DB 스키마</td><td><strong>Day 1에 16개 테이블 전체 완성</strong></td><td>entity_id 나중에 추가하면 v1처럼 전체 개편 필요. 처음에 설계 완성, 기능은 Phase별 구현.</td></tr>
   <tr><td>UI 품질</td><td><strong>Phase 1부터 UUPM 적용</strong></td><td>161개 UX 규칙(접근성, 애니메이션 등) 자동 적용. Phase 3+에서 프리미엄 컴포넌트 부분 추가.</td></tr>
 </table>
 </section>
@@ -1019,6 +1019,49 @@ CREATE INDEX idx_mapping_pattern ON mapping_rules(counterparty_pattern);</pre>
 <span class="comment">-- 초기 매핑: Claude API가 US GAAP → K-GAAP 자동 제안 → CEO 검토 후 is_confirmed=1</span>
 <span class="comment">-- 이후 QuickBooks 데이터 가져올 때 자동 변환 적용</span>
 <span class="comment">-- 장기 목표: QuickBooks와 FinanceOne 재무제표 차이 0%로 수렴 → Mercury만으로 전환 가능</span></pre>
+
+<h3>15. slack_messages — Slack 경비 메시지</h3>
+<pre>CREATE TABLE slack_messages (
+  id                         SERIAL PRIMARY KEY,
+  entity_id                  INTEGER REFERENCES entities(id),
+  ts                         TEXT NOT NULL UNIQUE,           <span class="comment">-- Slack 타임스탬프 (메시지 고유 ID)</span>
+  channel                    TEXT NOT NULL,                  <span class="comment">-- 채널 ID</span>
+  user_id                    TEXT,                           <span class="comment">-- Slack 사용자 ID</span>
+  text                       TEXT,                           <span class="comment">-- 메시지 원문</span>
+  parsed_amount              NUMERIC(18,2),                  <span class="comment">-- 파싱된 금액</span>
+  parsed_amount_vat_included NUMERIC(18,2),                  <span class="comment">-- VAT 포함 금액</span>
+  vat_flag                   TEXT,                           <span class="comment">-- 'included','excluded','none'</span>
+  project_tag                TEXT,                           <span class="comment">-- [ODD], [HAK] 등</span>
+  is_completed               BOOLEAN NOT NULL DEFAULT FALSE,
+  raw_json                   TEXT,
+  date_override              DATE,                           <span class="comment">-- 메시지 본문 괄호 안 날짜</span>
+  is_cancelled               BOOLEAN NOT NULL DEFAULT FALSE, <span class="comment">-- 댓글에서 "취소" 감지</span>
+  deposit_completed_date     DATE,                           <span class="comment">-- "입금 완료" 댓글 날짜</span>
+  reply_count                INTEGER NOT NULL DEFAULT 0,     <span class="comment">-- Slack reply_count 캐시</span>
+  thread_replies_json        TEXT,                           <span class="comment">-- [{ts, user, text}] 댓글 원본</span>
+  created_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_slack_ts ON slack_messages(ts);
+CREATE INDEX idx_slack_entity ON slack_messages(entity_id);</pre>
+
+<h3>16. transaction_slack_match — 거래 ↔ Slack 매칭</h3>
+<pre>CREATE TABLE transaction_slack_match (
+  id                   SERIAL PRIMARY KEY,
+  transaction_id       INTEGER NOT NULL REFERENCES transactions(id),
+  slack_message_id     INTEGER NOT NULL REFERENCES slack_messages(id),
+  match_confidence     NUMERIC(3,2),                  <span class="comment">-- 매칭 신뢰도 0.0~1.0</span>
+  is_manual            BOOLEAN NOT NULL DEFAULT FALSE, <span class="comment">-- 수동 매칭 여부</span>
+  is_confirmed         BOOLEAN NOT NULL DEFAULT FALSE, <span class="comment">-- 사용자 확정 여부</span>
+  ai_reasoning         TEXT,                           <span class="comment">-- AI 판단 근거</span>
+  note                 TEXT,                           <span class="comment">-- 사용자 메모</span>
+  amount_override      NUMERIC(18,2),                  <span class="comment">-- 매칭별 금액 오버라이드</span>
+  text_override        TEXT,
+  project_tag_override TEXT,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_match_tx ON transaction_slack_match(transaction_id);
+CREATE INDEX idx_match_slack ON transaction_slack_match(slack_message_id);
+<span class="comment">-- 상세 설계: docs/slack-matching-engine.md 참조</span></pre>
 </section>
 
 <!-- LEARNING LOOP DETAIL -->
@@ -1173,7 +1216,7 @@ python3 .claude/skills/ui-ux-pro-max/scripts/search.py \
 <!-- DB ERD -->
 <section id="db-erd">
 <h2>DB 스키마 ERD</h2>
-<p>14개 테이블 전체 관계도. 색상 그룹별로 역할 구분: 파란색(법인/멤버), 보라색(계정과목), 빨간색(거래 핵심), 초록색(파일/설정), 노란색(재무/예측), 진보라색(재무제표), 주황색(AI 학습).</p>
+<p>16개 테이블 전체 관계도. 색상 그룹별로 역할 구분: 파란색(법인/멤버), 보라색(계정과목), 빨간색(거래 핵심), 초록색(파일/설정), 노란색(재무/예측), 진보라색(재무제표), 주황색(AI 학습).</p>
 
 <div style="background:var(--color-background-secondary); border:1px solid var(--color-border-tertiary); border-radius:12px; padding:8px; overflow-x:auto; margin:16px 0;">
 <svg width="100%" viewBox="0 0 1100 900" xmlns="http://www.w3.org/2000/svg" style="max-width:1100px; display:block; margin:0 auto;">
@@ -1250,7 +1293,7 @@ python3 .claude/skills/ui-ux-pro-max/scripts/search.py \
 <text x="631" y="875" font-size="11" fill="#475569" font-family="system-ui,sans-serif">AI 학습</text>
 <line x1="700" y1="870" x2="720" y2="870" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,2"/>
 <text x="728" y="875" font-size="11" fill="#475569" font-family="system-ui,sans-serif">🔗 = 외래키</text>
-<text x="900" y="875" font-size="11" fill="#94a3b8" font-family="system-ui,sans-serif">총 14개 테이블 · Neon PostgreSQL</text>
+<text x="900" y="875" font-size="11" fill="#94a3b8" font-family="system-ui,sans-serif">총 16개 테이블 · Neon PostgreSQL</text>
 </svg>
 </div>
 </section>
