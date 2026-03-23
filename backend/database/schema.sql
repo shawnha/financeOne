@@ -1,5 +1,5 @@
 -- FinanceOne v2 — DB Schema (Neon PostgreSQL)
--- 18개 테이블 (14 + slack_messages + transaction_slack_match + journal_entries + journal_entry_lines)
+-- 20개 테이블 (14 + slack + journal + intercompany_pairs + consolidation_adjustments)
 -- PRD SQLite 문법 → PostgreSQL 변환
 
 BEGIN;
