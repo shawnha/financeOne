@@ -1,5 +1,5 @@
 -- FinanceOne v2 — DB Schema (Neon PostgreSQL)
--- 16개 테이블 (14 + slack_messages + transaction_slack_match), 모든 테이블에 entity_id 포함 원칙
+-- 18개 테이블 (14 + slack_messages + transaction_slack_match + journal_entries + journal_entry_lines)
 -- PRD SQLite 문법 → PostgreSQL 변환
 
 BEGIN;
@@ -279,5 +279,40 @@ CREATE TABLE transaction_slack_match (
 
 CREATE INDEX idx_match_tx ON transaction_slack_match(transaction_id);
 CREATE INDEX idx_match_slack ON transaction_slack_match(slack_message_id);
+
+-- 17. journal_entries — 분개 헤더
+CREATE TABLE journal_entries (
+  id             SERIAL PRIMARY KEY,
+  entity_id      INTEGER NOT NULL REFERENCES entities(id),
+  transaction_id INTEGER REFERENCES transactions(id),
+  entry_date     DATE NOT NULL,
+  description    TEXT,
+  is_adjusting   BOOLEAN NOT NULL DEFAULT FALSE,
+  is_closing     BOOLEAN NOT NULL DEFAULT FALSE,
+  status         TEXT NOT NULL DEFAULT 'posted',
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_je_entity_date ON journal_entries(entity_id, entry_date);
+CREATE INDEX idx_je_transaction ON journal_entries(transaction_id);
+
+-- 18. journal_entry_lines — 분개 라인 (차변/대변)
+CREATE TABLE journal_entry_lines (
+  id                  SERIAL PRIMARY KEY,
+  journal_entry_id    INTEGER NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+  standard_account_id INTEGER NOT NULL REFERENCES standard_accounts(id),
+  debit_amount        NUMERIC(18,2) NOT NULL DEFAULT 0,
+  credit_amount       NUMERIC(18,2) NOT NULL DEFAULT 0,
+  description         TEXT,
+  sort_order          INTEGER NOT NULL DEFAULT 0,
+  CONSTRAINT chk_debit_or_credit CHECK (
+    (debit_amount > 0 AND credit_amount = 0) OR
+    (debit_amount = 0 AND credit_amount > 0)
+  )
+);
+
+CREATE INDEX idx_jel_entry ON journal_entry_lines(journal_entry_id);
+CREATE INDEX idx_jel_account ON journal_entry_lines(standard_account_id);
 
 COMMIT;
