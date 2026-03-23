@@ -322,14 +322,14 @@ function UploadZone({
           min-h-[280px]
           ${
             isDragging
-              ? "border-[#22C55E] bg-[rgba(34,197,94,0.05)]"
-              : "border-[#334155] bg-card hover:border-[#475569]"
+              ? "border-accent bg-accent/5"
+              : "border-border bg-card hover:border-muted-foreground/30"
           }
         `}
       >
         <Upload
           className={`h-12 w-12 ${
-            isDragging ? "text-[#22C55E]" : "text-muted-foreground"
+            isDragging ? "text-accent" : "text-muted-foreground"
           }`}
         />
         <div className="text-center">
@@ -368,7 +368,7 @@ function UploadZone({
           <CardContent className="p-4 space-y-3">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-2 min-w-0">
-                <FileSpreadsheet className="h-5 w-5 text-[#22C55E] shrink-0" />
+                <FileSpreadsheet className="h-5 w-5 text-accent shrink-0" />
                 <span className="text-sm font-medium truncate">{fs.file.name}</span>
                 {fs.result?.source_type && (
                   <SourceBadge source={fs.result.source_type} />
@@ -655,7 +655,7 @@ function UploadContent() {
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold">업로드</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">업로드</h1>
 
       {/* Upload Zone */}
       <UploadZone entityId={entityId} onUploadComplete={handleUploadComplete} />

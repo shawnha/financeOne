@@ -15,9 +15,9 @@ interface Entity {
 }
 
 const ENTITY_COLORS: Record<number, string> = {
-  1: "bg-blue-500",   // HOI
-  2: "bg-green-500",  // HOK
-  3: "bg-amber-500",  // HOR
+  1: "bg-[hsl(var(--entity-hoi))]",
+  2: "bg-[hsl(var(--entity-hok))]",
+  3: "bg-[hsl(var(--entity-hor))]",
 }
 
 function getEntityDotColor(entityId: number): string {
@@ -105,7 +105,7 @@ export function EntityTabs() {
             className={cn(
               "flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors",
               "min-h-[44px] rounded-t-md",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#22C55E]",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               activeId === entity.id
                 ? "border-b-2 border-[hsl(var(--accent))] text-[hsl(var(--accent))]"
                 : "text-muted-foreground hover:text-foreground hover:bg-secondary/50",

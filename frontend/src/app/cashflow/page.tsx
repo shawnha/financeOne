@@ -167,7 +167,7 @@ function CashFlowContent() {
     return (
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">현금흐름</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">현금흐름</h1>
           {periodSelector}
         </div>
         <Card className="bg-card rounded-xl p-8 shadow flex flex-col items-center justify-center text-center gap-4">
@@ -188,7 +188,7 @@ function CashFlowContent() {
     return (
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">현금흐름</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">현금흐름</h1>
           {periodSelector}
         </div>
         <Card className="bg-card rounded-xl p-12 shadow flex flex-col items-center justify-center text-center gap-4">
@@ -217,7 +217,7 @@ function CashFlowContent() {
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
-        <h1 className="text-2xl font-bold">현금흐름</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">현금흐름</h1>
         {periodSelector}
       </div>
 
@@ -235,17 +235,17 @@ function CashFlowContent() {
               >
                 <defs>
                   <linearGradient id="incomeGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#22C55E" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="#22C55E" stopOpacity={0} />
+                    <stop offset="5%" stopColor="hsl(var(--chart-1))" stopOpacity={0.2} />
+                    <stop offset="95%" stopColor="hsl(var(--chart-1))" stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="expenseGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#EF4444" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="#EF4444" stopOpacity={0} />
+                    <stop offset="5%" stopColor="hsl(var(--chart-2))" stopOpacity={0.2} />
+                    <stop offset="95%" stopColor="hsl(var(--chart-2))" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid
                   strokeDasharray="3 3"
-                  stroke="#334155"
+                  stroke="hsl(var(--border))"
                   vertical={false}
                 />
                 <XAxis
@@ -266,7 +266,7 @@ function CashFlowContent() {
                   type="monotone"
                   dataKey="income"
                   name="수입"
-                  stroke="#22C55E"
+                  stroke="hsl(var(--chart-1))"
                   fill="url(#incomeGrad)"
                   strokeWidth={2}
                   animationDuration={300}
@@ -276,7 +276,7 @@ function CashFlowContent() {
                   type="monotone"
                   dataKey="expense"
                   name="지출"
-                  stroke="#EF4444"
+                  stroke="hsl(var(--chart-2))"
                   fill="url(#expenseGrad)"
                   strokeWidth={2}
                   animationDuration={300}

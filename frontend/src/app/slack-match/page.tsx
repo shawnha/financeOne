@@ -642,7 +642,7 @@ function SlackMatchContent() {
   if (error) {
     return (
       <div className="p-6 space-y-6">
-        <h1 className="text-2xl font-bold">Slack 매칭</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Slack 매칭</h1>
         <Card className="bg-card rounded-xl p-8 shadow flex flex-col items-center justify-center text-center gap-4">
           <AlertCircle className="h-12 w-12 text-[hsl(var(--loss))]" />
           <p className="text-lg font-medium">
@@ -666,7 +666,7 @@ function SlackMatchContent() {
   if (messages.length === 0) {
     return (
       <div className="p-6 space-y-6">
-        <h1 className="text-2xl font-bold">Slack 매칭</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Slack 매칭</h1>
         <Card className="bg-card rounded-xl p-12 shadow flex flex-col items-center justify-center text-center gap-4">
           <MessageSquare className="h-12 w-12 text-muted-foreground" />
           <p className="text-lg font-medium">Slack 메시지가 없습니다</p>
@@ -684,7 +684,7 @@ function SlackMatchContent() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div>
-          <h1 className="text-2xl font-bold">Slack 매칭</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Slack 매칭</h1>
           <div className="flex items-center gap-3 mt-1 text-sm">
             <span>
               미확정{" "}
