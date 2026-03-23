@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { fetchAPI, APIError } from "@/lib/api"
-import { formatKRW } from "@/lib/format"
+import { formatKRW, formatByEntity } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { EntityTabs } from "@/components/entity-tabs"
 import { toast } from "sonner"
@@ -589,7 +589,7 @@ export default function TransactionsPage() {
                         tx.is_duplicate && "line-through",
                       )}>
                         {tx.type === "in" ? (
-                          <span className="text-green-400">{formatKRW(tx.amount)}</span>
+                          <span className="text-green-400">{formatByEntity(tx.amount, String(entityId ?? 1))}</span>
                         ) : null}
                       </TableCell>
 
@@ -599,7 +599,7 @@ export default function TransactionsPage() {
                         tx.is_duplicate && "line-through",
                       )}>
                         {tx.type === "out" ? (
-                          <span className="text-red-400">{formatKRW(tx.amount)}</span>
+                          <span className="text-red-400">{formatByEntity(tx.amount, String(entityId ?? 1))}</span>
                         ) : null}
                       </TableCell>
 
@@ -755,7 +755,7 @@ export default function TransactionsPage() {
                 <div>
                   <span className="text-muted-foreground">금액</span>
                   <p className={cn("font-medium font-mono", detailTx.type === "in" ? "text-green-400" : "text-red-400")}>
-                    {detailTx.type === "in" ? "+" : "-"}{formatKRW(detailTx.amount)}
+                    {detailTx.type === "in" ? "+" : "-"}{formatByEntity(detailTx.amount, String(entityId ?? 1))}
                   </p>
                 </div>
               </div>

@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { EntityTabs } from "@/components/entity-tabs"
 import { fetchAPI } from "@/lib/api"
-import { formatKRW, abbreviateAmount } from "@/lib/format"
+import { formatKRW, abbreviateAmount, formatByEntity } from "@/lib/format"
 import {
   Table,
   TableBody,
@@ -75,7 +75,7 @@ function ChartTooltipContent({
           className="font-mono tabular-nums"
           style={{ color: entry.color }}
         >
-          {entry.name}: {formatKRW(entry.value)}
+          {entry.name}: {formatByEntity(entry.value, entityId)}
         </p>
       ))}
     </div>
@@ -324,13 +324,13 @@ function CashFlowContent() {
                   >
                     <TableCell className="font-medium">{row.month}</TableCell>
                     <TableCell className="text-right font-mono tabular-nums">
-                      {formatKRW(row.opening_balance)}
+                      {formatByEntity(row.opening_balance, entityId)}
                     </TableCell>
                     <TableCell className="text-right font-mono tabular-nums text-[hsl(var(--profit))]">
-                      {formatKRW(row.income)}
+                      {formatByEntity(row.income, entityId)}
                     </TableCell>
                     <TableCell className="text-right font-mono tabular-nums text-[hsl(var(--loss))]">
-                      {formatKRW(row.expense)}
+                      {formatByEntity(row.expense, entityId)}
                     </TableCell>
                     <TableCell
                       className={`text-right font-mono tabular-nums ${
@@ -339,10 +339,10 @@ function CashFlowContent() {
                           : "text-[hsl(var(--loss))]"
                       }`}
                     >
-                      {formatKRW(row.net)}
+                      {formatByEntity(row.net, entityId)}
                     </TableCell>
                     <TableCell className="text-right font-mono tabular-nums">
-                      {formatKRW(row.closing_balance)}
+                      {formatByEntity(row.closing_balance, entityId)}
                     </TableCell>
                   </TableRow>
                 ))}

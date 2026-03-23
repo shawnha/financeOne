@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { EntityTabs } from "@/components/entity-tabs"
 import { fetchAPI } from "@/lib/api"
-import { formatKRW } from "@/lib/format"
+import { formatKRW, formatByEntity, getEntityCurrency } from "@/lib/format"
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip,
   ResponsiveContainer, CartesianGrid, Legend,
@@ -199,10 +199,12 @@ function ChartTooltipContent({
   active,
   payload,
   label,
+  entityId,
 }: {
   active?: boolean
   payload?: Array<{ value: number; name: string; color: string }>
   label?: string
+  entityId?: string | null
 }) {
   if (!active || !payload?.length) return null
   return (
@@ -210,7 +212,7 @@ function ChartTooltipContent({
       <p className="text-muted-foreground mb-1">{label}</p>
       {payload.map((entry) => (
         <p key={entry.name} className="font-mono tabular-nums" style={{ color: entry.color }}>
-          {entry.name}: {formatKRW(entry.value)}
+          {entry.name}: {formatByEntity(entry.value, entityId ?? null)}
         </p>
       ))}
     </div>
@@ -289,9 +291,9 @@ function DashboardContent() {
         <h1 className="text-2xl font-semibold tracking-tight">대시보드</h1>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <KPICard label="총잔고" value={formatKRW(0)} />
-          <KPICard label="이번달 수입" value={formatKRW(0)} />
-          <KPICard label="이번달 지출" value={formatKRW(0)} />
+          <KPICard label="총잔고" value={formatByEntity(0, entityId)} />
+          <KPICard label="이번달 수입" value={formatByEntity(0, entityId)} />
+          <KPICard label="이번달 지출" value={formatByEntity(0, entityId)} />
           <KPICard label="현금 런웨이" value="N/A" />
         </div>
 
@@ -326,16 +328,16 @@ function DashboardContent() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
           label="총잔고"
-          value={formatKRW(kpi.total_balance)}
+          value={formatByEntity(kpi.total_balance, entityId)}
         />
         <KPICard
           label="이번달 수입"
-          value={formatKRW(kpi.monthly_income)}
+          value={formatByEntity(kpi.monthly_income, entityId)}
           trend={kpi.income_change_pct}
         />
         <KPICard
           label="이번달 지출"
-          value={formatKRW(kpi.monthly_expense)}
+          value={formatByEntity(kpi.monthly_expense, entityId)}
           trend={kpi.expense_change_pct}
           invertColor
         />
@@ -376,7 +378,7 @@ function DashboardContent() {
                     tickLine={false}
                     tickFormatter={(v) => `${(v / 10000).toFixed(0)}만`}
                   />
-                  <RechartsTooltip content={<ChartTooltipContent />} />
+                  <RechartsTooltip content={<ChartTooltipContent entityId={entityId} />} />
                   <Legend
                     wrapperStyle={{ fontSize: 12, paddingTop: 8 }}
                   />
@@ -438,7 +440,7 @@ function DashboardContent() {
                       }`}
                     >
                       {tx.type === "in" ? "+" : "-"}
-                      {formatKRW(tx.amount)}
+                      {formatByEntity(tx.amount, entityId)}
                     </p>
                     <div className="flex gap-1 justify-end mt-1">
                       {tx.is_confirmed ? (
