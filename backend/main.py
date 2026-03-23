@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database.connection import init_pool, close_pool
-from backend.routers import entities, transactions, accounts, upload, dashboard, statements, slack
+from backend.routers import entities, transactions, accounts, upload, dashboard, statements, slack, journal_entries, integrations
 
 
 @asynccontextmanager
@@ -26,8 +26,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(","),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 app.include_router(entities.router)
@@ -37,6 +37,8 @@ app.include_router(upload.router)
 app.include_router(dashboard.router)
 app.include_router(statements.router)
 app.include_router(slack.router)
+app.include_router(journal_entries.router)
+app.include_router(integrations.router)
 
 
 @app.get("/health")

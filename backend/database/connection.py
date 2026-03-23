@@ -32,4 +32,8 @@ def get_db() -> Generator[PgConnection, None, None]:
     try:
         yield conn
     finally:
+        try:
+            conn.rollback()  # 미커밋 트랜잭션 정리
+        except Exception:
+            pass
         _pool.putconn(conn)
