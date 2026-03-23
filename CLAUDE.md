@@ -31,8 +31,9 @@
 - 스키마: backend/database/schema.sql
 - 연결: DATABASE_URL (Neon dev 브랜치 connection string)
 - 로컬 개발도 Neon dev 브랜치 사용 — SQLite 사용 금지
-- 16개 테이블 (14 + gaap_mapping + slack_messages + transaction_slack_match)
+- 18개 테이블 (14 + gaap_mapping + slack_messages + transaction_slack_match + journal_entries + journal_entry_lines)
 - 3개 법인 초기 데이터: seed.py 실행
+- Alembic 마이그레이션: `alembic upgrade head`
 
 ## Stack
 - Frontend: Next.js 14 App Router
@@ -43,7 +44,11 @@
 ## Directory
 - frontend/src/app: Next.js 페이지
 - backend/routers: FastAPI 라우터
-- backend/services: 비즈니스 로직 (bookkeeping_engine, mapping_service, slack/ 등)
+- backend/services: 비즈니스 로직 (bookkeeping_engine, statement_generator, export, mapping_service, slack/ 등)
+- backend/services/bookkeeping_engine.py: 복식부기 엔진 (분개 생성, 잔액 조회, 시산표 검증)
+- backend/services/statement_generator.py: 재무제표 5종 자동 생성
+- backend/services/export.py: 재무제표 Excel Export
+- backend/services/integrations/: Mercury API + Codef 샌드박스
 - backend/services/slack/: Slack 매칭 엔진 (v1 포팅, 상세: docs/slack-matching-engine.md)
 - scripts/: 월별 브리핑 등 자동화
 - design-system/: UI 디자인 시스템 (UUPM 생성)
