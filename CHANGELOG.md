@@ -4,6 +4,34 @@ All notable changes to FinanceOne will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-23 — Phase 2: 복식부기 엔진 + 재무제표
+
+### Added
+- **복식부기 엔진** — journal_entries + journal_entry_lines 테이블, sum(debit)==sum(credit) 강제 검증, 복합 분개(3줄+) 지원
+- **재무제표 5종 자동 생성** — 재무상태표(자산=부채+자본 검증), 손익계산서, 현금흐름표(직접법, 독립 기말잔고 검증), 합계잔액시산표, 결손금처리계산서
+- **거래 확정 → 자동 분개** — 거래 확정 시 동일 트랜잭션에서 분개 원자적 생성 (CLAUDE.md 원칙 #9)
+- **Mercury API 연동** — HOI USD 거래 read-only 동기화, 페이지네이션, 중복 감지
+- **Codef 샌드박스** — 우리은행/롯데카드/우리카드 거래 조회 (SANDBOX 전용)
+- **재무제표 UI** — /statements 페이지, 5탭 전환, 생성 버튼, 검증 배지(균형/불균형), 인쇄 지원
+- **설정 페이지** — /settings, Mercury/Codef 연결 테스트 UI
+- **Excel Export** — 재무제표 다운로드 (openpyxl, K-GAAP 양식)
+- **분개 API** — CRUD + 시산표 검증 + 벌크 생성 from-transactions
+- 24 new pytest cases (복식부기 14 + 재무제표 10) — 총 38 tests
+
+### Changed
+- DB: 16 → 18 테이블 (journal_entries, journal_entry_lines 추가)
+- Connection pool: 반환 시 rollback 추가 (stale transaction 방지)
+- transactions.py: 확정/벌크 확정 시 자동 분개 + journal_error/journal_skipped 응답
+- statements.py: fs.statement_type 참조 버그 수정 (스키마에 없는 컬럼)
+- CORS: allow_methods/allow_headers 명시적 제한
+- Sidebar: "재무제표" 메뉴 활성화
+
+### Fixed
+- statements.py fs.statement_type 참조 오류 (스키마에 없는 컬럼 제거)
+- cashflow/page.tsx 미사용 AreaChart import 제거
+- Codef 에러 메시지에 내부 정보 노출 방지
+- 분개 중복 생성 race condition (UNIQUE INDEX on transaction_id)
+
 ## [0.1.0] - 2026-03-23 — Phase 1: 현금흐름 대시보드
 
 ### Added
