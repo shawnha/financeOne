@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database.connection import init_pool, close_pool
-from backend.routers import entities, transactions, accounts, upload, dashboard, statements, slack, journal_entries, integrations, exchange_rates, intercompany
+from backend.routers import entities, transactions, accounts, upload, dashboard, statements, slack, journal_entries, integrations, exchange_rates, intercompany, notes
 
 
 @asynccontextmanager
@@ -41,6 +41,7 @@ app.include_router(journal_entries.router)
 app.include_router(integrations.router)
 app.include_router(exchange_rates.router)
 app.include_router(intercompany.router)
+app.include_router(notes.router)
 
 
 @app.get("/health")
