@@ -129,32 +129,30 @@ export function EntityTabs() {
           </button>
         ))}
 
-        {/* Consolidated tab - disabled for Phase 3 */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              role="tab"
-              aria-selected={false}
-              aria-disabled="true"
-              tabIndex={-1}
-              disabled
-              className={cn(
-                "flex items-center gap-2 px-4 py-2.5 text-sm font-medium",
-                "min-h-[44px] rounded-t-md",
-                "text-muted-foreground/50 cursor-not-allowed",
-              )}
-            >
-              <span
-                className="inline-block h-2 w-2 rounded-full bg-gray-500"
-                aria-hidden="true"
-              />
-              <span>연결</span>
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            <p>Phase 3에서 활성화</p>
-          </TooltipContent>
-        </Tooltip>
+        {/* Consolidated tab */}
+        <button
+          role="tab"
+          aria-selected={selectedEntity === "consolidated"}
+          onClick={() => {
+            const params = new URLSearchParams(searchParams.toString())
+            params.set("entity", "consolidated")
+            router.push(`${pathname}?${params.toString()}`)
+          }}
+          className={cn(
+            "flex items-center gap-2 px-4 py-2.5 text-sm font-medium",
+            "min-h-[44px] rounded-t-md transition-colors cursor-pointer",
+            selectedEntity === "consolidated"
+              ? "text-foreground border-b-2 border-[#8B5CF6] bg-secondary/50"
+              : "text-muted-foreground hover:text-foreground hover:bg-secondary/30",
+          )}
+        >
+          <span
+            className="inline-block h-2 w-2 rounded-full bg-[#8B5CF6]"
+            aria-hidden="true"
+          />
+          <span>연결</span>
+          <span className="text-xs text-muted-foreground">(USD)</span>
+        </button>
       </div>
     </TooltipProvider>
   )
