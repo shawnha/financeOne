@@ -17,6 +17,8 @@ import {
   BookOpen,
   Menu,
   X,
+  ArrowLeftRight,
+  DollarSign,
 } from "lucide-react"
 
 const sections = [
@@ -35,6 +37,8 @@ const sections = [
       { label: "거래내역", icon: CreditCard, href: "/transactions", enabled: true },
       { label: "업로드", icon: Upload, href: "/upload", enabled: true },
       { label: "Slack 매칭", icon: MessageSquare, href: "/slack-match", enabled: true },
+      { label: "법인간 거래", icon: ArrowLeftRight, href: "/intercompany", enabled: true },
+      { label: "환율 관리", icon: DollarSign, href: "/exchange-rates", enabled: true },
     ],
   },
   {

@@ -31,7 +31,7 @@
 - 스키마: backend/database/schema.sql
 - 연결: DATABASE_URL (Neon dev 브랜치 connection string)
 - 로컬 개발도 Neon dev 브랜치 사용 — SQLite 사용 금지
-- 18개 테이블 (14 + gaap_mapping + slack_messages + transaction_slack_match + journal_entries + journal_entry_lines)
+- 20개 테이블 (14 + slack + journal + intercompany_pairs + consolidation_adjustments)
 - 3개 법인 초기 데이터: seed.py 실행
 - Alembic 마이그레이션: `alembic upgrade head`
 
@@ -49,6 +49,10 @@
 - backend/services/statement_generator.py: 재무제표 5종 자동 생성
 - backend/services/export.py: 재무제표 Excel Export
 - backend/services/integrations/: Mercury API + Codef 샌드박스
+- backend/services/cta_service.py: CTA 환산차이 계산 (KRW→USD)
+- backend/services/exchange_rate_service.py: 환율 조회 (기말/평균/역사적)
+- backend/services/gaap_conversion_service.py: K-GAAP → US GAAP 변환
+- backend/services/intercompany_service.py: 내부거래 감지 + 상계
 - backend/services/slack/: Slack 매칭 엔진 (v1 포팅, 상세: docs/slack-matching-engine.md)
 - scripts/: 월별 브리핑 등 자동화
 - design-system/: UI 디자인 시스템 (UUPM 생성)

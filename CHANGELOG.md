@@ -4,6 +4,27 @@ All notable changes to FinanceOne will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-23 — Phase 3: 3개 법인 연결재무제표
+
+### Added
+- **연결재무제표** — US GAAP 기준, USD 통화, 3법인 합산 + 내부거래 상계 + CTA
+- **CTA 엔진** — 자산/부채=기말환율, 수익/비용=평균환율, 자본=역사적환율, 차이→AOCI(30400)
+- **환율 서비스** — 기말/평균/역사적 환율 조회, 공휴일 직전 영업일 fallback (7일 이내)
+- **GAAP 변환** — K-GAAP → US GAAP 코드 매핑 (gaap_mapping 테이블 활용)
+- **내부거래 감지** — 자동 매칭 (금액+날짜±1일+반대타입) + 수동 확인 + 상계
+- **환율 관리 API** — CRUD + closing/average 환율 조회 엔드포인트
+- **내부거래 API** — detect/pairs/confirm/reject 엔드포인트
+- **연결 탭** — EntityTabs "연결" 활성화 (보라색, entity=consolidated, USD 포맷)
+- **사이드바** — "법인간 거래" + "환율 관리" 메뉴 추가
+- **감사 추적** — consolidation_adjustments 테이블 (CTA, 상계, GAAP 변환 기록)
+- 16 new pytest cases (환율 8 + 내부거래 2 + CTA/GAAP 6) — 총 54 tests
+
+### Changed
+- DB: 18 → 20 테이블 (intercompany_pairs, consolidation_adjustments)
+- financial_statements: base_currency 컬럼 추가
+- statement_generator: generate_consolidated_statements 함수 추가
+- statements 라우터: POST /generate-consolidated 엔드포인트
+
 ## [0.2.0] - 2026-03-23 — Phase 2: 복식부기 엔진 + 재무제표
 
 ### Added
