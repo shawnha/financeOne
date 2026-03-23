@@ -170,7 +170,7 @@ function CashFlowContent() {
           <h1 className="text-2xl font-semibold tracking-tight">현금흐름</h1>
           {periodSelector}
         </div>
-        <Card className="bg-card rounded-xl p-8 shadow flex flex-col items-center justify-center text-center gap-4">
+        <Card className="p-8 flex flex-col items-center justify-center text-center gap-4">
           <AlertCircle className="h-12 w-12 text-[hsl(var(--loss))]" />
           <p className="text-lg font-medium">데이터를 불러올 수 없습니다.</p>
           <p className="text-sm text-muted-foreground">{errorMessage}</p>
@@ -191,7 +191,7 @@ function CashFlowContent() {
           <h1 className="text-2xl font-semibold tracking-tight">현금흐름</h1>
           {periodSelector}
         </div>
-        <Card className="bg-card rounded-xl p-12 shadow flex flex-col items-center justify-center text-center gap-4">
+        <Card className="p-12 flex flex-col items-center justify-center text-center gap-4">
           <Upload className="h-12 w-12 text-muted-foreground" />
           <p className="text-lg font-medium">현금흐름 데이터가 없습니다</p>
           <p className="text-sm text-muted-foreground">
@@ -222,7 +222,7 @@ function CashFlowContent() {
       </div>
 
       {/* Area Chart */}
-      <Card className="bg-card rounded-xl p-6 shadow">
+      <Card className="p-6">
         <CardHeader className="p-0 pb-4">
           <CardTitle className="text-base">수입 / 지출 추이</CardTitle>
         </CardHeader>
@@ -299,7 +299,7 @@ function CashFlowContent() {
       </Card>
 
       {/* Monthly Breakdown Table */}
-      <Card className="bg-card rounded-xl shadow overflow-hidden">
+      <Card className="overflow-hidden">
         <CardHeader className="p-6 pb-0">
           <CardTitle className="text-base">월별 상세</CardTitle>
         </CardHeader>

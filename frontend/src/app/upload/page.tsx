@@ -364,7 +364,7 @@ function UploadZone({
 
       {/* File Upload Results */}
       {fileStates.map((fs, index) => (
-        <Card key={`${fs.file.name}-${index}`} className="bg-card rounded-xl shadow">
+        <Card key={`${fs.file.name}-${index}`} className="">
           <CardContent className="p-4 space-y-3">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-2 min-w-0">
@@ -663,7 +663,7 @@ function UploadContent() {
       {/* Upload History */}
       <div>
         <h2 className="text-lg font-semibold mb-4">업로드 이력</h2>
-        <Card className="bg-card rounded-xl shadow">
+        <Card className="">
           <CardContent className="p-0">
             <UploadHistory entityId={entityId} />
           </CardContent>
