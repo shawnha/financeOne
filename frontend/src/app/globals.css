@@ -2,57 +2,63 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600;700&display=swap');
 
 @layer base {
-  /* Dark-mode-first: :root IS the dark theme (OLED) */
   :root {
-    /* MASTER.md: Dark OLED palette */
-    --background: 222 47% 4%;        /* #020617 */
-    --foreground: 210 40% 98%;       /* #F8FAFC */
+    /* Ethereal Glass — Deep OLED */
+    --background: 240 10% 2%;           /* #050508 */
+    --foreground: 210 40% 98%;          /* #F8FAFC */
 
-    --card: 217 33% 17%;             /* #1E293B */
-    --card-foreground: 210 40% 98%;  /* #F8FAFC */
+    --card: 220 13% 7%;                 /* #0d1117 */
+    --card-foreground: 210 40% 98%;
 
-    --popover: 217 33% 17%;          /* #1E293B */
+    --popover: 220 13% 7%;
     --popover-foreground: 210 40% 98%;
 
-    --primary: 222 47% 11%;          /* #0F172A */
+    --primary: 220 13% 5%;              /* #0a0d12 */
     --primary-foreground: 210 40% 98%;
 
-    --secondary: 217 33% 17%;        /* #1E293B */
+    --secondary: 220 13% 10%;           /* #161b22 */
     --secondary-foreground: 210 40% 98%;
 
-    --muted: 217 33% 17%;            /* #1E293B */
-    --muted-foreground: 220 9% 46%;  /* #6B7280 */
+    --muted: 220 13% 10%;
+    --muted-foreground: 220 9% 50%;     /* #7c8290 */
 
-    --accent: 142 71% 45%;           /* #22C55E — CTA green */
+    --accent: 142 71% 45%;             /* #22C55E — single accent */
     --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 84% 60%;        /* #EF4444 — loss/expense */
+    --destructive: 0 84% 60%;          /* #EF4444 */
     --destructive-foreground: 0 0% 100%;
 
-    --border: 217 19% 27%;           /* #334155 */
-    --input: 217 19% 27%;            /* #334155 */
-    --ring: 142 71% 45%;             /* #22C55E — focus ring = CTA */
+    --border: 220 10% 14%;             /* rgba(255,255,255,0.06) equivalent */
+    --input: 220 10% 14%;
+    --ring: 142 71% 45%;
 
-    --radius: 0.75rem;               /* 12px — MASTER.md card-radius */
+    --radius: 1.25rem;                  /* 20px — outer bezel */
+    --radius-inner: calc(var(--radius) - 0.375rem); /* 14px — inner core */
 
-    /* MASTER.md: Semantic Financial Colors */
-    --profit: 142 71% 45%;           /* #22C55E */
-    --loss: 0 84% 60%;               /* #EF4444 */
-    --warning: 38 92% 50%;           /* #F59E0B */
-    --ai-accent: 239 84% 67%;        /* #6366F1 */
-    --neutral: 220 9% 46%;           /* #6B7280 */
+    /* Financial Colors */
+    --profit: 142 71% 45%;
+    --loss: 0 84% 60%;
+    --warning: 38 92% 50%;
+    --ai-accent: 239 84% 67%;
+    --neutral: 220 9% 50%;
 
-    /* MASTER.md: Chart Colors */
-    --chart-1: 142 71% 45%;          /* #22C55E — profit */
-    --chart-2: 0 84% 60%;            /* #EF4444 — loss */
-    --chart-3: 217 91% 60%;          /* #3B82F6 — series 1 */
-    --chart-4: 258 90% 66%;          /* #8B5CF6 — series 2 */
-    --chart-5: 38 92% 50%;           /* #F59E0B — series 3 */
+    /* Chart Colors */
+    --chart-1: 142 71% 45%;
+    --chart-2: 0 84% 60%;
+    --chart-3: 217 91% 60%;
+    --chart-4: 258 90% 66%;
+    --chart-5: 38 92% 50%;
 
-    /* MASTER.md: Spacing */
+    /* Entity Colors */
+    --entity-hoi: 217 91% 60%;         /* blue */
+    --entity-hok: 142 71% 45%;         /* green */
+    --entity-hor: 38 92% 50%;          /* amber */
+    --entity-consolidated: 258 90% 66%; /* purple */
+
+    /* Spacing */
     --space-xs: 4px;
     --space-sm: 8px;
     --space-md: 16px;
@@ -60,19 +66,30 @@
     --space-xl: 32px;
     --space-2xl: 48px;
 
-    /* MASTER.md: Shadows (dark bg) */
-    --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
-    --shadow-md: 0 4px 6px rgba(0,0,0,0.4);
-    --shadow-lg: 0 10px 15px rgba(0,0,0,0.4);
+    /* Tinted Shadows (not pure black) */
+    --shadow-sm: 0 1px 2px rgba(0,0,10,0.4);
+    --shadow-md: 0 4px 12px rgba(0,0,10,0.5);
+    --shadow-lg: 0 12px 32px rgba(0,0,10,0.6);
+    --shadow-glow: 0 0 24px rgba(34,197,94,0.08);
 
-    /* MASTER.md: Layout */
-    --sidebar-width: 280px;
+    /* Glass */
+    --glass-bg: rgba(255,255,255,0.03);
+    --glass-border: rgba(255,255,255,0.06);
+    --glass-border-hover: rgba(255,255,255,0.12);
+    --glass-inset: inset 0 1px 1px rgba(255,255,255,0.06);
+
+    /* Layout */
+    --sidebar-width: 260px;
     --sidebar-collapsed: 68px;
     --header-height: 56px;
     --table-row-height: 36px;
-    --kpi-font-size: 48px;
-    --sparkline-height: 32px;
     --grid-gap: 16px;
+
+    /* Motion */
+    --ease-premium: cubic-bezier(0.32, 0.72, 0, 1);
+    --duration-fast: 200ms;
+    --duration-normal: 300ms;
+    --duration-slow: 500ms;
   }
 }
 
@@ -83,9 +100,44 @@
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
-  /* MASTER.md: tabular-nums for financial data */
+
+  /* Typography */
+  h1, h2, h3, h4 {
+    text-wrap: balance;
+  }
+
+  /* Tabular figures for financial data */
   .tabular-nums {
     font-variant-numeric: tabular-nums;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.08);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255,255,255,0.15);
+  }
+
+  /* Grain overlay (fixed, pointer-events-none) */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    pointer-events: none;
+    opacity: 0.015;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
   }
 }

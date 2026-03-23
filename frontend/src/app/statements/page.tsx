@@ -134,7 +134,7 @@ function StatementsContent() {
     } finally {
       setGenerating(false)
     }
-  }, [entityId, year])
+  }, [entityId, year, isConsolidated])
 
   const effectiveTab = isConsolidated ? "consolidated_balance_sheet" : activeTab
   const filteredItems = statementData?.line_items.filter(
@@ -431,7 +431,7 @@ export default function StatementsPage() {
       </Suspense>
 
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-foreground">재무제표</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">재무제표</h1>
       </div>
 
       <Suspense fallback={<StatementsSkeleton />}>

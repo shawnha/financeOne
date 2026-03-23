@@ -98,7 +98,7 @@ function TrendIndicator({
 
 function KPISkeleton() {
   return (
-    <Card className="bg-card rounded-xl p-6 shadow">
+    <Card className="p-6">
       <Skeleton className="h-3 w-20 mb-3" />
       <Skeleton className="h-8 w-36 mb-2" />
       <Skeleton className="h-3 w-16" />
@@ -108,7 +108,7 @@ function KPISkeleton() {
 
 function ChartSkeleton() {
   return (
-    <Card className="bg-card rounded-xl p-6 shadow col-span-1 lg:col-span-2">
+    <Card className="p-6 col-span-1 lg:col-span-2">
       <Skeleton className="h-5 w-24 mb-4" />
       <Skeleton className="h-[300px] w-full rounded-lg" />
     </Card>
@@ -117,7 +117,7 @@ function ChartSkeleton() {
 
 function TransactionListSkeleton() {
   return (
-    <Card className="bg-card rounded-xl p-6 shadow">
+    <Card className="p-6">
       <Skeleton className="h-5 w-24 mb-4" />
       <div className="space-y-3">
         {Array.from({ length: 6 }).map((_, i) => (
@@ -136,7 +136,7 @@ function TransactionListSkeleton() {
 
 function QuickActionsSkeleton() {
   return (
-    <Card className="bg-card rounded-xl p-6 shadow">
+    <Card className="p-6">
       <Skeleton className="h-5 w-24 mb-4" />
       <div className="space-y-3">
         {Array.from({ length: 3 }).map((_, i) => (
@@ -179,9 +179,9 @@ function KPICard({
   invertColor?: boolean
 }) {
   return (
-    <Card className="bg-card rounded-xl p-6 shadow" data-testid="kpi-card">
+    <Card className="p-6" data-testid="kpi-card">
       <p className="text-xs text-muted-foreground mb-1">{label}</p>
-      <p className="text-[28px] font-mono font-bold tabular-nums leading-tight">
+      <p className="text-[32px] font-mono font-semibold tabular-nums leading-none tracking-tight">
         {value}
       </p>
       {trend !== undefined && (
@@ -268,8 +268,8 @@ function DashboardContent() {
   if (state === "error") {
     return (
       <div className="p-6">
-        <h1 className="text-2xl font-bold mb-6">대시보드</h1>
-        <Card className="bg-card rounded-xl p-8 shadow flex flex-col items-center justify-center text-center gap-4">
+        <h1 className="text-2xl font-semibold tracking-tight mb-6">대시보드</h1>
+        <Card className="p-8 flex flex-col items-center justify-center text-center gap-4">
           <AlertCircle className="h-12 w-12 text-[hsl(var(--loss))]" />
           <p className="text-lg font-medium">데이터를 불러올 수 없습니다.</p>
           <p className="text-sm text-muted-foreground">{errorMessage}</p>
@@ -286,7 +286,7 @@ function DashboardContent() {
   if (state === "empty") {
     return (
       <div className="p-6 space-y-6">
-        <h1 className="text-2xl font-bold">대시보드</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">대시보드</h1>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <KPICard label="총잔고" value={formatKRW(0)} />
@@ -295,7 +295,7 @@ function DashboardContent() {
           <KPICard label="현금 런웨이" value="N/A" />
         </div>
 
-        <Card className="bg-card rounded-xl p-12 shadow flex flex-col items-center justify-center text-center gap-4">
+        <Card className="p-12 flex flex-col items-center justify-center text-center gap-4">
           <Upload className="h-12 w-12 text-muted-foreground" />
           <p className="text-lg font-medium">첫 거래 데이터를 업로드해보세요</p>
           <p className="text-sm text-muted-foreground">
@@ -320,7 +320,7 @@ function DashboardContent() {
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold">대시보드</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">대시보드</h1>
 
       {/* KPI Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -348,7 +348,7 @@ function DashboardContent() {
       {/* Bento Grid: Chart (2col) + Recent (1col) + Quick Actions (1col) */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* Cash Flow Chart */}
-        <Card className="bg-card rounded-xl p-6 shadow col-span-1 lg:col-span-2">
+        <Card className="p-6 col-span-1 lg:col-span-2">
           <CardHeader className="p-0 pb-4">
             <CardTitle className="text-base">현금흐름</CardTitle>
           </CardHeader>
@@ -361,17 +361,17 @@ function DashboardContent() {
                 >
                   <CartesianGrid
                     strokeDasharray="3 3"
-                    stroke="#334155"
+                    stroke="hsl(var(--border))"
                     vertical={false}
                   />
                   <XAxis
                     dataKey="month"
-                    tick={{ fill: "hsl(220, 9%, 46%)", fontSize: 12 }}
-                    axisLine={{ stroke: "#334155" }}
+                    tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+                    axisLine={{ stroke: "hsl(var(--border))" }}
                     tickLine={false}
                   />
                   <YAxis
-                    tick={{ fill: "hsl(220, 9%, 46%)", fontSize: 12 }}
+                    tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
                     axisLine={false}
                     tickLine={false}
                     tickFormatter={(v) => `${(v / 10000).toFixed(0)}만`}
@@ -383,7 +383,7 @@ function DashboardContent() {
                   <Bar
                     dataKey="income"
                     name="수입"
-                    fill="#22C55E"
+                    fill="hsl(var(--chart-1))"
                     radius={[4, 4, 0, 0]}
                     animationDuration={300}
                     animationEasing="ease-out"
@@ -391,7 +391,7 @@ function DashboardContent() {
                   <Bar
                     dataKey="expense"
                     name="지출"
-                    fill="#EF4444"
+                    fill="hsl(var(--chart-2))"
                     radius={[4, 4, 0, 0]}
                     animationDuration={300}
                     animationEasing="ease-out"
@@ -412,7 +412,7 @@ function DashboardContent() {
         </Card>
 
         {/* Recent Transactions */}
-        <Card className="bg-card rounded-xl p-6 shadow">
+        <Card className="p-6">
           <CardHeader className="p-0 pb-4">
             <CardTitle className="text-base">최근 거래</CardTitle>
           </CardHeader>
@@ -479,7 +479,7 @@ function DashboardContent() {
         </Card>
 
         {/* Quick Actions */}
-        <Card className="bg-card rounded-xl p-6 shadow">
+        <Card className="p-6">
           <CardHeader className="p-0 pb-4">
             <CardTitle className="text-base">빠른 실행</CardTitle>
           </CardHeader>

@@ -166,7 +166,7 @@ export default function SettingsPage() {
 
       <div className="flex items-center gap-2">
         <Settings className="h-6 w-6 text-muted-foreground" />
-        <h1 className="text-2xl font-bold text-foreground">설정</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">설정</h1>
       </div>
 
       <Suspense fallback={<Skeleton className="h-40 w-full" />}>

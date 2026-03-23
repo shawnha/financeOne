@@ -57,10 +57,10 @@ const sections = [
   },
 ]
 
-const ENTITY_NAMES: Record<string, { name: string; color: string }> = {
-  "1": { name: "한아원인터내셔널", color: "bg-blue-500" },
-  "2": { name: "한아원코리아", color: "bg-green-500" },
-  "3": { name: "한아원리테일", color: "bg-amber-500" },
+const ENTITY_NAMES: Record<string, { name: string; colorVar: string }> = {
+  "1": { name: "한아원인터내셔널", colorVar: "var(--entity-hoi)" },
+  "2": { name: "한아원코리아", colorVar: "var(--entity-hok)" },
+  "3": { name: "한아원리테일", colorVar: "var(--entity-hor)" },
 }
 
 function isActive(pathname: string, href: string): boolean {
@@ -75,12 +75,10 @@ export function Sidebar() {
   const entityId = searchParams.get("entity") || "1"
   const entityInfo = ENTITY_NAMES[entityId] || ENTITY_NAMES["1"]
 
-  // Close mobile sidebar on route change
   useEffect(() => {
     setMobileOpen(false)
   }, [pathname])
 
-  // Close on Escape
   useEffect(() => {
     if (!mobileOpen) return
     const handleKey = (e: KeyboardEvent) => {
@@ -90,16 +88,13 @@ export function Sidebar() {
     return () => document.removeEventListener("keydown", handleKey)
   }, [mobileOpen])
 
-  // Prevent body scroll when mobile sidebar is open
   useEffect(() => {
     if (mobileOpen) {
       document.body.style.overflow = "hidden"
     } else {
       document.body.style.overflow = ""
     }
-    return () => {
-      document.body.style.overflow = ""
-    }
+    return () => { document.body.style.overflow = "" }
   }, [mobileOpen])
 
   const buildHref = useCallback(
@@ -114,15 +109,20 @@ export function Sidebar() {
   const sidebarContent = (
     <>
       {/* Logo */}
-      <div className="p-6">
-        <div className="text-xl font-bold text-foreground">FinanceOne</div>
+      <div className="p-6 pb-4">
+        <div className="text-lg font-semibold tracking-tight text-foreground">
+          FinanceOne
+        </div>
+        <div className="text-[10px] font-mono text-muted-foreground/60 mt-0.5">
+          v0.3.0
+        </div>
       </div>
 
       {/* Navigation */}
       <nav className="flex-1 px-3 overflow-y-auto" aria-label="Main navigation">
         {sections.map((section) => (
           <div key={section.label}>
-            <p className="mt-6 mb-2 px-3 text-[10px] uppercase tracking-[1.5px] text-muted-foreground select-none">
+            <p className="mt-6 mb-2 px-3 text-[10px] uppercase tracking-[0.15em] font-medium text-muted-foreground/60 select-none">
               {section.label}
             </p>
             <ul className="space-y-0.5">
@@ -135,13 +135,10 @@ export function Sidebar() {
                   return (
                     <li key={item.href}>
                       <span
-                        className={cn(
-                          "flex items-center gap-3 rounded-md px-3 h-10 text-sm",
-                          "text-muted-foreground/50 cursor-not-allowed select-none",
-                        )}
+                        className="flex items-center gap-3 rounded-lg px-3 h-10 text-sm text-muted-foreground/30 cursor-not-allowed select-none"
                         aria-disabled="true"
                       >
-                        <Icon className="h-5 w-5 shrink-0" />
+                        <Icon className="h-4 w-4 shrink-0" />
                         {item.label}
                       </span>
                     </li>
@@ -154,14 +151,15 @@ export function Sidebar() {
                       href={buildHref(item.href)}
                       aria-current={active ? "page" : undefined}
                       className={cn(
-                        "flex items-center gap-3 rounded-md px-3 h-10 text-sm transition-colors",
-                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#22C55E]",
+                        "flex items-center gap-3 rounded-lg px-3 h-10 text-sm",
+                        "transition-all duration-300 ease-[var(--ease-premium)]",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                         active
-                          ? "border-l-[3px] border-[hsl(var(--accent))] text-[hsl(var(--accent))] bg-secondary"
-                          : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+                          ? "bg-white/[0.06] text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
+                          : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground",
                       )}
                     >
-                      <Icon className="h-5 w-5 shrink-0" />
+                      <Icon className={cn("h-4 w-4 shrink-0", active && "text-accent")} />
                       {item.label}
                     </Link>
                   </li>
@@ -172,14 +170,15 @@ export function Sidebar() {
         ))}
       </nav>
 
-      {/* Entity indicator at bottom */}
-      <div className="border-t border-border p-4">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      {/* Entity indicator */}
+      <div className="border-t border-white/[0.04] p-4">
+        <div className="flex items-center gap-2.5 text-sm text-muted-foreground">
           <span
-            className={cn("inline-block h-2 w-2 rounded-full shrink-0", entityInfo.color)}
+            className="inline-block h-2 w-2 rounded-full shrink-0"
+            style={{ backgroundColor: `hsl(${entityInfo.colorVar})` }}
             aria-hidden="true"
           />
-          <span className="truncate">{entityInfo.name}</span>
+          <span className="truncate text-xs">{entityInfo.name}</span>
         </div>
       </div>
     </>
@@ -193,20 +192,22 @@ export function Sidebar() {
         onClick={() => setMobileOpen(true)}
         className={cn(
           "fixed top-3 left-3 z-50 md:hidden",
-          "flex items-center justify-center h-11 w-11 rounded-md",
-          "bg-primary text-foreground",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#22C55E]",
+          "flex items-center justify-center h-11 w-11 rounded-lg",
+          "bg-card/80 backdrop-blur-xl text-foreground border border-white/[0.06]",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         )}
         aria-label="메뉴 열기"
       >
         <Menu className="h-5 w-5" />
       </button>
 
-      {/* Desktop sidebar */}
+      {/* Desktop sidebar — glassmorphism */}
       <aside
         className={cn(
           "hidden md:flex md:flex-col md:fixed md:inset-y-0",
-          "w-[var(--sidebar-width)] bg-primary",
+          "w-[var(--sidebar-width)]",
+          "bg-black/80 backdrop-blur-2xl",
+          "border-r border-white/[0.04]",
         )}
       >
         {sidebarContent}
@@ -218,35 +219,35 @@ export function Sidebar() {
       {/* Mobile overlay */}
       {mobileOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
-          {/* Backdrop */}
           <div
-            className="absolute inset-0 bg-black/60"
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
             onClick={() => setMobileOpen(false)}
             aria-hidden="true"
           />
-
-          {/* Slide-over */}
           <aside
-            className="relative flex flex-col w-[var(--sidebar-width)] h-full bg-primary animate-in slide-in-from-left duration-200"
+            className={cn(
+              "relative flex flex-col w-[var(--sidebar-width)] h-full",
+              "bg-black/90 backdrop-blur-2xl border-r border-white/[0.04]",
+              "animate-in slide-in-from-left duration-300",
+            )}
             role="dialog"
             aria-modal="true"
             aria-label="Navigation menu"
           >
-            {/* Close button */}
             <button
               type="button"
               onClick={() => setMobileOpen(false)}
               className={cn(
                 "absolute top-4 right-4",
-                "flex items-center justify-center h-11 w-11 rounded-md",
+                "flex items-center justify-center h-11 w-11 rounded-lg",
                 "text-muted-foreground hover:text-foreground",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#22C55E]",
+                "transition-colors duration-200",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               )}
               aria-label="메뉴 닫기"
             >
               <X className="h-5 w-5" />
             </button>
-
             {sidebarContent}
           </aside>
         </div>

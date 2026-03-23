@@ -1,9 +1,24 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 
+/**
+ * Premium Card — Glass surface with inset highlight
+ * Single element (no nested wrapper) for backward compatibility
+ */
 const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn("rounded-lg border bg-card text-card-foreground shadow-sm", className)} {...props} />
+    <div
+      ref={ref}
+      className={cn(
+        "rounded-[var(--radius)] bg-card text-card-foreground",
+        "ring-1 ring-white/[0.06]",
+        "shadow-[inset_0_1px_0_rgba(255,255,255,0.04),var(--shadow-sm)]",
+        "hover:ring-white/[0.10]",
+        "transition-all duration-500 ease-[var(--ease-premium)]",
+        className,
+      )}
+      {...props}
+    />
   )
 )
 Card.displayName = "Card"

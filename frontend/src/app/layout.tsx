@@ -1,21 +1,21 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { Suspense } from "react";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { Sidebar } from "@/components/sidebar";
 import { Toaster } from "sonner";
 
-const ibmPlexSans = IBM_Plex_Sans({
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
+const geistSans = localFont({
+  src: "../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2",
   variable: "--font-sans",
+  display: "swap",
 });
 
-const ibmPlexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+const geistMono = localFont({
+  src: "../../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2",
   variable: "--font-mono",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -33,8 +33,8 @@ export default function RootLayout({
       <body
         className={cn(
           "min-h-screen bg-background font-sans antialiased",
-          ibmPlexSans.variable,
-          ibmPlexMono.variable
+          geistSans.variable,
+          geistMono.variable
         )}
       >
         <div className="flex min-h-screen">
@@ -48,9 +48,9 @@ export default function RootLayout({
           position="top-right"
           toastOptions={{
             style: {
-              background: "hsl(217 33% 17%)",
-              border: "1px solid hsl(217 19% 27%)",
-              color: "hsl(210 40% 98%)",
+              background: "hsl(var(--card))",
+              border: "1px solid hsl(var(--border))",
+              color: "hsl(var(--foreground))",
             },
           }}
         />
