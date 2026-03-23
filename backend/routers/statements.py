@@ -7,7 +7,7 @@ from typing import Optional
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
-from backend.services.statement_generator import generate_all_statements
+from backend.services.statement_generator import generate_all_statements, generate_consolidated_statements
 from backend.services.export import export_statement_excel
 
 
@@ -149,6 +149,40 @@ def generate_statements(
         result = generate_all_statements(
             conn=conn,
             entity_id=body.entity_id,
+            fiscal_year=body.fiscal_year,
+            start_month=body.start_month,
+            end_month=body.end_month,
+        )
+        conn.commit()
+        return result
+    except Exception:
+        conn.rollback()
+        raise
+
+
+class ConsolidatedGenerateRequest(BaseModel):
+    fiscal_year: int
+    start_month: int = 1
+    end_month: int = 12
+
+    def model_post_init(self, __context) -> None:
+        if not (1 <= self.start_month <= 12):
+            raise ValueError("start_month must be 1-12")
+        if not (1 <= self.end_month <= 12):
+            raise ValueError("end_month must be 1-12")
+        if self.start_month > self.end_month:
+            raise ValueError("start_month must be <= end_month")
+
+
+@router.post("/generate-consolidated")
+def generate_consolidated(
+    body: ConsolidatedGenerateRequest,
+    conn: PgConnection = Depends(get_db),
+):
+    """연결재무제표 생성 (US GAAP, USD)."""
+    try:
+        result = generate_consolidated_statements(
+            conn=conn,
             fiscal_year=body.fiscal_year,
             start_month=body.start_month,
             end_month=body.end_month,
