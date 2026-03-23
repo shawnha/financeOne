@@ -7,6 +7,7 @@ from datetime import date
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
+from backend.services.bookkeeping_engine import create_journal_from_transaction
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
@@ -137,15 +138,28 @@ def update_transaction(
         params.append(tx_id)
 
         cur.execute(
-            f"UPDATE transactions SET {', '.join(sets)} WHERE id = %s RETURNING id",
+            f"UPDATE transactions SET {', '.join(sets)} WHERE id = %s RETURNING id, is_confirmed, standard_account_id",
             params,
         )
         row = cur.fetchone()
         if not row:
             raise HTTPException(404, "Transaction not found")
+
+        tx_id_out, is_confirmed, std_account_id = row[0], row[1], row[2]
+        journal_entry_id = None
+        journal_error = None
+
+        # 확정 + 매핑 완료 → 자동 분개 생성 (원자성)
+        if is_confirmed and std_account_id:
+            try:
+                journal_entry_id = create_journal_from_transaction(conn, tx_id_out)
+            except ValueError as e:
+                if "already exists" not in str(e):
+                    journal_error = str(e)
+
         conn.commit()
         cur.close()
-        return {"id": row[0], "updated": True}
+        return {"id": tx_id_out, "updated": True, "journal_entry_id": journal_entry_id, "journal_error": journal_error}
     except HTTPException:
         raise
     except Exception:
@@ -165,9 +179,20 @@ def bulk_confirm(body: BulkConfirm, conn: PgConnection = Depends(get_db)):
             body.ids,
         )
         updated = [r[0] for r in cur.fetchall()]
+
+        # 벌크 확정 → 자동 분개 생성
+        journal_created = 0
+        journal_skipped = []
+        for tx_id in updated:
+            try:
+                create_journal_from_transaction(conn, tx_id)
+                journal_created += 1
+            except ValueError as e:
+                journal_skipped.append({"id": tx_id, "reason": str(e)})
+
         conn.commit()
         cur.close()
-        return {"confirmed": len(updated), "ids": updated}
+        return {"confirmed": len(updated), "ids": updated, "journals_created": journal_created, "journal_skipped": journal_skipped}
     except Exception:
         conn.rollback()
         raise
