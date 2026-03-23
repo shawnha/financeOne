@@ -134,7 +134,7 @@ function StatementsContent() {
     } finally {
       setGenerating(false)
     }
-  }, [entityId, year])
+  }, [entityId, year, isConsolidated])
 
   const effectiveTab = isConsolidated ? "consolidated_balance_sheet" : activeTab
   const filteredItems = statementData?.line_items.filter(

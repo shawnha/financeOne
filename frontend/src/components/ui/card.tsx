@@ -1,9 +1,29 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 
+/**
+ * Double-Bezel Card — SOFT.md "Doppelrand" architecture
+ * Outer shell (glass tray) → Inner core (content surface)
+ */
 const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn("rounded-lg border bg-card text-card-foreground shadow-sm", className)} {...props} />
+  ({ className, children, ...props }, ref) => (
+    <div
+      ref={ref}
+      className={cn(
+        /* Outer shell */
+        "bg-[var(--glass-bg)] ring-1 ring-[var(--glass-border)] p-1.5",
+        "rounded-[var(--radius)]",
+        "hover:ring-[var(--glass-border-hover)]",
+        "transition-all duration-500 ease-[var(--ease-premium)]",
+        className
+      )}
+      {...props}
+    >
+      {/* Inner core */}
+      <div className="bg-card rounded-[var(--radius-inner)] shadow-[var(--glass-inset)] h-full">
+        {children}
+      </div>
+    </div>
   )
 )
 Card.displayName = "Card"

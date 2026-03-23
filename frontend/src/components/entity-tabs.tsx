@@ -4,12 +4,7 @@ import { useEffect, useState, useCallback } from "react"
 import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { fetchAPI } from "@/lib/api"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
+import { TooltipProvider } from "@/components/ui/tooltip"
 
 interface Entity {
   id: number
@@ -77,6 +72,7 @@ export function EntityTabs() {
   )
 
   const activeId = currentEntityId ?? entities[0]?.id
+  const selectedEntity = searchParams.get("entity") || String(activeId)
 
   if (loading) {
     return (
@@ -142,12 +138,12 @@ export function EntityTabs() {
             "flex items-center gap-2 px-4 py-2.5 text-sm font-medium",
             "min-h-[44px] rounded-t-md transition-colors cursor-pointer",
             selectedEntity === "consolidated"
-              ? "text-foreground border-b-2 border-[#8B5CF6] bg-secondary/50"
+              ? "text-foreground border-b-2 border-[hsl(var(--entity-consolidated))] bg-secondary/50"
               : "text-muted-foreground hover:text-foreground hover:bg-secondary/30",
           )}
         >
           <span
-            className="inline-block h-2 w-2 rounded-full bg-[#8B5CF6]"
+            className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--entity-consolidated))]"
             aria-hidden="true"
           />
           <span>연결</span>
