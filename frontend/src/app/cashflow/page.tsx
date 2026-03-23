@@ -17,7 +17,6 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import {
-  AreaChart,
   Area,
   XAxis,
   YAxis,
