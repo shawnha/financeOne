@@ -32,6 +32,7 @@ def detect_intercompany(
         JOIN transactions t2
           ON t1.entity_id != t2.entity_id
           AND t1.amount = t2.amount
+          AND t1.currency = t2.currency
           AND t1.type != t2.type
           AND ABS(t1.date - t2.date) <= %s
           AND t1.id < t2.id

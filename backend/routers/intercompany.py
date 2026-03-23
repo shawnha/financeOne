@@ -77,10 +77,23 @@ def confirm(pair_id: int, conn: PgConnection = Depends(get_db)):
 @router.delete("/pairs/{pair_id}")
 def reject(pair_id: int, conn: PgConnection = Depends(get_db)):
     cur = conn.cursor()
-    cur.execute("DELETE FROM intercompany_pairs WHERE id = %s RETURNING id", [pair_id])
-    row = cur.fetchone()
-    if not row:
+    # transaction 플래그 정리
+    cur.execute(
+        "SELECT transaction_a_id, transaction_b_id FROM intercompany_pairs WHERE id = %s",
+        [pair_id],
+    )
+    pair = cur.fetchone()
+    if not pair:
         raise HTTPException(404, "Pair not found")
+
+    for tx_id in [pair[0], pair[1]]:
+        if tx_id:
+            cur.execute(
+                "UPDATE transactions SET is_intercompany = FALSE, intercompany_pair_id = NULL WHERE id = %s",
+                [tx_id],
+            )
+
+    cur.execute("DELETE FROM intercompany_pairs WHERE id = %s", [pair_id])
     conn.commit()
     cur.close()
     return {"deleted": True}

@@ -946,11 +946,52 @@ def generate_consolidated_statements(
                     "error": str(e),
                 })
 
-    # 내부거래 상계
+    # 내부거래 상계 — 확정된 내부거래의 분개를 조회하여 계정별 차감
+    from backend.services.exchange_rate_service import get_closing_rate as _get_closing
     eliminations = get_eliminations(conn, all_entity_ids, start_date, end_date)
     total_eliminated = Decimal("0")
     for elim in eliminations:
-        total_eliminated += Decimal(str(elim["amount"]))
+        elim_amount = Decimal(str(elim["amount"]))
+        elim_currency = elim.get("currency", "KRW")
+
+        # KRW 금액을 USD로 변환
+        if elim_currency != "USD":
+            try:
+                elim_rate = _get_closing(conn, elim_currency, "USD", end_date)
+                elim_amount_usd = (elim_amount * elim_rate).quantize(Decimal("0.01"))
+            except Exception:
+                elim_amount_usd = Decimal("0")
+        else:
+            elim_amount_usd = elim_amount
+
+        total_eliminated += elim_amount_usd
+
+        # 내부거래 분개의 계정 조회하여 연결 잔액에서 차감
+        for tx_id_col in ["transaction_a_id", "transaction_b_id"]:
+            tx_id = elim.get(tx_id_col)
+            if not tx_id:
+                continue
+            cur.execute(
+                """
+                SELECT sa.code, jel.debit_amount, jel.credit_amount
+                FROM journal_entry_lines jel
+                JOIN journal_entries je ON jel.journal_entry_id = je.id
+                JOIN standard_accounts sa ON jel.standard_account_id = sa.id
+                WHERE je.transaction_id = %s
+                """,
+                [tx_id],
+            )
+            for je_row in cur.fetchall():
+                acct_code, debit, credit = je_row
+                # GAAP 변환 후 코드 찾기 (매핑된 코드가 consolidated_balances에 있을 수 있음)
+                for cb_code in list(consolidated_balances.keys()):
+                    if cb_code == acct_code or consolidated_balances[cb_code].get("_orig_code") == acct_code:
+                        bal_adj = Decimal(str(debit or 0)) - Decimal(str(credit or 0))
+                        if elim_currency != "USD":
+                            bal_adj = (bal_adj * elim_rate).quantize(Decimal("0.01"))
+                        consolidated_balances[cb_code]["balance"] -= bal_adj
+                        break
+
         cur.execute(
             """
             INSERT INTO consolidation_adjustments
@@ -958,7 +999,7 @@ def generate_consolidated_statements(
                  original_amount, adjusted_amount, source_entity_id)
             VALUES (%s, 'intercompany_elimination', 'ELIM', %s, %s, %s, %s)
             """,
-            [stmt_id, elim.get("description", ""), float(elim["amount"]), 0, elim["entity_a_id"]],
+            [stmt_id, elim.get("description", ""), float(elim_amount), float(elim_amount_usd), elim["entity_a_id"]],
         )
 
     # line items 저장
