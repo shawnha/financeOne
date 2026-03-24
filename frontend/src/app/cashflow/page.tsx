@@ -60,10 +60,12 @@ function ChartTooltipContent({
   active,
   payload,
   label,
+  entityId,
 }: {
   active?: boolean
   payload?: Array<{ value: number; name: string; color: string }>
   label?: string
+  entityId?: string | null
 }) {
   if (!active || !payload?.length) return null
   return (
@@ -75,7 +77,7 @@ function ChartTooltipContent({
           className="font-mono tabular-nums"
           style={{ color: entry.color }}
         >
-          {entry.name}: {formatByEntity(entry.value, entityId)}
+          {entry.name}: {formatByEntity(entry.value, entityId ?? null)}
         </p>
       ))}
     </div>
@@ -260,7 +262,7 @@ function CashFlowContent() {
                   tickLine={false}
                   tickFormatter={(v) => abbreviateAmount(v)}
                 />
-                <RechartsTooltip content={<ChartTooltipContent />} />
+                <RechartsTooltip content={<ChartTooltipContent entityId={entityId} />} />
                 <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
                 <Area
                   type="monotone"
