@@ -1,11 +1,13 @@
 """파일 업로드 API -- multi-format (xls, xlsx, csv) with auto-detection."""
 
 from fastapi import APIRouter, UploadFile, File, Query, HTTPException, Depends
+from pydantic import BaseModel
 from typing import Optional
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
 from backend.services.parsers import detect_parser
+from backend.services.parsers.woori_bank import WooriBankParser
 
 router = APIRouter(prefix="/api/upload", tags=["upload"])
 
@@ -44,6 +46,14 @@ async def upload_transactions(
 
     source_type = parsed[0].source_type if parsed else "unknown"
 
+    # 우리은행: 잔액 파싱
+    bank_closing_balance = None
+    bank_balance_date = None
+    if isinstance(parser, WooriBankParser):
+        result = parser.parse_with_balance(file_bytes, filename)
+        bank_closing_balance = result.closing_balance
+        bank_balance_date = result.balance_date
+
     cur = conn.cursor()
     try:
         # Insert uploaded_files record
@@ -59,28 +69,47 @@ async def upload_transactions(
 
         inserted_count = 0
         duplicate_count = 0
+        cancel_count = 0
 
         for tx in parsed:
-            # Duplicate detection: check existing (entity_id, date, amount, counterparty)
+            # 중복 감지: (entity_id, date, amount, counterparty, description, source_type)
             cur.execute(
                 """
                 SELECT id FROM transactions
-                WHERE entity_id = %s AND date = %s AND amount = %s AND counterparty = %s
+                WHERE entity_id = %s AND date = %s AND amount = %s
+                  AND counterparty = %s AND description = %s AND source_type = %s
                 LIMIT 1
                 """,
-                [entity_id, tx.date, tx.amount, tx.counterparty],
+                [entity_id, tx.date, tx.amount, tx.counterparty, tx.description, tx.source_type],
             )
-            existing = cur.fetchone()
-            is_dup = existing is not None
+            if cur.fetchone():
+                duplicate_count += 1
+                continue  # 중복이면 INSERT 건너뜀
 
-            # Check card dedup: if is_check_card, also mark as duplicate
+            # 체크카드 중복: 은행 거래가 DB에 존재할 때만
+            is_dup = False
             if tx.is_check_card:
-                is_dup = True
+                cur.execute(
+                    """
+                    SELECT id FROM transactions
+                    WHERE entity_id = %s AND date = %s AND amount = %s
+                      AND source_type = 'woori_bank'
+                      AND description LIKE '체크우리%%'
+                    LIMIT 1
+                    """,
+                    [entity_id, tx.date, tx.amount],
+                )
+                is_dup = cur.fetchone() is not None
 
             if is_dup:
                 duplicate_count += 1
+                continue
 
-            # Resolve member_id from member_name if provided
+            # 취소 건 카운트
+            if tx.is_cancel:
+                cancel_count += 1
+
+            # Resolve member_id
             member_id = None
             if tx.member_name:
                 cur.execute(
@@ -97,25 +126,53 @@ async def upload_transactions(
                     (entity_id, file_id, date, amount, currency, type,
                      description, counterparty, source_type, member_id,
                      is_duplicate, duplicate_of_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, NULL)
                 """,
                 [
                     entity_id, file_id, tx.date, tx.amount, tx.currency, tx.type,
                     tx.description, tx.counterparty, tx.source_type, member_id,
-                    is_dup, existing[0] if existing else None,
                 ],
             )
             inserted_count += 1
 
-        # Update uploaded_files with final counts
+        # Update uploaded_files
         cur.execute(
-            """
-            UPDATE uploaded_files
-            SET status = 'completed', row_count = %s
-            WHERE id = %s
-            """,
+            "UPDATE uploaded_files SET status = 'completed', row_count = %s WHERE id = %s",
             [inserted_count, file_id],
         )
+
+        # 우리은행 잔액 → balance_snapshots 자동 저장
+        verification = None
+        if bank_closing_balance is not None and bank_balance_date is not None:
+            cur.execute(
+                """
+                INSERT INTO balance_snapshots
+                    (entity_id, date, account_name, account_type, balance, currency, source)
+                VALUES (%s, %s, '우리은행 법인통장', 'bank', %s, 'KRW', 'excel_parsed')
+                ON CONFLICT (entity_id, date, account_name)
+                DO UPDATE SET balance = EXCLUDED.balance, source = 'excel_parsed'
+                """,
+                [entity_id, bank_balance_date, bank_closing_balance],
+            )
+
+            # 파싱 검증: 파싱된 합계 vs 잔액 비교
+            cur.execute(
+                """
+                SELECT
+                    COALESCE(SUM(CASE WHEN type = 'in' THEN amount ELSE 0 END), 0) -
+                    COALESCE(SUM(CASE WHEN type = 'out' THEN amount ELSE 0 END), 0)
+                FROM transactions
+                WHERE entity_id = %s AND source_type = 'woori_bank' AND file_id = %s
+                """,
+                [entity_id, file_id],
+            )
+            parsed_net = float(cur.fetchone()[0])
+            verification = {
+                "bank_closing_balance": bank_closing_balance,
+                "balance_date": str(bank_balance_date),
+                "parsed_net_flow": parsed_net,
+                "balance_saved": True,
+            }
 
         conn.commit()
         cur.close()
@@ -124,15 +181,19 @@ async def upload_transactions(
             "file_id": file_id,
             "filename": filename,
             "source_type": source_type,
-            "uploaded": inserted_count,
-            "duplicates": duplicate_count,
+            "stats": {
+                "total_parsed": len(parsed),
+                "inserted": inserted_count,
+                "duplicates_skipped": duplicate_count,
+                "cancellations": cancel_count,
+            },
+            "verification": verification,
         }
     except HTTPException:
         conn.rollback()
         raise
     except Exception as e:
         conn.rollback()
-        # Mark upload as failed if file record was created
         try:
             cur2 = conn.cursor()
             cur2.execute(
@@ -144,6 +205,81 @@ async def upload_transactions(
         except Exception:
             pass
         raise HTTPException(500, f"업로드 처리 중 오류: {e}")
+
+
+class ResetRequest(BaseModel):
+    entity_id: int
+    confirm: bool = False
+
+
+@router.post("/reset")
+def reset_transactions(
+    body: ResetRequest,
+    conn: PgConnection = Depends(get_db),
+):
+    """법인 거래 초기화 (관리자 전용). confirm=True 필수."""
+    if not body.confirm:
+        # 건수만 반환
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM transactions WHERE entity_id = %s",
+            [body.entity_id],
+        )
+        count = cur.fetchone()[0]
+        cur.execute(
+            "SELECT COUNT(*) FROM uploaded_files WHERE entity_id = %s",
+            [body.entity_id],
+        )
+        file_count = cur.fetchone()[0]
+        cur.close()
+        return {
+            "entity_id": body.entity_id,
+            "transactions_count": count,
+            "files_count": file_count,
+            "confirmed": False,
+            "message": f"{count}건 거래와 {file_count}개 업로드 이력이 삭제됩니다. confirm=true로 재요청하세요.",
+        }
+
+    cur = conn.cursor()
+    try:
+        # 분개 먼저 삭제 (FK)
+        cur.execute(
+            """
+            DELETE FROM journal_entry_lines WHERE journal_entry_id IN (
+                SELECT id FROM journal_entries WHERE entity_id = %s
+            )
+            """,
+            [body.entity_id],
+        )
+        cur.execute("DELETE FROM journal_entries WHERE entity_id = %s", [body.entity_id])
+
+        # 거래 삭제
+        cur.execute("DELETE FROM transactions WHERE entity_id = %s RETURNING id", [body.entity_id])
+        tx_deleted = cur.rowcount
+
+        # 업로드 이력 삭제
+        cur.execute("DELETE FROM uploaded_files WHERE entity_id = %s", [body.entity_id])
+        files_deleted = cur.rowcount
+
+        # 잔고 스냅샷 삭제 (excel_parsed 소스만)
+        cur.execute(
+            "DELETE FROM balance_snapshots WHERE entity_id = %s AND source = 'excel_parsed'",
+            [body.entity_id],
+        )
+
+        conn.commit()
+        cur.close()
+
+        return {
+            "entity_id": body.entity_id,
+            "confirmed": True,
+            "transactions_deleted": tx_deleted,
+            "files_deleted": files_deleted,
+            "message": "초기화 완료. Excel 파일을 다시 업로드하세요.",
+        }
+    except Exception:
+        conn.rollback()
+        raise
 
 
 @router.get("/history")
@@ -175,8 +311,7 @@ def upload_history(
         f"""
         SELECT uf.id, uf.entity_id, uf.filename, uf.source_type,
                uf.row_count, uf.status, uf.uploaded_at,
-               e.name AS entity_name,
-               (SELECT COUNT(*) FROM transactions t WHERE t.file_id = uf.id AND t.is_duplicate = true) AS duplicate_count
+               e.name AS entity_name
         FROM uploaded_files uf
         LEFT JOIN entities e ON uf.entity_id = e.id
         WHERE {where_clause}

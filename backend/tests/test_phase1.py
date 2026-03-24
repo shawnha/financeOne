@@ -75,7 +75,7 @@ class TestLotteCardParse:
             assert isinstance(tx.date, datetime.date)
             assert tx.amount > 0
             assert tx.source_type == "lotte_card"
-            assert tx.type == "out"
+            assert tx.type in ("out", "in")  # "in" for 취소 환불
 
         # Most rows should have a non-empty counterparty
         with_counterparty = [tx for tx in txns if tx.counterparty]

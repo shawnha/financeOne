@@ -55,10 +55,9 @@ class WooriCardParser(BaseParser):
         # Data starts at row 19 (0-indexed), row 18 = headers
         for row_idx in range(19, sheet.nrows):
             try:
-                # Col 18: 접수/취소 — skip cancelled
+                # Col 18: 접수/취소
                 cancel_flag = str(sheet.cell_value(row_idx, 18)).strip()
-                if cancel_flag == "취소":
-                    continue
+                is_cancel = cancel_flag == "취소"
 
                 # Col 0: 이용일자 MM.DD HH:MM (no year)
                 date_str = str(sheet.cell_value(row_idx, 0)).strip()
@@ -89,11 +88,12 @@ class WooriCardParser(BaseParser):
                     date=tx_date,
                     amount=abs(amount),
                     currency="KRW",
-                    type="out",
-                    description=f"우리카드 {counterparty}",
+                    type="in" if is_cancel else "out",
+                    description=f"우리카드 {counterparty}" + (" (취소)" if is_cancel else ""),
                     counterparty=counterparty,
                     source_type="woori_card",
                     is_check_card=is_check_card,
+                    is_cancel=is_cancel,
                 ))
             except Exception:
                 continue

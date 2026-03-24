@@ -35,10 +35,9 @@ class LotteCardParser(BaseParser):
         # Data rows start at row 2 (row 0 = title, row 1 = headers)
         for row_idx in range(2, sheet.nrows):
             try:
-                # Col 11: 취소여부 — skip cancelled
+                # Col 11: 취소여부
                 cancel_flag = str(sheet.cell_value(row_idx, 11)).strip()
-                if cancel_flag == "Y":
-                    continue
+                is_cancel = cancel_flag == "Y"
 
                 # Col 5: 승인일자 YYYY.MM.DD
                 date_str = str(sheet.cell_value(row_idx, 5)).strip()
@@ -68,11 +67,12 @@ class LotteCardParser(BaseParser):
                     date=tx_date,
                     amount=abs(amount),
                     currency=currency,
-                    type="out",
-                    description=f"롯데카드 {counterparty}",
+                    type="in" if is_cancel else "out",
+                    description=f"롯데카드 {counterparty}" + (" (취소)" if is_cancel else ""),
                     counterparty=counterparty,
                     source_type="lotte_card",
                     member_name=member_name,
+                    is_cancel=is_cancel,
                 ))
             except Exception:
                 # Skip malformed rows
