@@ -198,7 +198,7 @@ def get_cashflow(
     )
     opening_balance = float(cur.fetchone()[0])
 
-    # Monthly income/expense for the period
+    # Monthly income/expense — 은행 거래만 (카드는 은행의 카드대금 출금에 포함)
     cur.execute(
         f"""
         SELECT
@@ -208,6 +208,7 @@ def get_cashflow(
         FROM transactions
         WHERE date >= date_trunc('month', CURRENT_DATE) - interval '{months - 1} months'
           AND date < date_trunc('month', CURRENT_DATE) + interval '1 month'
+          AND source_type IN ('woori_bank', 'mercury_api', 'manual')
           {entity_clause}
         GROUP BY date_trunc('month', date)
         ORDER BY month
@@ -240,4 +241,102 @@ def get_cashflow(
         "months": result,
         "period_start_balance": opening_balance,
         "period_end_balance": running_balance if result else opening_balance,
+    }
+
+
+@router.get("/cashflow/detail")
+def get_cashflow_detail(
+    entity_id: int = Query(...),
+    year: int = Query(...),
+    month: int = Query(...),
+    conn: PgConnection = Depends(get_db),
+):
+    """월별 현금흐름 상세 — 은행 거래 일별 리스트 + 카드대금 세부."""
+    cur = conn.cursor()
+
+    # 은행 거래 (일별)
+    cur.execute(
+        """
+        SELECT t.id, t.date, t.type, t.amount, t.description, t.counterparty,
+               t.source_type
+        FROM transactions t
+        WHERE t.entity_id = %s
+          AND t.source_type IN ('woori_bank', 'mercury_api', 'manual')
+          AND EXTRACT(YEAR FROM t.date) = %s
+          AND EXTRACT(MONTH FROM t.date) = %s
+        ORDER BY t.date, t.id
+        """,
+        [entity_id, year, month],
+    )
+    cols = [d[0] for d in cur.description]
+    bank_transactions = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+    # 카드 사용 내역 (해당 월 사용분 — 다음 달 결제)
+    cur.execute(
+        """
+        SELECT t.id, t.date, t.type, t.amount, t.description, t.counterparty,
+               t.source_type, t.member_id,
+               m.name AS member_name,
+               sa.name AS account_name, sa.code AS account_code
+        FROM transactions t
+        LEFT JOIN members m ON t.member_id = m.id
+        LEFT JOIN standard_accounts sa ON t.standard_account_id = sa.id
+        WHERE t.entity_id = %s
+          AND t.source_type IN ('lotte_card', 'woori_card')
+          AND EXTRACT(YEAR FROM t.date) = %s
+          AND EXTRACT(MONTH FROM t.date) = %s
+        ORDER BY t.source_type, t.member_id, t.date
+        """,
+        [entity_id, year, month],
+    )
+    cols2 = [d[0] for d in cur.description]
+    card_transactions = [dict(zip(cols2, r)) for r in cur.fetchall()]
+
+    # 카드 사용 요약 (소스별)
+    cur.execute(
+        """
+        SELECT source_type,
+               SUM(CASE WHEN type = 'out' THEN amount ELSE 0 END) AS total_out,
+               SUM(CASE WHEN type = 'in' THEN amount ELSE 0 END) AS total_refund,
+               COUNT(*) AS tx_count
+        FROM transactions
+        WHERE entity_id = %s
+          AND source_type IN ('lotte_card', 'woori_card')
+          AND EXTRACT(YEAR FROM date) = %s
+          AND EXTRACT(MONTH FROM date) = %s
+        GROUP BY source_type
+        """,
+        [entity_id, year, month],
+    )
+    card_summary = []
+    for r in cur.fetchall():
+        card_summary.append({
+            "source_type": r[0],
+            "total_expense": float(r[1]),
+            "total_refund": float(r[2]),
+            "net": float(r[1]) - float(r[2]),
+            "tx_count": r[3],
+        })
+
+    # 잔액 스냅샷
+    cur.execute(
+        """
+        SELECT balance FROM balance_snapshots
+        WHERE entity_id = %s AND date <= make_date(%s, %s, 28)
+        ORDER BY date DESC LIMIT 1
+        """,
+        [entity_id, year, month],
+    )
+    row = cur.fetchone()
+    closing_balance = float(row[0]) if row else None
+
+    cur.close()
+
+    return {
+        "year": year,
+        "month": month,
+        "bank_transactions": bank_transactions,
+        "card_transactions": card_transactions,
+        "card_summary": card_summary,
+        "closing_balance": closing_balance,
     }
