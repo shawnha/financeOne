@@ -72,19 +72,27 @@ async def upload_transactions(
         cancel_count = 0
 
         for tx in parsed:
-            # 중복 감지: (entity_id, date, amount, counterparty, description, source_type)
+            # 중복 감지: 같은 키의 거래가 DB에 이미 있는 개수 vs 이번 파일에서 같은 키 개수
+            dedup_key = (str(tx.date), tx.amount, tx.counterparty, tx.description, tx.source_type)
+
+            # 이번 파일에서 같은 키가 몇 번째인지
+            file_key_count = sum(1 for p in parsed[:parsed.index(tx)+1]
+                                 if (str(p.date), p.amount, p.counterparty, p.description, p.source_type) == dedup_key)
+
+            # DB에 이미 있는 같은 키 개수
             cur.execute(
                 """
-                SELECT id FROM transactions
+                SELECT COUNT(*) FROM transactions
                 WHERE entity_id = %s AND date = %s AND amount = %s
                   AND counterparty = %s AND description = %s AND source_type = %s
-                LIMIT 1
                 """,
                 [entity_id, tx.date, tx.amount, tx.counterparty, tx.description, tx.source_type],
             )
-            if cur.fetchone():
+            db_count = cur.fetchone()[0]
+
+            if file_key_count <= db_count:
                 duplicate_count += 1
-                continue  # 중복이면 INSERT 건너뜀
+                continue  # DB에 이미 충분히 있으면 건너뜀
 
             # 체크카드 중복: 은행 거래가 DB에 존재할 때만
             is_dup = False
