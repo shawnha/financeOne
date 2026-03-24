@@ -118,9 +118,11 @@ class WooriBankParser(BaseParser):
                 continue
 
         wb.close()
+        # 우리은행 Excel은 최신순 (첫 행=최신, 마지막 행=가장 오래된 거래)
+        # 따라서 first_balance = 기말잔고, last_balance = 기초잔고
         return ParseResult(
             transactions=results,
-            opening_balance=first_balance,
-            closing_balance=last_balance,
-            balance_date=last_date,
+            opening_balance=last_balance,  # 마지막 행 = 가장 오래된 = 기초
+            closing_balance=first_balance,  # 첫 행 = 가장 최신 = 기말
+            balance_date=results[0].date if results else None,  # 최신 거래 날짜
         )
