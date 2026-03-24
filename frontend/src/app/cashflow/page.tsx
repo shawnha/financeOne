@@ -54,35 +54,7 @@ const PERIOD_OPTIONS: { value: PeriodOption; label: string }[] = [
   { value: 24, label: "24개월" },
 ]
 
-// ── Custom Tooltip ─────────────────────────────────────
-
-function ChartTooltipContent({
-  active,
-  payload,
-  label,
-  entityId,
-}: {
-  active?: boolean
-  payload?: Array<{ value: number; name: string; color: string }>
-  label?: string
-  entityId?: string | null
-}) {
-  if (!active || !payload?.length) return null
-  return (
-    <div className="rounded-lg bg-popover border border-border px-3 py-2 shadow-lg text-sm">
-      <p className="text-muted-foreground mb-1">{label}</p>
-      {payload.map((entry) => (
-        <p
-          key={entry.name}
-          className="font-mono tabular-nums"
-          style={{ color: entry.color }}
-        >
-          {entry.name}: {formatByEntity(entry.value, entityId ?? null)}
-        </p>
-      ))}
-    </div>
-  )
-}
+// ChartTooltipContent moved inside CashFlowContent for entityId closure
 
 // ── Skeletons ──────────────────────────────────────────
 
@@ -108,6 +80,29 @@ function CashFlowSkeleton() {
 function CashFlowContent() {
   const searchParams = useSearchParams()
   const entityId = searchParams.get("entity")
+
+  // Tooltip inside component for entityId closure
+  function ChartTooltipContent({
+    active,
+    payload,
+    label,
+  }: {
+    active?: boolean
+    payload?: Array<{ value: number; name: string; color: string }>
+    label?: string
+  }) {
+    if (!active || !payload?.length) return null
+    return (
+      <div className="rounded-lg bg-popover border border-border px-3 py-2 shadow-lg text-sm">
+        <p className="text-muted-foreground mb-1">{label}</p>
+        {payload.map((entry) => (
+          <p key={entry.name} className="font-mono tabular-nums" style={{ color: entry.color }}>
+            {entry.name}: {formatByEntity(entry.value, entityId)}
+          </p>
+        ))}
+      </div>
+    )
+  }
 
   const [data, setData] = useState<CashFlowData | null>(null)
   const [state, setState] = useState<LoadState>("loading")
@@ -262,7 +257,7 @@ function CashFlowContent() {
                   tickLine={false}
                   tickFormatter={(v) => abbreviateAmount(v)}
                 />
-                <RechartsTooltip content={<ChartTooltipContent entityId={entityId} />} />
+                <RechartsTooltip content={<ChartTooltipContent />} />
                 <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
                 <Area
                   type="monotone"
