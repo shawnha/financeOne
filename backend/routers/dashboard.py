@@ -175,7 +175,8 @@ def get_cashflow(
         entity_clause = "AND entity_id = %s"
         params.append(entity_id)
 
-    # Opening balance: latest balance_snapshot before the period start
+    # Opening balance: latest balance_snapshot before the first transaction month
+    # (or before period start, whichever finds data)
     cur.execute(
         f"""
         SELECT COALESCE(SUM(balance), 0)
@@ -183,12 +184,17 @@ def get_cashflow(
         WHERE (entity_id, date, account_name) IN (
             SELECT entity_id, MAX(date), account_name
             FROM balance_snapshots
-            WHERE date < date_trunc('month', CURRENT_DATE) - interval '{months - 1} months'
+            WHERE date < (
+                SELECT COALESCE(MIN(date_trunc('month', date)), date_trunc('month', CURRENT_DATE))
+                FROM transactions
+                WHERE date >= date_trunc('month', CURRENT_DATE) - interval '{months - 1} months'
+                  {"AND entity_id = %s" if entity_id else ""}
+            )
               {"AND entity_id = %s" if entity_id else ""}
             GROUP BY entity_id, account_name
         )
         """,
-        [entity_id] if entity_id else [],
+        ([entity_id, entity_id] if entity_id else []),
     )
     opening_balance = float(cur.fetchone()[0])
 
