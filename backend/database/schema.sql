@@ -1,5 +1,5 @@
 -- FinanceOne v2 — DB Schema (Neon PostgreSQL)
--- 20개 테이블 (14 + slack + journal + intercompany_pairs + consolidation_adjustments)
+-- 21개 테이블 (14 + slack + journal + intercompany_pairs + consolidation_adjustments + card_settings)
 -- PRD SQLite 문법 → PostgreSQL 변환
 
 BEGIN;
@@ -346,5 +346,19 @@ CREATE TABLE consolidation_adjustments (
 );
 
 CREATE INDEX idx_exchange_rates_lookup ON exchange_rates(from_currency, to_currency, date DESC);
+
+-- 21. card_settings — 카드 설정 (결제일, 카드사 정보)
+CREATE TABLE card_settings (
+  id           SERIAL PRIMARY KEY,
+  entity_id    INTEGER NOT NULL REFERENCES entities(id),
+  card_name    TEXT NOT NULL,
+  source_type  TEXT NOT NULL,
+  payment_day  INTEGER NOT NULL DEFAULT 15,
+  card_number  TEXT,
+  is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(entity_id, source_type, card_number)
+);
 
 COMMIT;

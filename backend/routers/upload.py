@@ -51,10 +51,12 @@ async def upload_transactions(
 
     # 우리은행: 잔액 파싱
     bank_closing_balance = None
+    bank_opening_balance = None
     bank_balance_date = None
     if isinstance(parser, WooriBankParser):
         result = parser.parse_with_balance(file_bytes, filename)
         bank_closing_balance = result.closing_balance
+        bank_opening_balance = result.opening_balance
         bank_balance_date = result.balance_date
 
     cur = conn.cursor()
@@ -152,7 +154,7 @@ async def upload_transactions(
             [inserted_count, file_id],
         )
 
-        # 우리은행 잔액 → balance_snapshots 자동 저장
+        # 우리은행 잔액 → balance_snapshots 자동 저장 (기말 + 기초)
         verification = None
         if bank_closing_balance is not None and bank_balance_date is not None:
             cur.execute(
@@ -165,6 +167,21 @@ async def upload_transactions(
                 """,
                 [entity_id, bank_balance_date, bank_closing_balance],
             )
+
+            # 기초잔고도 저장 (해당 월 1일 기준)
+            if bank_opening_balance is not None and parsed:
+                earliest_date = min(tx.date for tx in parsed)
+                opening_date = earliest_date.replace(day=1)
+                cur.execute(
+                    """
+                    INSERT INTO balance_snapshots
+                        (entity_id, date, account_name, account_type, balance, currency, source, note)
+                    VALUES (%s, %s, '우리은행 법인통장', 'bank', %s, 'KRW', 'excel_parsed', 'opening_balance')
+                    ON CONFLICT (entity_id, date, account_name)
+                    DO UPDATE SET balance = EXCLUDED.balance, source = 'excel_parsed', note = 'opening_balance'
+                    """,
+                    [entity_id, opening_date, bank_opening_balance],
+                )
 
             # 파싱 검증: 파싱된 합계 vs 잔액 비교
             cur.execute(
