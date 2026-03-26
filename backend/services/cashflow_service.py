@@ -10,6 +10,8 @@ from typing import Optional
 
 from psycopg2.extensions import connection as PgConnection
 
+from backend.utils.db import build_date_range, fetch_all
+
 
 # ── Pure computation functions (no DB) ───────────────────────────────────────
 
@@ -238,15 +240,13 @@ def get_bank_transactions(conn: PgConnection, entity_id: int, year: int, month: 
         FROM transactions t
         WHERE t.entity_id = %s
           AND t.source_type IN ('woori_bank', 'mercury_api', 'manual')
-          AND EXTRACT(YEAR FROM t.date) = %s
-          AND EXTRACT(MONTH FROM t.date) = %s
+          AND t.date >= %s AND t.date < %s
           AND t.is_duplicate = false
         ORDER BY t.date, t.id
         """,
-        [entity_id, year, month],
+        [entity_id, *build_date_range(year, month)],
     )
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    rows = fetch_all(cur)
     cur.close()
     return rows
 
@@ -265,15 +265,13 @@ def get_card_transactions(conn: PgConnection, entity_id: int, year: int, month: 
         LEFT JOIN standard_accounts sa ON t.standard_account_id = sa.id
         WHERE t.entity_id = %s
           AND t.source_type IN ('lotte_card', 'woori_card')
-          AND EXTRACT(YEAR FROM t.date) = %s
-          AND EXTRACT(MONTH FROM t.date) = %s
+          AND t.date >= %s AND t.date < %s
           AND t.is_duplicate = false
         ORDER BY t.source_type, t.member_id, t.date, t.id
         """,
-        [entity_id, year, month],
+        [entity_id, *build_date_range(year, month)],
     )
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    rows = fetch_all(cur)
     cur.close()
     return rows
 
@@ -372,11 +370,10 @@ def get_card_total_net(conn: PgConnection, entity_id: int, year: int, month: int
         FROM transactions
         WHERE entity_id = %s
           AND source_type IN ('lotte_card', 'woori_card')
-          AND EXTRACT(YEAR FROM date) = %s
-          AND EXTRACT(MONTH FROM date) = %s
+          AND date >= %s AND date < %s
           AND is_duplicate = false
         """,
-        [entity_id, year, month],
+        [entity_id, *build_date_range(year, month)],
     )
     result = Decimal(str(cur.fetchone()[0]))
     cur.close()
@@ -409,8 +406,7 @@ def get_forecast_cashflow(
         """,
         [entity_id, year, month],
     )
-    cols = [d[0] for d in cur.description]
-    items = [dict(zip(cols, r)) for r in cur.fetchall()]
+    items = fetch_all(cur)
 
     # 3. Forecast 합산 (카드 카테고리 제외한 일반 입출금)
     forecast_income = Decimal("0")
@@ -456,11 +452,10 @@ def get_forecast_cashflow(
         FROM transactions
         WHERE entity_id = %s
           AND source_type IN ('woori_bank', 'mercury_api', 'manual')
-          AND EXTRACT(YEAR FROM date) = %s
-          AND EXTRACT(MONTH FROM date) = %s
+          AND date >= %s AND date < %s
           AND is_duplicate = false
         """,
-        [entity_id, year, month],
+        [entity_id, *build_date_range(year, month)],
     )
     row = cur.fetchone()
     actual_income = Decimal(str(row[0]))

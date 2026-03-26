@@ -9,6 +9,7 @@ from typing import Optional
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
+from backend.utils.db import fetch_all
 
 router = APIRouter(prefix="/api/card-settings", tags=["card-settings"])
 
@@ -45,8 +46,7 @@ def list_card_settings(
         """,
         [entity_id],
     )
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    rows = fetch_all(cur)
     cur.close()
 
     return {"card_settings": rows, "count": len(rows)}

@@ -2,6 +2,27 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [0.6.0] - 2026-03-26 — Supabase 마이그레이션 + 백엔드 리팩토링
+
+### Changed
+- **DB: Neon → Supabase** — hanahone-erp 프로젝트 (kxsofwbwzoovnwgxiwgi), financeone 스키마
+- **connection.py** — SET search_path TO financeone, public + 로깅
+- **schema.sql** — IF NOT EXISTS, base_currency 컬럼, idx_tx_file_id 인덱스, NULLS NOT DISTINCT
+- **EXTRACT → range queries** — 11개 EXTRACT(YEAR/MONTH) → date >= / date < 변환 (인덱스 활용)
+- **fetch_all 유틸** — 14개 파일 24개 위치의 cols/dict(zip) 패턴 → fetch_all(cur)
+- **statement_generator 분리** — 1074줄 → 7 모듈 (balance_sheet, income_statement, cash_flow, trial_balance, deficit, consolidated, helpers)
+- **upload dedup** — O(n²) → O(1) set 기반 중복 체크 (dedup_service.py)
+- **하드코딩 제거** — ENTITIES dict, HOI_ENTITY_ID, CASH_ACCOUNT_CODE, EQUITY_INCEPTION_DATE → DB/env
+- **VERSION 파일** — main.py 버전 하드코딩 → VERSION 파일 (0.5.0)
+- **에러 핸들링** — dashboard, cashflow, intercompany 라우터 try/except + 파서 로깅
+
+### Added
+- `backend/utils/db.py` — fetch_all(), build_date_range() 유틸
+- `backend/services/dedup_service.py` — O(1) 중복 감지 서비스
+- `backend/services/statements/` — 7개 모듈로 분리
+- `backend/tests/test_api_integration.py` — API 통합 테스트 10개
+- 총 80 tests (70 기존 + 10 통합)
+
 ## [0.5.0] - 2026-03-26 — 현금흐름 3탭 재설계 + 프로덕션 배포
 
 ### Added

@@ -1,11 +1,15 @@
 """내부거래 관리 API"""
 
+import logging
 from fastapi import APIRouter, Query, HTTPException, Depends
+
+logger = logging.getLogger(__name__)
 from pydantic import BaseModel
 from datetime import date
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
+from backend.utils.db import fetch_all
 from backend.services.intercompany_service import (
     detect_intercompany,
     confirm_pair,
@@ -55,8 +59,7 @@ def list_pairs(
         """,
         [start_date, end_date],
     )
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    rows = fetch_all(cur)
     cur.close()
     return {"items": rows, "total": len(rows)}
 
@@ -77,23 +80,30 @@ def confirm(pair_id: int, conn: PgConnection = Depends(get_db)):
 @router.delete("/pairs/{pair_id}")
 def reject(pair_id: int, conn: PgConnection = Depends(get_db)):
     cur = conn.cursor()
-    # transaction 플래그 정리
-    cur.execute(
-        "SELECT transaction_a_id, transaction_b_id FROM intercompany_pairs WHERE id = %s",
-        [pair_id],
-    )
-    pair = cur.fetchone()
-    if not pair:
-        raise HTTPException(404, "Pair not found")
+    try:
+        # transaction 플래그 정리
+        cur.execute(
+            "SELECT transaction_a_id, transaction_b_id FROM intercompany_pairs WHERE id = %s",
+            [pair_id],
+        )
+        pair = cur.fetchone()
+        if not pair:
+            raise HTTPException(404, "Pair not found")
 
-    for tx_id in [pair[0], pair[1]]:
-        if tx_id:
-            cur.execute(
-                "UPDATE transactions SET is_intercompany = FALSE, intercompany_pair_id = NULL WHERE id = %s",
-                [tx_id],
-            )
+        for tx_id in [pair[0], pair[1]]:
+            if tx_id:
+                cur.execute(
+                    "UPDATE transactions SET is_intercompany = FALSE, intercompany_pair_id = NULL WHERE id = %s",
+                    [tx_id],
+                )
 
-    cur.execute("DELETE FROM intercompany_pairs WHERE id = %s", [pair_id])
-    conn.commit()
-    cur.close()
-    return {"deleted": True}
+        cur.execute("DELETE FROM intercompany_pairs WHERE id = %s", [pair_id])
+        conn.commit()
+        cur.close()
+        return {"deleted": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        logger.error("Intercompany delete error: %s", e)
+        raise HTTPException(500, detail=str(e))

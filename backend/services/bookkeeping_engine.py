@@ -8,19 +8,32 @@ from decimal import Decimal, ROUND_HALF_UP
 from psycopg2.extensions import connection as PgConnection
 
 
-# 현금 계정 코드 (K-GAAP)
-CASH_ACCOUNT_CODE = "10100"
+DEFAULT_CASH_ACCOUNT_CODE = "10100"
+
+
+def get_cash_account_code(conn) -> str:
+    """settings 테이블에서 현금 계정 코드 조회. 없으면 기본값 사용."""
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM settings WHERE key = 'cash_account_code' AND entity_id IS NULL")
+        row = cur.fetchone()
+        cur.close()
+        if row and isinstance(row[0], str):
+            return row[0]
+    except Exception:
+        pass
+    return DEFAULT_CASH_ACCOUNT_CODE
 
 
 def _get_cash_account_id(cur) -> int:
     """현금및현금성자산 계정 ID 조회."""
     cur.execute(
         "SELECT id FROM standard_accounts WHERE code = %s",
-        [CASH_ACCOUNT_CODE],
+        [DEFAULT_CASH_ACCOUNT_CODE],
     )
     row = cur.fetchone()
     if not row:
-        raise RuntimeError(f"Cash account {CASH_ACCOUNT_CODE} not found in standard_accounts")
+        raise RuntimeError(f"Cash account {DEFAULT_CASH_ACCOUNT_CODE} not found in standard_accounts")
     return row[0]
 
 

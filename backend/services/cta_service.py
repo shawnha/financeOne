@@ -17,11 +17,24 @@ from backend.services.exchange_rate_service import (
 )
 
 
-# 역사적환율 기준일 (법인 설립일 기본값)
-EQUITY_INCEPTION_DATE = date(2023, 1, 1)
+DEFAULT_EQUITY_INCEPTION_DATE = date(2023, 1, 1)
 
 # AOCI US GAAP 코드
 AOCI_CODE = "3300"
+
+
+def _get_equity_inception_date(conn) -> date:
+    """settings 테이블에서 법인 설립일 조회. 없으면 기본값 사용."""
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM settings WHERE key = 'equity_inception_date' AND entity_id IS NULL")
+        row = cur.fetchone()
+        cur.close()
+        if row and isinstance(row[0], str):
+            return date.fromisoformat(row[0])
+    except Exception:
+        pass
+    return DEFAULT_EQUITY_INCEPTION_DATE
 
 
 def _quantize(amount: Decimal) -> Decimal:
@@ -56,7 +69,7 @@ def translate_entity_to_usd(
     # 3. 환율 조회
     closing_rate = get_closing_rate(conn, "KRW", "USD", end_date)
     average_rate = get_average_rate(conn, "KRW", "USD", start_date, end_date)
-    historical_rate = get_historical_rate(conn, "KRW", "USD", EQUITY_INCEPTION_DATE)
+    historical_rate = get_historical_rate(conn, "KRW", "USD", _get_equity_inception_date(conn))
 
     # 4. 환산
     translated = []

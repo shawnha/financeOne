@@ -1,8 +1,11 @@
 """우리은행 .xlsx parser."""
 
 import io
+import logging
 import re
 import openpyxl
+
+logger = logging.getLogger(__name__)
 import openpyxl.styles.colors as _colors
 from datetime import date, datetime
 from typing import Optional
@@ -114,7 +117,8 @@ class WooriBankParser(BaseParser):
                     source_type="woori_bank",
                     is_check_card=is_check_card,
                 ))
-            except Exception:
+            except Exception as e:
+                logger.warning("Parse row failed: %s", e)
                 continue
 
         wb.close()

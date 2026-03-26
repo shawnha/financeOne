@@ -29,16 +29,17 @@
 
 ## DB
 - 스키마: backend/database/schema.sql
-- 연결: DATABASE_URL (Neon dev 브랜치 connection string)
-- 로컬 개발도 Neon dev 브랜치 사용 — SQLite 사용 금지
-- 20개 테이블 (14 + slack + journal + intercompany_pairs + consolidation_adjustments)
+- 연결: DATABASE_URL (Supabase Session pooler)
+- Supabase 프로젝트: hanahone-erp (kxsofwbwzoovnwgxiwgi, ap-northeast-2)
+- 스키마: financeone (connection.py에서 SET search_path TO financeone, public)
+- 21개 테이블 (14 + slack + journal + intercompany_pairs + consolidation_adjustments + card_settings)
 - 3개 법인 초기 데이터: seed.py 실행
 - Alembic 마이그레이션: `alembic upgrade head`
 
 ## Stack
 - Frontend: Next.js 14 App Router
 - Backend: FastAPI (Python)
-- DB: Neon PostgreSQL (dev/prod 브랜치 분리)
+- DB: Supabase PostgreSQL (financeone 스키마, Session pooler)
 - Deploy: Vercel (frontend) + Railway (backend)
 
 ## Directory

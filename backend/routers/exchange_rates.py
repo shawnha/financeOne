@@ -7,6 +7,7 @@ from datetime import date
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
+from backend.utils.db import fetch_all
 from backend.services.exchange_rate_service import (
     get_closing_rate,
     get_average_rate,
@@ -66,8 +67,7 @@ def list_exchange_rates(
         """,
         params + [per_page, offset],
     )
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    rows = fetch_all(cur)
     cur.close()
 
     return {"items": rows, "total": total, "page": page, "per_page": per_page}

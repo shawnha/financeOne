@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
+from backend.utils.db import build_date_range
 
 router = APIRouter(prefix="/api/notes", tags=["notes"])
 
@@ -17,7 +18,10 @@ VAULT_PATH = os.environ.get(
     "/Users/admin/Desktop/claude/financeone/obsidian-vault",
 )
 
-ENTITIES = {1: ("HOI", "USD"), 2: ("한아원코리아", "KRW"), 3: ("한아원리테일", "KRW")}
+def _get_entities(cur) -> dict:
+    """DB에서 법인 목록 조회. Returns: {id: (name, currency)}"""
+    cur.execute("SELECT id, name, currency FROM entities WHERE is_active = TRUE ORDER BY id")
+    return {row[0]: (row[1], row[2]) for row in cur.fetchall()}
 
 
 def _format_krw(amount: float) -> str:
@@ -45,9 +49,10 @@ def generate_notes(
     months = [body.month] if body.month else list(range(1, 13))
     created = []
     cur = conn.cursor()
+    entities = _get_entities(cur)
 
     for m in months:
-        for eid, (ename, currency) in ENTITIES.items():
+        for eid, (ename, currency) in entities.items():
             # 거래 요약
             cur.execute(
                 """
@@ -59,10 +64,9 @@ def generate_notes(
                     COUNT(*) FILTER (WHERE is_confirmed = FALSE)
                 FROM transactions
                 WHERE entity_id = %s
-                  AND EXTRACT(YEAR FROM date) = %s
-                  AND EXTRACT(MONTH FROM date) = %s
+                  AND date >= %s AND date < %s
                 """,
-                [eid, body.year, m],
+                [eid, *build_date_range(body.year, m)],
             )
             row = cur.fetchone()
             income, expense, tx_count, confirmed, unconfirmed = row
@@ -76,11 +80,11 @@ def generate_notes(
                 SELECT counterparty, SUM(amount)
                 FROM transactions
                 WHERE entity_id = %s AND type = 'out'
-                  AND EXTRACT(YEAR FROM date) = %s AND EXTRACT(MONTH FROM date) = %s
+                  AND date >= %s AND date < %s
                   AND counterparty IS NOT NULL
                 GROUP BY counterparty ORDER BY SUM(amount) DESC LIMIT 5
                 """,
-                [eid, body.year, m],
+                [eid, *build_date_range(body.year, m)],
             )
             top_exp = [(r[0], float(r[1])) for r in cur.fetchall()]
 

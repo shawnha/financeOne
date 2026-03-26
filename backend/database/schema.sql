@@ -1,11 +1,14 @@
--- FinanceOne v2 — DB Schema (Neon PostgreSQL)
+-- FinanceOne v2 — DB Schema (Supabase PostgreSQL)
 -- 21개 테이블 (14 + slack + journal + intercompany_pairs + consolidation_adjustments + card_settings)
--- PRD SQLite 문법 → PostgreSQL 변환
+-- Schema: financeone (hanahone-erp Supabase project)
+
+CREATE SCHEMA IF NOT EXISTS financeone;
+SET search_path TO financeone;
 
 BEGIN;
 
 -- 1. entities — 법인
-CREATE TABLE entities (
+CREATE TABLE IF NOT EXISTS entities (
   id          SERIAL PRIMARY KEY,
   code        TEXT NOT NULL UNIQUE,
   name        TEXT NOT NULL,
@@ -17,7 +20,7 @@ CREATE TABLE entities (
 );
 
 -- 2. members — 팀 멤버
-CREATE TABLE members (
+CREATE TABLE IF NOT EXISTS members (
   id          SERIAL PRIMARY KEY,
   entity_id   INTEGER NOT NULL REFERENCES entities(id),
   name        TEXT NOT NULL,
@@ -27,7 +30,7 @@ CREATE TABLE members (
 );
 
 -- 3. standard_accounts — K-GAAP 표준계정
-CREATE TABLE standard_accounts (
+CREATE TABLE IF NOT EXISTS standard_accounts (
   id           SERIAL PRIMARY KEY,
   code         TEXT NOT NULL UNIQUE,
   name         TEXT NOT NULL,
@@ -40,7 +43,7 @@ CREATE TABLE standard_accounts (
 );
 
 -- 4. internal_accounts — 내부 계정과목
-CREATE TABLE internal_accounts (
+CREATE TABLE IF NOT EXISTS internal_accounts (
   id                  SERIAL PRIMARY KEY,
   entity_id           INTEGER NOT NULL REFERENCES entities(id),
   code                TEXT NOT NULL,
@@ -53,7 +56,7 @@ CREATE TABLE internal_accounts (
 );
 
 -- 5. uploaded_files — 업로드 파일 추적
-CREATE TABLE uploaded_files (
+CREATE TABLE IF NOT EXISTS uploaded_files (
   id           SERIAL PRIMARY KEY,
   entity_id    INTEGER NOT NULL REFERENCES entities(id),
   filename     TEXT NOT NULL,
@@ -66,7 +69,7 @@ CREATE TABLE uploaded_files (
 );
 
 -- 6. transactions — 거래내역 (핵심)
-CREATE TABLE transactions (
+CREATE TABLE IF NOT EXISTS transactions (
   id                     SERIAL PRIMARY KEY,
   entity_id              INTEGER NOT NULL REFERENCES entities(id),
   file_id                INTEGER REFERENCES uploaded_files(id),
@@ -102,12 +105,13 @@ CREATE TABLE transactions (
   updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_tx_entity_date ON transactions(entity_id, date);
-CREATE INDEX idx_tx_standard ON transactions(standard_account_id);
-CREATE INDEX idx_tx_confirmed ON transactions(is_confirmed);
+CREATE INDEX IF NOT EXISTS idx_tx_entity_date ON transactions(entity_id, date);
+CREATE INDEX IF NOT EXISTS idx_tx_standard ON transactions(standard_account_id);
+CREATE INDEX IF NOT EXISTS idx_tx_confirmed ON transactions(is_confirmed);
+CREATE INDEX IF NOT EXISTS idx_tx_file_id ON transactions(file_id);
 
 -- 7. balance_snapshots — 잔고 스냅샷
-CREATE TABLE balance_snapshots (
+CREATE TABLE IF NOT EXISTS balance_snapshots (
   id            SERIAL PRIMARY KEY,
   entity_id     INTEGER NOT NULL REFERENCES entities(id),
   date          DATE NOT NULL,
@@ -122,7 +126,7 @@ CREATE TABLE balance_snapshots (
 );
 
 -- 8. forecasts — 예측 수입/지출
-CREATE TABLE forecasts (
+CREATE TABLE IF NOT EXISTS forecasts (
   id               SERIAL PRIMARY KEY,
   entity_id        INTEGER NOT NULL REFERENCES entities(id),
   year             INTEGER NOT NULL,
@@ -136,11 +140,11 @@ CREATE TABLE forecasts (
   note             TEXT,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE(entity_id, year, month, category, subcategory, type)
+  UNIQUE NULLS NOT DISTINCT (entity_id, year, month, category, subcategory, type)
 );
 
 -- 9. exchange_rates — 환율
-CREATE TABLE exchange_rates (
+CREATE TABLE IF NOT EXISTS exchange_rates (
   id            SERIAL PRIMARY KEY,
   date          DATE NOT NULL,
   from_currency TEXT NOT NULL,
@@ -152,7 +156,7 @@ CREATE TABLE exchange_rates (
 );
 
 -- 10. financial_statements — 재무제표 헤더
-CREATE TABLE financial_statements (
+CREATE TABLE IF NOT EXISTS financial_statements (
   id                        SERIAL PRIMARY KEY,
   entity_id                 INTEGER NOT NULL REFERENCES entities(id),
   fiscal_year               INTEGER NOT NULL,
@@ -169,6 +173,7 @@ CREATE TABLE financial_statements (
   business_item             TEXT,
   auditor_name              TEXT,
   notes                     TEXT,
+  base_currency             TEXT DEFAULT 'KRW',
   status                    TEXT NOT NULL DEFAULT 'draft',
   created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -176,7 +181,7 @@ CREATE TABLE financial_statements (
 );
 
 -- 11. financial_statement_line_items — 재무제표 항목
-CREATE TABLE financial_statement_line_items (
+CREATE TABLE IF NOT EXISTS financial_statement_line_items (
   id                SERIAL PRIMARY KEY,
   statement_id      INTEGER NOT NULL REFERENCES financial_statements(id) ON DELETE CASCADE,
   statement_type    TEXT NOT NULL,
@@ -196,7 +201,7 @@ CREATE TABLE financial_statement_line_items (
 );
 
 -- 12. settings — 앱 설정
-CREATE TABLE settings (
+CREATE TABLE IF NOT EXISTS settings (
   id         SERIAL PRIMARY KEY,
   key        TEXT NOT NULL,
   value      TEXT NOT NULL,
@@ -206,10 +211,10 @@ CREATE TABLE settings (
 );
 
 -- entity_id NULL인 경우 중복 방지 (전역 설정)
-CREATE UNIQUE INDEX idx_settings_global ON settings(key) WHERE entity_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_global ON settings(key) WHERE entity_id IS NULL;
 
 -- 13. mapping_rules — AI 매핑 학습
-CREATE TABLE mapping_rules (
+CREATE TABLE IF NOT EXISTS mapping_rules (
   id                   SERIAL PRIMARY KEY,
   entity_id            INTEGER REFERENCES entities(id),
   counterparty_pattern TEXT NOT NULL,
@@ -221,10 +226,10 @@ CREATE TABLE mapping_rules (
   updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_mapping_pattern ON mapping_rules(counterparty_pattern);
+CREATE INDEX IF NOT EXISTS idx_mapping_pattern ON mapping_rules(counterparty_pattern);
 
 -- 14. gaap_mapping — US GAAP ↔ K-GAAP 매핑
-CREATE TABLE gaap_mapping (
+CREATE TABLE IF NOT EXISTS gaap_mapping (
   id                    SERIAL PRIMARY KEY,
   us_gaap_code          TEXT NOT NULL UNIQUE,
   us_gaap_name          TEXT NOT NULL,
@@ -237,7 +242,7 @@ CREATE TABLE gaap_mapping (
 );
 
 -- 15. slack_messages — Slack 경비 메시지
-CREATE TABLE slack_messages (
+CREATE TABLE IF NOT EXISTS slack_messages (
   id                        SERIAL PRIMARY KEY,
   entity_id                 INTEGER REFERENCES entities(id),
   ts                        TEXT NOT NULL UNIQUE,
@@ -258,11 +263,11 @@ CREATE TABLE slack_messages (
   created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_slack_ts ON slack_messages(ts);
-CREATE INDEX idx_slack_entity ON slack_messages(entity_id);
+CREATE INDEX IF NOT EXISTS idx_slack_ts ON slack_messages(ts);
+CREATE INDEX IF NOT EXISTS idx_slack_entity ON slack_messages(entity_id);
 
 -- 16. transaction_slack_match — 거래 ↔ Slack 매칭
-CREATE TABLE transaction_slack_match (
+CREATE TABLE IF NOT EXISTS transaction_slack_match (
   id                   SERIAL PRIMARY KEY,
   transaction_id       INTEGER NOT NULL REFERENCES transactions(id),
   slack_message_id     INTEGER NOT NULL REFERENCES slack_messages(id),
@@ -277,11 +282,11 @@ CREATE TABLE transaction_slack_match (
   created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_match_tx ON transaction_slack_match(transaction_id);
-CREATE INDEX idx_match_slack ON transaction_slack_match(slack_message_id);
+CREATE INDEX IF NOT EXISTS idx_match_tx ON transaction_slack_match(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_match_slack ON transaction_slack_match(slack_message_id);
 
 -- 17. journal_entries — 분개 헤더
-CREATE TABLE journal_entries (
+CREATE TABLE IF NOT EXISTS journal_entries (
   id             SERIAL PRIMARY KEY,
   entity_id      INTEGER NOT NULL REFERENCES entities(id),
   transaction_id INTEGER REFERENCES transactions(id),
@@ -294,11 +299,11 @@ CREATE TABLE journal_entries (
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_je_entity_date ON journal_entries(entity_id, entry_date);
-CREATE INDEX idx_je_transaction ON journal_entries(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_je_entity_date ON journal_entries(entity_id, entry_date);
+CREATE INDEX IF NOT EXISTS idx_je_transaction ON journal_entries(transaction_id);
 
 -- 18. journal_entry_lines — 분개 라인 (차변/대변)
-CREATE TABLE journal_entry_lines (
+CREATE TABLE IF NOT EXISTS journal_entry_lines (
   id                  SERIAL PRIMARY KEY,
   journal_entry_id    INTEGER NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
   standard_account_id INTEGER NOT NULL REFERENCES standard_accounts(id),
@@ -312,11 +317,11 @@ CREATE TABLE journal_entry_lines (
   )
 );
 
-CREATE INDEX idx_jel_entry ON journal_entry_lines(journal_entry_id);
-CREATE INDEX idx_jel_account ON journal_entry_lines(standard_account_id);
+CREATE INDEX IF NOT EXISTS idx_jel_entry ON journal_entry_lines(journal_entry_id);
+CREATE INDEX IF NOT EXISTS idx_jel_account ON journal_entry_lines(standard_account_id);
 
 -- 19. intercompany_pairs — 내부거래 매칭
-CREATE TABLE intercompany_pairs (
+CREATE TABLE IF NOT EXISTS intercompany_pairs (
   id               SERIAL PRIMARY KEY,
   entity_a_id      INTEGER NOT NULL REFERENCES entities(id),
   entity_b_id      INTEGER NOT NULL REFERENCES entities(id),
@@ -332,7 +337,7 @@ CREATE TABLE intercompany_pairs (
 );
 
 -- 20. consolidation_adjustments — 연결 조정 감사 추적
-CREATE TABLE consolidation_adjustments (
+CREATE TABLE IF NOT EXISTS consolidation_adjustments (
   id               SERIAL PRIMARY KEY,
   statement_id     INTEGER NOT NULL REFERENCES financial_statements(id) ON DELETE CASCADE,
   adjustment_type  TEXT NOT NULL,
@@ -345,10 +350,10 @@ CREATE TABLE consolidation_adjustments (
   created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_exchange_rates_lookup ON exchange_rates(from_currency, to_currency, date DESC);
+CREATE INDEX IF NOT EXISTS idx_exchange_rates_lookup ON exchange_rates(from_currency, to_currency, date DESC);
 
 -- 21. card_settings — 카드 설정 (결제일, 카드사 정보)
-CREATE TABLE card_settings (
+CREATE TABLE IF NOT EXISTS card_settings (
   id           SERIAL PRIMARY KEY,
   entity_id    INTEGER NOT NULL REFERENCES entities(id),
   card_name    TEXT NOT NULL,

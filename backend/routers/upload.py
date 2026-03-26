@@ -6,8 +6,10 @@ from typing import Optional
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
+from backend.utils.db import fetch_all
 from backend.services.parsers import detect_parser
 from backend.services.parsers.woori_bank import WooriBankParser
+from backend.services.dedup_service import build_file_key_counts, is_file_duplicate
 
 router = APIRouter(prefix="/api/upload", tags=["upload"])
 
@@ -76,15 +78,10 @@ async def upload_transactions(
         duplicate_count = 0
         cancel_count = 0
 
-        for tx in parsed:
-            # 중복 감지: 같은 키의 거래가 DB에 이미 있는 개수 vs 이번 파일에서 같은 키 개수
-            dedup_key = (str(tx.date), tx.amount, tx.counterparty, tx.description, tx.source_type)
+        cumulative = build_file_key_counts(parsed)
 
-            # 이번 파일에서 같은 키가 몇 번째인지
-            file_key_count = sum(1 for p in parsed[:parsed.index(tx)+1]
-                                 if (str(p.date), p.amount, p.counterparty, p.description, p.source_type) == dedup_key)
-
-            # DB에 이미 있는 같은 키 개수
+        for i, tx in enumerate(parsed):
+            # 중복 감지: O(1) set 기반
             cur.execute(
                 """
                 SELECT COUNT(*) FROM transactions
@@ -95,7 +92,7 @@ async def upload_transactions(
             )
             db_count = cur.fetchone()[0]
 
-            if file_key_count <= db_count:
+            if is_file_duplicate(i, cumulative, db_count):
                 duplicate_count += 1
                 continue  # DB에 이미 충분히 있으면 건너뜀
 
@@ -352,8 +349,7 @@ def upload_history(
         """,
         params + [per_page, offset],
     )
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    rows = fetch_all(cur)
     cur.close()
 
     return {

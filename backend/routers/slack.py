@@ -6,6 +6,7 @@ from typing import Optional
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
+from backend.utils.db import fetch_all
 
 router = APIRouter(prefix="/api/slack", tags=["slack"])
 
@@ -79,8 +80,7 @@ def list_slack_messages(
         """,
         params + [per_page, offset],
     )
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    rows = fetch_all(cur)
     cur.close()
 
     return {
@@ -175,8 +175,7 @@ def get_candidates(
             amount, lower_3pct, upper_3pct, vat_lower, vat_upper,  # confidence CASE
         ] + params + [amount],  # ORDER BY
     )
-    cols = [d[0] for d in cur.description]
-    candidates = [dict(zip(cols, r)) for r in cur.fetchall()]
+    candidates = fetch_all(cur)
     cur.close()
 
     return {

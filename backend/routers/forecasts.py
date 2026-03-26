@@ -9,6 +9,7 @@ from typing import Optional
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
+from backend.utils.db import fetch_all
 
 router = APIRouter(prefix="/api/forecasts", tags=["forecasts"])
 
@@ -65,8 +66,7 @@ def list_forecasts(
             """,
             [entity_id, year],
         )
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    rows = fetch_all(cur)
     cur.close()
 
     return {"forecasts": rows, "count": len(rows)}

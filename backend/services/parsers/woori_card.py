@@ -1,10 +1,13 @@
 """우리카드 .xls parser."""
 
 import io
+import logging
 import re
 import xlrd
 from datetime import date
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from .base import BaseParser, ParsedTransaction
 from .utils import parse_amount
@@ -95,7 +98,8 @@ class WooriCardParser(BaseParser):
                     is_check_card=is_check_card,
                     is_cancel=is_cancel,
                 ))
-            except Exception:
+            except Exception as e:
+                logger.warning("Parse row failed: %s", e)
                 continue
 
         return results

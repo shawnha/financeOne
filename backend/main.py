@@ -2,8 +2,11 @@
 
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+_VERSION = (Path(__file__).resolve().parent.parent / "VERSION").read_text().strip()
 
 from backend.database.connection import init_pool, close_pool
 from backend.routers import entities, transactions, accounts, upload, dashboard, statements, slack, journal_entries, integrations, exchange_rates, intercompany, notes, cashflow, forecasts, card_settings
@@ -18,7 +21,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="FinanceOne API",
-    version="0.1.0",
+    version=_VERSION,
     lifespan=lifespan,
 )
 
@@ -49,4 +52,4 @@ app.include_router(card_settings.router)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "0.4.0"}
+    return {"status": "ok", "version": _VERSION}

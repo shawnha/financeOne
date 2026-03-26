@@ -1,10 +1,14 @@
 """대시보드 API -- KPI cards, cash flow chart, recent transactions"""
 
-from fastapi import APIRouter, Depends
+import logging
+from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
+from backend.utils.db import fetch_all
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -14,6 +18,16 @@ def get_dashboard(
     entity_id: Optional[int] = None,
     conn: PgConnection = Depends(get_db),
 ):
+    try:
+        return _get_dashboard_data(conn, entity_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Dashboard KPI error: %s", e)
+        raise HTTPException(500, detail=str(e))
+
+
+def _get_dashboard_data(conn: PgConnection, entity_id: Optional[int]):
     cur = conn.cursor()
 
     entity_filter = ""
@@ -123,8 +137,7 @@ def get_dashboard(
         """,
         params,
     )
-    cols = [d[0] for d in cur.description]
-    recent = [dict(zip(cols, r)) for r in cur.fetchall()]
+    recent = fetch_all(cur)
 
     # Summary counts
     cur.execute(
