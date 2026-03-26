@@ -291,7 +291,10 @@ export function ActualTab({ entityId }: { entityId: string | null }) {
 
   // ── SUCCESS ──
   const months = summary!.available_months
-  const chartData = summary!.months
+  const chartData = summary!.months.map((m) => ({
+    ...m,
+    barOpacity: m.month === selectedMonth ? 1 : 0.35,
+  }))
 
   // Current month KPI
   const currentSummary = chartData.find((m) => m.month === selectedMonth)
@@ -360,7 +363,6 @@ export function ActualTab({ entityId }: { entityId: string | null }) {
                 fill="url(#incomeBarGrad)"
                 radius={[4, 4, 0, 0]}
                 animationDuration={300}
-                opacity={(entry: SummaryMonth) => entry.month === selectedMonth ? 1 : 0.35}
               />
               <Bar
                 dataKey="expense"
@@ -368,7 +370,6 @@ export function ActualTab({ entityId }: { entityId: string | null }) {
                 fill="url(#expenseBarGrad)"
                 radius={[4, 4, 0, 0]}
                 animationDuration={300}
-                opacity={(entry: SummaryMonth) => entry.month === selectedMonth ? 1 : 0.35}
               />
               <Line
                 type="monotone"
