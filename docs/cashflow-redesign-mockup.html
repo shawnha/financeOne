@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FinanceOne — 현금흐름 재설계 v4</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap');
+  :root{--bg:#050508;--bg2:#0d1117;--bg3:#161b22;--border:rgba(255,255,255,0.06);--text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;--green:#22C55E;--red:#EF4444;--amber:#F59E0B;--blue:#3B82F6;--purple:#8B5CF6;--cyan:#06B6D4}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;font-size:14px;line-height:1.6;padding:32px;max-width:1300px;margin:0 auto}
+  h1{font-size:24px;font-weight:700;letter-spacing:-.5px;margin-bottom:4px}h1 span{color:var(--green)}
+  .subtitle{color:var(--text2);font-size:13px;margin-bottom:24px}
+  .mono{font-family:'Geist Mono',monospace}
+  .tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:24px}
+  .tab{padding:10px 20px;font-size:13px;font-weight:500;cursor:pointer;border-bottom:2px solid transparent;color:var(--text2);transition:all .2s}
+  .tab:hover{color:var(--text)}.tab.active{color:var(--green);border-bottom-color:var(--green)}.tab.a2{color:var(--amber);border-bottom-color:var(--amber)}.tab.a3{color:var(--purple);border-bottom-color:var(--purple)}
+  .month-sel{display:flex;align-items:center;gap:8px;margin-bottom:20px}
+  .mbtn{padding:6px 14px;font-size:12px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer}
+  .mbtn.on{background:var(--green);color:#000;border-color:var(--green);font-weight:600}
+  .mbtn.on2{background:var(--amber);color:#000;border-color:var(--amber);font-weight:600}
+  .mbtn.on3{background:var(--purple);color:#fff;border-color:var(--purple);font-weight:600}
+  .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+  .scard{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px}
+  .scard .l{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
+  .scard .v{font-size:17px;font-weight:600;font-family:'Geist Mono',monospace}
+  .scard .d{font-size:11px;margin-top:3px}
+  .pos{color:var(--green)}.neg{color:var(--red)}.est{color:var(--amber)}
+  .chart{background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:24px;margin-bottom:24px}
+  .legend{display:flex;gap:16px;margin-top:10px;font-size:11px;color:var(--text2)}
+  .ldot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+
+  /* Event list */
+  .elist{background:var(--bg2);border:1px solid var(--border);border-radius:16px;overflow:hidden}
+  .ehdr{display:grid;padding:10px 16px;background:var(--bg3);font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.5px}
+  .ehdr.c5{grid-template-columns:90px 70px 1fr 120px 130px}
+  .ehdr.c7{grid-template-columns:80px 80px 1fr 110px 110px 110px 110px}
+  .erow{display:grid;padding:9px 16px;border-top:1px solid var(--border);font-size:13px;align-items:center;transition:background .15s}
+  .erow:hover{background:rgba(255,255,255,.02)}
+  .erow.c5{grid-template-columns:90px 70px 1fr 120px 130px}
+  .erow.c7{grid-template-columns:80px 80px 1fr 110px 110px 110px 110px}
+  .edate{font-family:'Geist Mono',monospace;color:var(--text2);font-size:12px}
+  .etype{font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;text-align:center;white-space:nowrap}
+  .t-in{background:rgba(34,197,94,.12);color:var(--green)}
+  .t-out{background:rgba(239,68,68,.12);color:var(--red)}
+  .t-card{background:rgba(139,92,246,.12);color:var(--purple)}
+  .t-fix{background:rgba(100,116,139,.15);color:var(--text2)}
+  .t-fc{background:rgba(249,115,22,.12);color:var(--amber)}
+  .eamt{text-align:right;font-family:'Geist Mono',monospace;font-size:12px}
+  .ebal{text-align:right;font-family:'Geist Mono',monospace;font-size:12px;font-weight:500}
+  .edesc{color:var(--text)}.edesc small{display:block;font-size:11px;color:var(--text3)}
+  .ghdr{display:grid;padding:9px 16px;border-top:1px solid var(--border);background:rgba(255,255,255,.015);cursor:pointer;font-size:13px}
+  .ghdr.c5{grid-template-columns:90px 70px 1fr 120px 130px}
+  .ghdr.c7{grid-template-columns:80px 80px 1fr 110px 110px 110px 110px}
+  .ghdr:hover{background:rgba(255,255,255,.03)}
+  .gch{border-top:1px solid rgba(255,255,255,.03)}
+  .gch .erow{padding-left:28px;background:rgba(0,0,0,.12);font-size:12px}
+  .gch .gch .erow{padding-left:48px;background:rgba(0,0,0,.18);font-size:11px}
+  .brow{display:grid;padding:12px 16px;font-size:13px;font-weight:600}
+  .brow.c5{grid-template-columns:90px 70px 1fr 120px 130px}
+  .brow.c7{grid-template-columns:80px 80px 1fr 110px 110px 110px 110px}
+  .brow.st{background:rgba(34,197,94,.03);border-bottom:1px solid var(--border)}
+  .brow.en{background:rgba(34,197,94,.03);border-top:2px solid rgba(34,197,94,.15)}
+  .brow.enf{background:rgba(249,115,22,.03);border-top:2px solid rgba(249,115,22,.15)}
+  .ab{display:inline-block;font-size:9px;padding:1px 6px;border-radius:3px;margin-right:4px;font-weight:600}
+  .ab-s{background:rgba(6,182,212,.12);color:var(--cyan)}
+  .ab-t{background:rgba(59,130,246,.12);color:var(--blue)}
+  .ab-e{background:rgba(249,115,22,.12);color:var(--amber)}
+  .ab-w{background:rgba(34,197,94,.12);color:var(--green)}
+  .ab-f{background:rgba(139,92,246,.12);color:var(--purple)}
+  .ab-o{background:rgba(100,116,139,.12);color:var(--text2)}
+  .ab-rev{background:rgba(34,197,94,.12);color:var(--green)}
+  .ab-rent{background:rgba(239,68,68,.12);color:var(--red)}
+
+  .compare{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px}
+  .cbox{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px}
+  .cbox h4{font-size:13px;font-weight:600;margin-bottom:12px}
+  .crow{display:flex;justify-content:space-between;padding:4px 0;font-size:12px}
+  .note{background:rgba(249,115,22,.06);border:1px solid rgba(249,115,22,.15);border-radius:8px;padding:12px 16px;margin:16px 0;font-size:12px;color:var(--amber)}
+  .note strong{display:block;margin-bottom:4px}
+  .formula{background:var(--bg3);border:1px solid var(--border);padding:12px 16px;border-radius:8px;font-family:'Geist Mono',monospace;font-size:12px;line-height:1.8;color:var(--cyan);margin:12px 0}
+
+  /* Card section */
+  .csec{background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:20px}
+  .cgrp{margin-bottom:16px}
+  .cname{font-size:13px;font-weight:600;color:var(--purple);margin-bottom:8px;cursor:pointer}
+  .citem{display:flex;justify-content:space-between;padding:4px 0 4px 12px;font-size:12px;color:var(--text2);border-bottom:1px solid rgba(255,255,255,.03)}
+  .ctot{display:flex;justify-content:space-between;padding:8px 0;font-size:13px;font-weight:600;border-top:1px solid var(--border);margin-top:8px}
+
+  /* Diff indicator */
+  .diff-bar{display:inline-block;height:4px;border-radius:2px;margin-left:6px;vertical-align:middle}
+  .diff-ok{background:var(--green);width:30px}
+  .diff-warn{background:var(--amber);width:20px}
+  .diff-bad{background:var(--red);width:15px}
+
+  @media(max-width:900px){body{padding:16px}.summary{grid-template-columns:repeat(2,1fr)}.ehdr,.erow,.ghdr,.brow{font-size:11px;padding:8px 10px}.compare{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<h1>현금흐름 — <span>한아원코리아</span></h1>
+<p class="subtitle">우리은행 법인통장</p>
+
+<div class="tabs">
+  <div class="tab active" onclick="showTab('actual',this)">실제 현금흐름</div>
+  <div class="tab" onclick="showTab('forecast',this)">예상 현금흐름</div>
+  <div class="tab" onclick="showTab('expense',this)">비용 (카드 사용)</div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- TAB 1: 실제 현금흐름 -->
+<!-- ═══════════════════════════════════════════ -->
+<div id="tab-actual">
+
+<div class="month-sel"><span style="font-size:12px;color:var(--text3)">월:</span><div class="mbtn">12월</div><div class="mbtn on">1월</div><div class="mbtn">2월</div></div>
+
+<!-- 그래프: 월별 입금/출금 bar + 순현금흐름 area -->
+<div class="chart">
+  <svg viewBox="0 0 800 200" style="width:100%;height:200px">
+    <defs>
+      <linearGradient id="gIn" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#22C55E" stop-opacity="0.6"/><stop offset="100%" stop-color="#22C55E" stop-opacity="0.05"/></linearGradient>
+      <linearGradient id="gOut" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#EF4444" stop-opacity="0.6"/><stop offset="100%" stop-color="#EF4444" stop-opacity="0.05"/></linearGradient>
+      <linearGradient id="gNet" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F59E0B" stop-opacity="0.3"/><stop offset="100%" stop-color="#F59E0B" stop-opacity="0"/></linearGradient>
+    </defs>
+    <!-- Grid -->
+    <line x1="60" y1="160" x2="760" y2="160" stroke="rgba(255,255,255,0.06)"/>
+    <line x1="60" y1="80" x2="760" y2="80" stroke="rgba(255,255,255,0.03)" stroke-dasharray="4 4"/>
+    <text x="55" y="15" text-anchor="end" fill="#64748b" font-size="9">₩300M</text>
+    <text x="55" y="85" text-anchor="end" fill="#64748b" font-size="9">₩150M</text>
+    <text x="55" y="165" text-anchor="end" fill="#64748b" font-size="9">₩0</text>
+
+    <!-- Dec: soft gradient bars -->
+    <rect x="105" y="55" width="28" height="105" rx="6" fill="url(#gIn)" stroke="#22C55E" stroke-width="0.5" opacity="0.5"/>
+    <rect x="138" y="35" width="28" height="125" rx="6" fill="url(#gOut)" stroke="#EF4444" stroke-width="0.5" opacity="0.5"/>
+    <text x="135" y="175" fill="#64748b" font-size="10" text-anchor="middle">12월</text>
+
+    <!-- Jan: highlighted -->
+    <rect x="255" y="28" width="32" height="132" rx="6" fill="url(#gIn)" stroke="#22C55E" stroke-width="1"/>
+    <rect x="292" y="12" width="32" height="148" rx="6" fill="url(#gOut)" stroke="#EF4444" stroke-width="1"/>
+    <text x="289" y="175" fill="var(--green)" font-size="10" text-anchor="middle" font-weight="600">1월</text>
+    <text x="271" y="23" fill="#22C55E" font-size="8" text-anchor="middle">₩236M</text>
+    <text x="308" y="8" fill="#EF4444" font-size="8" text-anchor="middle">₩290M</text>
+
+    <!-- Feb -->
+    <rect x="405" y="42" width="28" height="118" rx="6" fill="url(#gIn)" stroke="#22C55E" stroke-width="0.5" opacity="0.35"/>
+    <rect x="438" y="50" width="28" height="110" rx="6" fill="url(#gOut)" stroke="#EF4444" stroke-width="0.5" opacity="0.35"/>
+    <text x="435" y="175" fill="#64748b" font-size="10" text-anchor="middle">2월</text>
+
+    <!-- Mar -->
+    <rect x="555" y="45" width="28" height="115" rx="6" fill="url(#gIn)" stroke="#22C55E" stroke-width="0.5" opacity="0.2"/>
+    <rect x="588" y="48" width="28" height="112" rx="6" fill="url(#gOut)" stroke="#EF4444" stroke-width="0.5" opacity="0.2"/>
+    <text x="585" y="175" fill="#64748b" font-size="10" text-anchor="middle">3월</text>
+
+    <!-- Net cashflow area line -->
+    <polygon points="135,128 289,138 435,130 585,128 585,160 435,160 289,160 135,160" fill="url(#gNet)"/>
+    <polyline points="135,128 289,138 435,130 585,128" fill="none" stroke="#F59E0B" stroke-width="1.5"/>
+    <circle cx="289" cy="138" r="3.5" fill="#F59E0B"/>
+    <text x="289" y="148" fill="#F59E0B" font-size="8" text-anchor="middle">-₩54M</text>
+  </svg>
+  <div class="legend">
+    <span><span class="ldot" style="background:#22C55E"></span>입금</span>
+    <span><span class="ldot" style="background:#EF4444"></span>출금</span>
+    <span><span class="ldot" style="background:#F59E0B"></span>순현금흐름</span>
+  </div>
+</div>
+
+<!-- Summary with 순현금흐름 -->
+<div class="summary">
+  <div class="scard"><div class="l">기초 잔고</div><div class="v mono">₩161,050,376</div></div>
+  <div class="scard"><div class="l">총 입금</div><div class="v mono pos">+₩235,976,922</div></div>
+  <div class="scard"><div class="l">총 출금</div><div class="v mono neg">-₩289,858,658</div></div>
+  <div class="scard"><div class="l">기말 잔고</div><div class="v mono">₩107,168,640</div><div class="d neg">순 -₩53,881,736</div></div>
+</div>
+
+<!-- 실제 거래 리스트 (5컬럼) -->
+<div class="elist">
+  <div class="ehdr c5"><span>날짜</span><span>유형</span><span>항목</span><span style="text-align:right">금액</span><span style="text-align:right">잔고</span></div>
+  <div class="brow c5 st"><span class="edate">2025-12-31</span><span></span><span>시작 잔고</span><span class="eamt">—</span><span class="ebal">₩161,050,376</span></div>
+
+  <div class="erow c5"><span class="edate">01-02</span><span class="etype t-in">입금</span><span class="edesc">스마트스토어정산</span><span class="eamt pos">+₩1,226,184</span><span class="ebal">₩162,276,560</span></div>
+  <div class="erow c5"><span class="edate">01-04</span><span class="etype t-out">출금</span><span class="edesc">NICE_통신판매</span><span class="eamt neg">-₩235,200</span><span class="ebal">₩162,041,360</span></div>
+  <div class="erow c5"><span class="edate">01-08</span><span class="etype t-card">선결제</span><span class="edesc">롯데카드(주) 선결제</span><span class="eamt neg">-₩3,000,000</span><span class="ebal">₩159,041,360</span></div>
+
+  <!-- 카드대금 → 회원 → 내부계정 서랍 -->
+  <div class="ghdr c5" onclick="toggle(this)">
+    <span class="edate">01-15</span><span class="etype t-card">카드대금</span>
+    <span class="edesc">롯데카드 12월분 (10건) ▾<small>2025-12 사용분</small></span>
+    <span class="eamt neg">-₩25,293,212</span><span class="ebal">₩xxx,xxx</span>
+  </div>
+  <div class="gch" style="display:none">
+    <div class="ghdr c5" onclick="toggle(this)" style="padding-left:28px;background:rgba(0,0,0,.12)">
+      <span></span><span class="etype t-card">회원</span>
+      <span>하선우 (****1234) ▾</span><span class="eamt neg">-₩5,650,590</span><span></span>
+    </div>
+    <div class="gch" style="display:none">
+      <div class="erow c5" style="padding-left:48px;background:rgba(0,0,0,.18);font-size:11px"><span></span><span></span><span><span class="ab ab-s">SaaS</span>Anthropic, Cursor 등 — ₩196,103</span><span></span><span></span></div>
+      <div class="erow c5" style="padding-left:48px;background:rgba(0,0,0,.18);font-size:11px"><span></span><span></span><span><span class="ab ab-t">교통비</span>카카오T × 12건 — ₩201,600</span><span></span><span></span></div>
+      <div class="erow c5" style="padding-left:48px;background:rgba(0,0,0,.18);font-size:11px"><span></span><span></span><span><span class="ab ab-f">수수료</span>배달플랫폼 — ₩1,230,000</span><span></span><span></span></div>
+      <div class="erow c5" style="padding-left:48px;background:rgba(0,0,0,.18);font-size:11px;color:var(--text3)"><span></span><span></span><span><span class="ab ab-o">기타</span>외 45건 — ₩4,022,887</span><span></span><span></span></div>
+    </div>
+    <div class="erow c5" style="padding-left:28px;background:rgba(0,0,0,.12);font-size:12px;color:var(--text3)"><span></span><span></span><span>김선우 외 8건</span><span class="eamt">-₩19,642,622</span><span></span></div>
+  </div>
+
+  <div class="erow c5"><span class="edate">01-26</span><span class="etype t-card">카드대금</span><span class="edesc">우리카드 12월분<small>2025-12 사용분</small></span><span class="eamt neg">-₩1,641,914</span><span class="ebal">₩xxx,xxx</span></div>
+  <div class="erow c5"><span class="edate">01-30</span><span class="etype t-in">입금</span><span class="edesc">스마트스토어정산</span><span class="eamt pos">+₩613,092</span><span class="ebal">₩107,168,640</span></div>
+  <div class="erow c5" style="color:var(--text3);text-align:center"><span></span><span></span><span style="font-size:12px">... 전체 119건. 펼치기로 보기</span><span></span><span></span></div>
+  <div class="brow c5 en"><span class="edate">2026-01-30</span><span></span><span><strong>기말 잔고</strong></span><span class="eamt">—</span><span class="ebal" style="color:var(--green)">₩107,168,640</span></div>
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- TAB 2: 예상 현금흐름 -->
+<!-- ═══════════════════════════════════════════ -->
+<div id="tab-forecast" style="display:none">
+
+<div class="month-sel"><span style="font-size:12px;color:var(--text3)">예상 월:</span><div class="mbtn on2">2월</div><div class="mbtn">3월</div><div class="mbtn">4월</div></div>
+
+<div class="note"><strong>2026년 2월 예상 현금흐름</strong>카드/은행 데이터 업로드마다 "실제 진행" 컬럼이 업데이트됩니다. 월말에 예상↔실제를 비교합니다.</div>
+
+<!-- 그래프: 2월 일별 — 예상 잔고 vs 실제 잔고 (2선만) -->
+<div class="chart">
+  <svg viewBox="0 0 800 220" style="width:100%;height:220px">
+    <defs>
+      <linearGradient id="gEst" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F59E0B" stop-opacity="0.15"/><stop offset="100%" stop-color="#F59E0B" stop-opacity="0"/></linearGradient>
+      <linearGradient id="gAct" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#22C55E" stop-opacity="0.15"/><stop offset="100%" stop-color="#22C55E" stop-opacity="0"/></linearGradient>
+      <filter id="glow"><feGaussianBlur stdDeviation="2" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    </defs>
+    <!-- Grid -->
+    <line x1="50" y1="190" x2="780" y2="190" stroke="rgba(255,255,255,0.06)"/>
+    <line x1="50" y1="95" x2="780" y2="95" stroke="rgba(255,255,255,0.03)" stroke-dasharray="4 4"/>
+    <text x="45" y="18" text-anchor="end" fill="#64748b" font-size="9" font-family="Geist Mono">₩130M</text>
+    <text x="45" y="100" text-anchor="end" fill="#64748b" font-size="9" font-family="Geist Mono">₩100M</text>
+    <text x="45" y="195" text-anchor="end" fill="#64748b" font-size="9" font-family="Geist Mono">₩70M</text>
+    <!-- X labels -->
+    <text x="80" y="208" fill="#64748b" font-size="9" text-anchor="middle">2/1</text>
+    <text x="210" y="208" fill="#64748b" font-size="9" text-anchor="middle">2/7</text>
+    <text x="370" y="208" fill="#64748b" font-size="9" text-anchor="middle">2/14</text>
+    <text x="530" y="208" fill="#64748b" font-size="9" text-anchor="middle">2/21</text>
+    <text x="760" y="208" fill="#64748b" font-size="9" text-anchor="middle">2/28</text>
+
+    <!-- 카드 결제일 마커 -->
+    <line x1="420" y1="10" x2="420" y2="190" stroke="rgba(139,92,246,0.3)" stroke-width="1" stroke-dasharray="3 3"/>
+    <rect x="395" y="2" width="80" height="16" rx="4" fill="rgba(139,92,246,0.15)"/>
+    <text x="435" y="13" fill="#8B5CF6" font-size="8" text-anchor="middle" font-weight="500">롯데 결제일</text>
+
+    <line x1="620" y1="10" x2="620" y2="190" stroke="rgba(139,92,246,0.2)" stroke-width="1" stroke-dasharray="3 3"/>
+    <rect x="595" y="2" width="80" height="16" rx="4" fill="rgba(139,92,246,0.1)"/>
+    <text x="635" y="13" fill="#8B5CF6" font-size="8" text-anchor="middle" font-weight="500">우리 결제일</text>
+
+    <!-- 예상 잔고 (amber dashed + area) -->
+    <!-- 입금으로 올라감 → 카드 결제일에 급락 → 완만 → 월말 시차보정 후 기말 -->
+    <polygon points="80,28 180,20 280,14 370,10 420,85 530,80 620,90 700,100 760,108 760,190 80,190" fill="url(#gEst)"/>
+    <polyline points="80,28 180,20 280,14 370,10 420,85 530,80 620,90 700,100 760,108" fill="none" stroke="#F59E0B" stroke-width="2" stroke-dasharray="8 4"/>
+    <circle cx="80" cy="28" r="3" fill="#F59E0B"/>
+    <circle cx="420" cy="85" r="3" fill="#F59E0B" opacity="0.7"/>
+    <circle cx="760" cy="108" r="4" fill="#F59E0B" stroke="#050508" stroke-width="2"/>
+    <text x="80" y="21" fill="#F59E0B" font-size="9" text-anchor="middle" font-family="Geist Mono">₩107M</text>
+    <text x="420" y="78" fill="var(--text3)" font-size="8" text-anchor="middle">카드대금 급락</text>
+    <text x="760" y="101" fill="#F59E0B" font-size="9" text-anchor="middle" font-family="Geist Mono">₩95M</text>
+
+    <!-- 실제 잔고 (green solid + area, 진행중이므로 중간에서 끝남) -->
+    <polygon points="80,28 120,24 160,20 200,16 240,14 280,12 280,190 80,190" fill="url(#gAct)"/>
+    <polyline points="80,28 120,24 160,20 200,16 240,14 280,12" fill="none" stroke="#22C55E" stroke-width="2.5"/>
+    <circle cx="80" cy="28" r="3" fill="#22C55E"/>
+    <circle cx="120" cy="24" r="2.5" fill="#22C55E" filter="url(#glow)"/>
+    <circle cx="160" cy="20" r="2.5" fill="#22C55E" filter="url(#glow)"/>
+    <circle cx="200" cy="16" r="2.5" fill="#22C55E" filter="url(#glow)"/>
+    <circle cx="240" cy="14" r="2.5" fill="#22C55E" filter="url(#glow)"/>
+    <circle cx="280" cy="12" r="4" fill="#22C55E" stroke="#050508" stroke-width="2" filter="url(#glow)"/>
+    <text x="295" y="10" fill="#22C55E" font-size="9" font-family="Geist Mono">₩96.2M</text>
+    <text x="295" y="20" fill="var(--text3)" font-size="8">← 현재</text>
+  </svg>
+  <div class="legend">
+    <span><span class="ldot" style="background:#F59E0B"></span>예상 잔고 (시차보정 포함)</span>
+    <span><span class="ldot" style="background:#22C55E;box-shadow:0 0 6px #22C55E"></span>실제 잔고 (업로드마다 업데이트)</span>
+    <span><span class="ldot" style="background:#8B5CF6"></span>카드 결제일</span>
+  </div>
+</div>
+
+<!-- Summary -->
+<div class="summary">
+  <div class="scard"><div class="l">기초 (1월 확정)</div><div class="v mono">₩107,168,640</div></div>
+  <div class="scard"><div class="l">예상 기말</div><div class="v mono est">₩95,400,000</div></div>
+  <div class="scard"><div class="l">실제 진행 기준 기말</div><div class="v mono pos">₩96,200,000</div><div class="d" style="color:var(--text3)">차이: +₩800K <span class="diff-bar diff-ok"></span></div></div>
+  <div class="scard"><div class="l">2월 카드 사용 (진행)</div><div class="v mono est">₩5,200,000</div><div class="d est">예상 ₩12.3M 중 42%</div></div>
+</div>
+
+<!-- ★ 예상 이벤트 리스트— 기본 4컬럼, 토글로 실제 비교 펼침 -->
+<div style="margin-bottom:8px;text-align:right">
+  <button onclick="toggleActual()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);padding:6px 14px;border-radius:8px;font-size:12px;cursor:pointer" id="toggleBtn">실제 비교 펼치기 ▸</button>
+</div>
+
+<div class="elist">
+  <div class="ehdr" style="display:grid;grid-template-columns:80px 80px 1fr 110px var(--act-w,0px) 110px var(--act-w,0px);padding:10px 16px;background:var(--bg3);font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.5px" id="fhdr">
+    <span>날짜</span><span>유형</span><span>항목</span>
+    <span style="text-align:right">예상 금액</span>
+    <span style="text-align:right;color:var(--green);overflow:hidden" class="act-col">실제 진행</span>
+    <span style="text-align:right;color:var(--amber)">예상 잔고</span>
+    <span style="text-align:right;color:var(--green);overflow:hidden" class="act-col">실제 잔고</span>
+  </div>
+
+  <div class="frow brow st" style="display:grid;grid-template-columns:80px 80px 1fr 110px var(--act-w,0px) 110px var(--act-w,0px);padding:12px 16px;font-weight:600;background:rgba(34,197,94,.03);border-bottom:1px solid var(--border)">
+    <span class="edate">01-31</span><span></span><span>시작 잔고</span>
+    <span class="eamt">—</span>
+    <span class="eamt act-col" style="overflow:hidden">—</span>
+    <span class="ebal">₩107,168,640</span>
+    <span class="ebal act-col" style="overflow:hidden">₩107,168,640</span>
+  </div>
+
+  <!-- 매출 -->
+  <div class="frow" style="display:grid;grid-template-columns:80px 80px 1fr 110px var(--act-w,0px) 110px var(--act-w,0px);padding:9px 16px;border-top:1px solid var(--border);font-size:13px;align-items:center">
+    <span class="edate">02월</span>
+    <span class="etype" style="background:rgba(34,197,94,.12);color:var(--green)">매출</span>
+    <span class="edesc">스마트스토어 정산<small>영업일 20일 × ₩11.3M</small></span>
+    <span class="eamt pos">+₩226.7M</span>
+    <span class="eamt pos act-col" style="overflow:hidden">+₩56.0M</span>
+    <span class="ebal est">₩333.9M</span>
+    <span class="ebal act-col" style="overflow:hidden">₩163.2M</span>
+  </div>
+
+  <!-- SaaS -->
+  <div class="frow" style="display:grid;grid-template-columns:80px 80px 1fr 110px var(--act-w,0px) 110px var(--act-w,0px);padding:9px 16px;border-top:1px solid var(--border);font-size:13px;cursor:pointer" onclick="toggle(this.nextElementSibling)">
+    <span class="edate">02월</span>
+    <span class="etype" style="background:rgba(6,182,212,.12);color:var(--cyan)">SaaS</span>
+    <span class="edesc">SaaS 구독료 ▾</span>
+    <span class="eamt neg">-₩2.4M</span>
+    <span class="eamt neg act-col" style="overflow:hidden">-₩1.2M</span>
+    <span class="ebal est">₩331.5M</span>
+    <span class="ebal act-col" style="overflow:hidden">₩162.0M</span>
+  </div>
+  <div style="display:none;border-top:1px solid rgba(255,255,255,.03)">
+    <div style="display:grid;grid-template-columns:80px 80px 1fr 110px var(--act-w,0px) 110px var(--act-w,0px);padding:7px 16px 7px 40px;font-size:11px;background:rgba(0,0,0,.12);border-top:1px solid rgba(255,255,255,.02)">
+      <span></span><span></span><span>Anthropic Claude</span><span class="eamt neg">-₩167K</span><span class="eamt neg act-col" style="overflow:hidden">-₩167K</span><span></span><span></span>
+    </div>
+    <div style="display:grid;grid-template-columns:80px 80px 1fr 110px var(--act-w,0px) 110px var(--act-w,0px);padding:7px 16px 7px 40px;font-size:11px;background:rgba(0,0,0,.12);border-top:1px solid rgba(255,255,255,.02)">
+      <span></span><span></span><span>Cursor AI</span><span class="eamt neg">-₩29K</span><span class="eamt neg act-col" style="overflow:hidden">-₩29K</span><span></span><span></span>
+    </div>
+    <div style="display:grid;grid-template-columns:80px 80px 1fr 110px var(--act-w,0px) 110px var(--act-w,0px);padding:7px 16px 7px 40px;font-size:11px;background:rgba(0,0,0,.12);border-top:1px solid rgba(255,255,255,.02)">
+      <span></span><span></span><span>OpenAI, RapidAPI 외</span><span class="eamt neg">-₩2.2M</span><span class="eamt neg act-col" style="overflow:hidden">-₩1.0M</span><span></span><span></span>
+    </div>
+  </div>
+
+  <!-- 수수료 -->
+  <div class="frow" style="display:grid;grid-template-columns:80px 80px 1fr 110px var(--act-w,0px) 110px var(--act-w,0px);padding:9px 16px;border-top:1px solid var(--border);font-size:13px">
+    <span class="edate">02월</span>
+    <span class="etype" style="background:rgba(139,92,246,.12);color:var(--purple)">수수료</span>
+    <span class="edesc">지급수수료 (Shopify, 배달플랫폼)</span>
+    <span class="eamt neg">-₩6.8M</span>
+    <span class="eamt neg act-col" style="overflow:hidden">-₩3.1M</span>
+    <span class="ebal est">₩324.7M</span>
+    <span class="ebal act-col" style="overflow:hidden">₩158.9M</span>
+  </div>
+
+  <!-- 교통비 -->
+  <div class="frow" style="display:grid;grid-template-columns:80px 80px 1fr 110px var(--act-w,0px) 110px var(--act-w,0px);padding:9px 16px;border-top:1px solid var(--border);font-size:13px">
+    <span class="edate">02월</span>
+    <span class="etype" style="background:rgba(59,130,246,.12);color:var(--blue)">교통비</span>
+    <span class="edesc">여비교통비 (카카오T 등)</span>
+    <span class="eamt neg">-₩890K</span>
+    <span class="eamt neg act-col" style="overflow:hidden">-₩320K</span>
+    <span class="ebal est">₩323.8M</span>
+    <span class="ebal act-col" style="overflow:hidden">₩158.6M</span>
+  </div>
+
+  <!-- 접대비 -->
+  <div class="frow" style="display:grid;grid-template-columns:80px 80px 1fr 110px var(--act-w,0px) 110px var(--act-w,0px);padding:9px 16px;border-top:1px solid var(--border);font-size:13px">
+    <span class="edate">02월</span>
+    <span class="etype" style="background:rgba(249,115,22,.12);color:var(--amber)">접대비</span>
+    <span class="edesc">접대비 (식비 등)<small>3명 × ₩400K/인</small></span>
+    <span class="eamt neg">-₩1.2M</span>
+    <span class="eamt neg act-col" style="overflow:hidden">-₩450K</span>
+    <span class="ebal est">₩322.6M</span>
+    <span class="ebal act-col" style="overflow:hidden">₩158.1M</span>
+  </div>
+
+  <!-- 복리후생 -->
+  <div class="frow" style="display:grid;grid-template-columns:80px 80px 1fr 110px var(--act-w,0px) 110px var(--act-w,0px);padding:9px 16px;border-top:1px solid var(--border);font-size:13px">
+    <span class="edate">02월</span>
+    <span class="etype" style="background:rgba(34,197,94,.12);color:var(--green)">복리후생</span>
+    <span class="edesc">복리후생비<small>3명 × ₩217K/인</small></span>
+    <span class="eamt neg">-₩650K</span>
+    <span class="eamt neg act-col" style="overflow:hidden">-₩200K</span>
+    <span class="ebal est">₩322.0M</span>
+    <span class="ebal act-col" style="overflow:hidden">₩157.9M</span>
+  </div>
+
+  <!-- 임차료 -->
+  <div class="frow" style="display:grid;grid-template-columns:80px 80px 1fr 110px var(--act-w,0px) 110px var(--act-w,0px);padding:9px 16px;border-top:1px solid var(--border);font-size:13px">
+    <span class="edate">02-10</span>
+    <span class="etype t-fix">임차료</span>
+    <span class="edesc">임차료 (고정)<small>매월 동일</small></span>
+    <span class="eamt neg">-₩4.0M</span>
+    <span class="eamt act-col" style="overflow:hidden;color:var(--text3)">₩0</span>
+    <span class="ebal est">₩318.0M</span>
+    <span class="ebal act-col" style="overflow:hidden">₩157.9M</span>
+  </div>
+
+  <!-- 기타 -->
+  <div class="frow" style="display:grid;grid-template-columns:80px 80px 1fr 110px var(--act-w,0px) 110px var(--act-w,0px);padding:9px 16px;border-top:1px solid var(--border);font-size:13px">
+    <span class="edate">02월</span>
+    <span class="etype" style="background:rgba(100,116,139,.12);color:var(--text2)">기타</span>
+    <span class="edesc">기타 출금</span>
+    <span class="eamt neg">-₩5.2M</span>
+    <span class="eamt neg act-col" style="overflow:hidden">-₩3.4M</span>
+    <span class="ebal est">₩312.8M</span>
+    <span class="ebal act-col" style="overflow:hidden">₩154.5M</span>
+  </div>
+
+  <!-- 시차 보정 — 카드별 -->
+  <div class="frow" style="display:grid;grid-template-columns:80px 80px 1fr 110px var(--act-w,0px) 110px var(--act-w,0px);padding:9px 16px;border-top:1px solid var(--border);font-size:13px;background:rgba(139,92,246,.03);cursor:pointer" onclick="toggle(this.nextElementSibling)">
+    <span class="edate">02-28</span>
+    <span class="etype t-fc">시차보정</span>
+    <span class="edesc">카드 시차 보정 (카드별) ▾</span>
+    <span class="eamt pos">+₩5.4M</span>
+    <span class="eamt act-col" style="overflow:hidden;color:var(--text3)">—</span>
+    <span class="ebal est">₩318.2M</span>
+    <span class="ebal act-col" style="overflow:hidden;color:var(--text3)">—</span>
+  </div>
+  <div style="display:none;border-top:1px solid rgba(255,255,255,.03)">
+    <div style="display:grid;grid-template-columns:80px 80px 1fr 110px var(--act-w,0px) 110px var(--act-w,0px);padding:8px 16px 8px 40px;font-size:11px;background:rgba(139,92,246,.02);border-top:1px solid rgba(255,255,255,.02)">
+      <span class="edate" style="font-size:10px">02-15</span>
+      <span class="etype t-card" style="font-size:9px">롯데</span>
+      <span class="edesc">롯데카드 시차<small>1월 확정 ₩14.7M - 2월 예상 ₩11.5M</small></span>
+      <span class="eamt pos">+₩3.2M</span>
+      <span class="eamt act-col" style="overflow:hidden;color:var(--text3)">—</span>
+      <span></span><span></span>
+    </div>
+    <div style="display:grid;grid-template-columns:80px 80px 1fr 110px var(--act-w,0px) 110px var(--act-w,0px);padding:8px 16px 8px 40px;font-size:11px;background:rgba(139,92,246,.02);border-top:1px solid rgba(255,255,255,.02)">
+      <span class="edate" style="font-size:10px">02-25</span>
+      <span class="etype t-card" style="font-size:9px">우리</span>
+      <span class="edesc">우리카드 시차<small>1월 확정 ₩3.0M - 2월 예상 ₩0.8M</small></span>
+      <span class="eamt pos">+₩2.2M</span>
+      <span class="eamt act-col" style="overflow:hidden;color:var(--text3)">—</span>
+      <span></span><span></span>
+    </div>
+  </div>
+
+  <!-- 기말 -->
+  <div class="frow" style="display:grid;grid-template-columns:80px 80px 1fr 110px var(--act-w,0px) 110px var(--act-w,0px);padding:12px 16px;font-weight:600;background:rgba(249,115,22,.03);border-top:2px solid rgba(249,115,22,.15)">
+    <span class="edate">02-28</span><span></span><span><strong>기말 잔고</strong></span>
+    <span class="eamt">—</span>
+    <span class="eamt act-col" style="overflow:hidden">—</span>
+    <span class="ebal est">₩95,400,000</span>
+    <span class="ebal pos act-col" style="overflow:hidden">₩96,200,000</span>
+  </div>
+</div>
+
+<div class="formula">
+2월 예상 기말 = 1월 확정 기말<br>
+&nbsp;&nbsp;+ 2월 예상 입금<br>
+&nbsp;&nbsp;- 2월 예상 출금<br>
+&nbsp;&nbsp;- 2월 예상 카드 사용액<br>
+&nbsp;&nbsp;+ (1월 카드 사용액 - 2월 예상 카드 사용액) ← 시차 보정
+</div>
+
+<div class="compare">
+  <div class="cbox">
+    <h4 style="color:var(--purple)">카드 시차</h4>
+    <div class="crow"><span>1월 카드 (확정)</span><span class="mono">₩17,720,895</span></div>
+    <div class="crow"><span>2월 카드 (진행)</span><span class="mono est">₩5,200,000</span></div>
+    <div class="crow"><span>2월 카드 (예상)</span><span class="mono est">₩12,300,000</span></div>
+    <div class="crow" style="border-top:1px solid var(--border);padding-top:8px;font-weight:600"><span>시차 보정</span><span class="pos">+₩5,420,895</span></div>
+  </div>
+  <div class="cbox">
+    <h4 style="color:var(--amber)">1월 예상 vs 실제</h4>
+    <div class="crow"><span>예상 기말</span><span class="mono est">₩108,200,000</span></div>
+    <div class="crow"><span>실제 기말</span><span class="mono">₩107,168,640</span></div>
+    <div class="crow" style="border-top:1px solid var(--border);padding-top:8px;font-weight:600"><span>차이</span><span class="neg">-₩1,031,360</span></div>
+    <div style="font-size:11px;color:var(--text3);margin-top:4px">정확도 99.0% <span class="diff-bar diff-ok"></span></div>
+  </div>
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- TAB 3: 비용 (카드 사용) -->
+<!-- ═══════════════════════════════════════════ -->
+<div id="tab-expense" style="display:none">
+
+<div class="month-sel"><span style="font-size:12px;color:var(--text3)">카드 사용 월:</span><div class="mbtn">12월</div><div class="mbtn on3">1월</div><div class="mbtn">2월</div></div>
+<p style="color:var(--text2);margin-bottom:16px;font-size:13px">1월 카드 사용 → <strong style="color:var(--amber)">2월</strong> 결제 예정</p>
+
+<div class="summary" style="grid-template-columns:repeat(3,1fr)">
+  <div class="scard"><div class="l">총 지출</div><div class="v mono neg">₩21,626,970</div><div class="d" style="color:var(--text3)">607건</div></div>
+  <div class="scard"><div class="l">환불</div><div class="v mono pos">₩3,906,075</div><div class="d" style="color:var(--text3)">12건</div></div>
+  <div class="scard"><div class="l">순 사용</div><div class="v mono" style="color:var(--purple)">₩17,720,895</div></div>
+</div>
+
+<div class="csec">
+  <div class="cgrp">
+    <div class="cname" onclick="toggle(this.nextElementSibling)">롯데카드 ****1234 (하선우) — 순 ₩8,128,425 ▾</div>
+    <div style="display:none">
+      <div class="citem"><span><span class="ab ab-s">SaaS</span>Anthropic Claude</span><span class="neg">-₩167,145</span></div>
+      <div class="citem"><span><span class="ab ab-s">SaaS</span>Cursor AI</span><span class="neg">-₩28,958</span></div>
+      <div class="citem"><span><span class="ab ab-t">교통비</span>카카오T × 12건</span><span class="neg">-₩201,600</span></div>
+      <div class="citem" style="color:var(--green)"><span><span class="ab ab-o">취소</span>이노페이 (취소)</span><span>+₩55,000</span></div>
+      <div class="citem" style="color:var(--text3)"><span>... 외 178건</span><span></span></div>
+    </div>
+    <div class="ctot"><span>소계</span><span><span class="neg">₩10.2M</span> / <span class="pos">환불 ₩2.1M</span> / 순 ₩8.1M</span></div>
+  </div>
+  <div class="cgrp">
+    <div class="cname" onclick="toggle(this.nextElementSibling)">롯데카드 ****5678 (김선우) — 순 ₩6,599,598 ▾</div>
+    <div style="display:none">
+      <div class="citem"><span><span class="ab ab-f">수수료</span>SHOPIFY</span><span class="neg">-₩2,800,000</span></div>
+      <div class="citem" style="color:var(--text3)"><span>... 외 118건</span><span></span></div>
+    </div>
+    <div class="ctot"><span>소계</span><span>순 ₩6.6M</span></div>
+  </div>
+  <div class="cgrp">
+    <div class="cname" onclick="toggle(this.nextElementSibling)">우리카드 ****9012 — 순 ₩2,992,872 ▾</div>
+    <div style="display:none">
+      <div class="citem"><span><span class="ab ab-s">SaaS</span>CURSOR, OPENAI</span><span class="neg">-₩104,233</span></div>
+      <div class="citem" style="color:var(--text3)"><span>... 외 47건</span><span></span></div>
+    </div>
+    <div class="ctot"><span>소계</span><span>순 ₩3.0M</span></div>
+  </div>
+  <div style="border-top:2px solid var(--border);padding-top:16px;margin-top:16px">
+    <div class="ctot" style="font-size:15px"><span>1월 합계</span><span style="color:var(--purple);font-size:16px">₩17,720,895</span></div>
+  </div>
+</div>
+
+<div class="compare" style="margin-top:20px">
+  <div class="cbox">
+    <h4>내부 계정별 (1월)</h4>
+    <div class="crow"><span><span class="ab ab-s">SaaS</span>구독료</span><span class="mono">₩2,400,000</span></div>
+    <div class="crow"><span><span class="ab ab-f">수수료</span>지급수수료</span><span class="mono">₩6,800,000</span></div>
+    <div class="crow"><span><span class="ab ab-t">교통비</span>여비교통비</span><span class="mono">₩890,000</span></div>
+    <div class="crow"><span><span class="ab ab-e">접대비</span>접대비</span><span class="mono">₩1,200,000</span></div>
+    <div class="crow"><span><span class="ab ab-w">복리후생</span>복리후생비</span><span class="mono">₩650,000</span></div>
+    <div class="crow"><span><span class="ab ab-o">기타</span>기타</span><span class="mono">₩5,780,895</span></div>
+    <div class="crow" style="border-top:1px solid var(--border);padding-top:8px;font-weight:600"><span>합계</span><span class="mono">₩17,720,895</span></div>
+  </div>
+  <div class="cbox">
+    <h4>월별 비교</h4>
+    <div class="crow"><span>12월</span><span class="mono">₩29,935,126</span></div>
+    <div class="crow"><span>1월</span><span class="mono">₩17,720,895</span></div>
+    <div class="crow" style="border-top:1px solid var(--border);padding-top:8px;font-weight:600"><span>변동</span><span class="pos">-40.8%</span></div>
+  </div>
+</div>
+</div>
+
+<script>
+function showTab(n,el){
+  document.querySelectorAll('[id^="tab-"]').forEach(e=>e.style.display='none');
+  document.querySelectorAll('.tab').forEach(e=>{e.classList.remove('active','a2','a3')});
+  document.getElementById('tab-'+n).style.display='block';
+  el.classList.add('active');
+  if(n==='forecast')el.classList.add('a2');
+  if(n==='expense')el.classList.add('a3');
+}
+function toggle(el){
+  var t=el.nextElementSibling;
+  if(t)t.style.display=t.style.display==='none'?'block':'none';
+}
+var actOpen=false;
+function toggleActual(){
+  actOpen=!actOpen;
+  document.documentElement.style.setProperty('--act-w',actOpen?'110px':'0px');
+  document.querySelectorAll('.act-col').forEach(function(e){
+    e.style.overflow=actOpen?'visible':'hidden';
+    e.style.width=actOpen?'auto':'0';
+    e.style.padding=actOpen?'':'0';
+  });
+  document.getElementById('toggleBtn').textContent=actOpen?'실제 비교 접기 ◂':'실제 비교 펼치기 ▸';
+}
+</script>
+</body>
+</html>

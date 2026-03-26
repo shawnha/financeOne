@@ -7,6 +7,7 @@ from datetime import date
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
+from backend.utils.db import fetch_all
 from backend.services.bookkeeping_engine import (
     create_journal_entry,
     bulk_create_journals,
@@ -90,8 +91,7 @@ def list_journal_entries(
         """,
         params + [per_page, offset],
     )
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    rows = fetch_all(cur)
     cur.close()
 
     return {
@@ -127,11 +127,11 @@ def get_journal_entry(je_id: int, conn: PgConnection = Depends(get_db)):
         """,
         [je_id],
     )
-    cols = [d[0] for d in cur.description]
+    header_cols = [d[0] for d in cur.description]
     row = cur.fetchone()
     if not row:
         raise HTTPException(404, "Journal entry not found")
-    header = dict(zip(cols, row))
+    header = dict(zip(header_cols, row))
 
     cur.execute(
         """
@@ -145,8 +145,7 @@ def get_journal_entry(je_id: int, conn: PgConnection = Depends(get_db)):
         """,
         [je_id],
     )
-    li_cols = [d[0] for d in cur.description]
-    lines = [dict(zip(li_cols, r)) for r in cur.fetchall()]
+    lines = fetch_all(cur)
     cur.close()
 
     header["lines"] = lines

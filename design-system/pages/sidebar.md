@@ -7,7 +7,7 @@
 - 높이: 100vh, position fixed
 
 ## Logo
-- "FinanceOne" 텍스트 로고, IBM Plex Sans 20px bold
+- "FinanceOne" 텍스트 로고, Geist 20px bold
 - 색상: `--color-text` (#F8FAFC)
 - padding: 24px
 

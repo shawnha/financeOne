@@ -20,8 +20,8 @@ def _mock_insert_line_item(cur, stmt_id, item):
 
 
 class TestBalanceSheet:
-    @patch("backend.services.statement_generator._insert_line_item", _mock_insert_line_item)
-    @patch("backend.services.statement_generator.get_all_account_balances")
+    @patch("backend.services.statements.helpers._insert_line_item", _mock_insert_line_item)
+    @patch("backend.services.statements.balance_sheet.get_all_account_balances")
     def test_assets_equals_liabilities_plus_equity(self, mock_balances):
         """재무상태표 항등식: 자산 = 부채 + 자본"""
         # 설정: 자산 100만, 부채 60만, 자본 40만
@@ -55,8 +55,8 @@ class TestBalanceSheet:
         assert result["total_liabilities"] == 600000
         assert result["total_equity"] == 400000
 
-    @patch("backend.services.statement_generator._insert_line_item", _mock_insert_line_item)
-    @patch("backend.services.statement_generator.get_all_account_balances")
+    @patch("backend.services.statements.helpers._insert_line_item", _mock_insert_line_item)
+    @patch("backend.services.statements.balance_sheet.get_all_account_balances")
     def test_net_income_flows_to_retained_earnings(self, mock_balances):
         """당기순이익이 이익잉여금에 반영되어 균형 유지"""
         # 자산 150만, 부채 50만, 자본금 50만, 이익잉여금 0
@@ -100,8 +100,8 @@ class TestBalanceSheet:
         # 자본 총계 = 자본금 50만 + 이익잉여금(0+50만) = 100만
         assert result["total_equity"] == 1000000
 
-    @patch("backend.services.statement_generator._insert_line_item", _mock_insert_line_item)
-    @patch("backend.services.statement_generator.get_all_account_balances")
+    @patch("backend.services.statements.helpers._insert_line_item", _mock_insert_line_item)
+    @patch("backend.services.statements.balance_sheet.get_all_account_balances")
     def test_empty_period_returns_zeros(self, mock_balances):
         """0건 기간 → 빈 재무제표 (0원)"""
         mock_balances.side_effect = [[], []]
@@ -120,8 +120,8 @@ class TestBalanceSheet:
 
 
 class TestIncomeStatement:
-    @patch("backend.services.statement_generator._insert_line_item", _mock_insert_line_item)
-    @patch("backend.services.statement_generator.get_all_account_balances")
+    @patch("backend.services.statements.helpers._insert_line_item", _mock_insert_line_item)
+    @patch("backend.services.statements.income_statement.get_all_account_balances")
     def test_revenue_minus_expense_equals_net_income(self, mock_balances):
         mock_balances.return_value = [
             {"account_id": 1, "code": "40100", "name": "매출", "category": "수익",
@@ -145,7 +145,7 @@ class TestIncomeStatement:
 
 
 class TestCashFlowStatement:
-    @patch("backend.services.statement_generator._insert_line_item", _mock_insert_line_item)
+    @patch("backend.services.statements.helpers._insert_line_item", _mock_insert_line_item)
     def test_ending_equals_opening_plus_net(self):
         """기말 = 기초 + 순현금흐름, 독립 검증 포함"""
         conn = MagicMock()
@@ -193,8 +193,8 @@ class TestCashFlowStatement:
 
 
 class TestTrialBalance:
-    @patch("backend.services.statement_generator._insert_line_item", _mock_insert_line_item)
-    @patch("backend.services.statement_generator.get_all_account_balances")
+    @patch("backend.services.statements.helpers._insert_line_item", _mock_insert_line_item)
+    @patch("backend.services.statements.trial_balance.get_all_account_balances")
     def test_debits_equal_credits(self, mock_balances):
         mock_balances.return_value = [
             {"account_id": 1, "code": "10100", "name": "현금", "category": "자산",
@@ -222,8 +222,8 @@ class TestTrialBalance:
 
 
 class TestDeficitTreatment:
-    @patch("backend.services.statement_generator._insert_line_item", _mock_insert_line_item)
-    @patch("backend.services.statement_generator.get_all_account_balances")
+    @patch("backend.services.statements.helpers._insert_line_item", _mock_insert_line_item)
+    @patch("backend.services.statements.deficit.get_all_account_balances")
     def test_deficit_detected(self, mock_balances):
         """이익잉여금 음수 시 결손금 감지"""
         # 전체 기간 잔액

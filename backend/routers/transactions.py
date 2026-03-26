@@ -7,6 +7,7 @@ from datetime import date
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
+from backend.utils.db import fetch_all
 from backend.services.bookkeeping_engine import create_journal_from_transaction
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
@@ -103,8 +104,7 @@ def list_transactions(
         """,
         params + [per_page, offset],
     )
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+    rows = fetch_all(cur)
     cur.close()
 
     return {

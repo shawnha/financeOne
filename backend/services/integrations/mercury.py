@@ -4,6 +4,7 @@ Mercury Dashboard > Settings > API > Read-only 토큰 발급
 """
 
 import logging
+import os
 from datetime import date
 from decimal import Decimal
 
@@ -13,7 +14,7 @@ from psycopg2.extensions import connection as PgConnection
 logger = logging.getLogger(__name__)
 
 MERCURY_BASE_URL = "https://api.mercury.com/api/v1"
-HOI_ENTITY_ID = 1  # HOI Inc.
+HOI_ENTITY_ID = int(os.environ.get("HOI_ENTITY_ID", "1"))
 
 
 class MercuryError(Exception):

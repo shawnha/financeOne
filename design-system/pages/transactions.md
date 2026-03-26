@@ -21,8 +21,8 @@
 | 4 | 회원 | `member_id` → JOIN members | 80px | left | 카드 사용자 (은행 거래는 빈값) |
 | 5 | 내역 | `description` | flex | left | 거래 설명 |
 | 6 | 거래처 | `counterparty` | 140px | left | 가맹점/상대방, 정렬 가능 |
-| 7 | 수입 | `amount` (type='in') | 120px | right | green, tabular-nums, IBM Plex Mono |
-| 8 | 지출 | `amount` (type='out') | 120px | right | red, tabular-nums, IBM Plex Mono |
+| 7 | 수입 | `amount` (type='in') | 120px | right | green, tabular-nums, Geist Mono |
+| 8 | 지출 | `amount` (type='out') | 120px | right | red, tabular-nums, Geist Mono |
 | 9 | 내부 계정 | `internal_account_id` → JOIN | 120px | left | 클릭하여 변경 가능 |
 | 10 | 표준 계정 | `standard_account_id` → JOIN | 120px | left | 클릭하여 변경 가능 |
 | 11 | 신뢰 | `mapping_confidence` | 60px | center | 0-100% badge (color by level) |

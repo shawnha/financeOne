@@ -5,6 +5,7 @@ from typing import Optional
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
+from backend.utils.db import fetch_all
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 
@@ -16,8 +17,7 @@ def list_standard_accounts(conn: PgConnection = Depends(get_db)):
         "SELECT id, code, name, category, subcategory, normal_side, sort_order "
         "FROM standard_accounts WHERE is_active = true ORDER BY sort_order, code"
     )
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    rows = fetch_all(cur)
     cur.close()
     return rows
 
@@ -53,8 +53,7 @@ def list_internal_accounts(
             ORDER BY ia.entity_id, ia.sort_order, ia.code
             """
         )
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    rows = fetch_all(cur)
     cur.close()
     return rows
 
@@ -74,7 +73,6 @@ def list_members(
         cur.execute(
             "SELECT id, entity_id, name, role FROM members WHERE is_active = true ORDER BY entity_id, name"
         )
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    rows = fetch_all(cur)
     cur.close()
     return rows

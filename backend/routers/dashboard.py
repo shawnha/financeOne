@@ -1,10 +1,14 @@
 """대시보드 API -- KPI cards, cash flow chart, recent transactions"""
 
-from fastapi import APIRouter, Query, Depends
+import logging
+from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
+from backend.utils.db import fetch_all
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -14,6 +18,16 @@ def get_dashboard(
     entity_id: Optional[int] = None,
     conn: PgConnection = Depends(get_db),
 ):
+    try:
+        return _get_dashboard_data(conn, entity_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Dashboard KPI error: %s", e)
+        raise HTTPException(500, detail=str(e))
+
+
+def _get_dashboard_data(conn: PgConnection, entity_id: Optional[int]):
     cur = conn.cursor()
 
     entity_filter = ""
@@ -123,8 +137,7 @@ def get_dashboard(
         """,
         params,
     )
-    cols = [d[0] for d in cur.description]
-    recent = [dict(zip(cols, r)) for r in cur.fetchall()]
+    recent = fetch_all(cur)
 
     # Summary counts
     cur.execute(
@@ -160,78 +173,6 @@ def get_dashboard(
     }
 
 
-@router.get("/cashflow")
-def get_cashflow(
-    entity_id: Optional[int] = None,
-    months: int = Query(12, ge=1, le=60),
-    conn: PgConnection = Depends(get_db),
-):
-    """Monthly cashflow breakdown with running balance."""
-    cur = conn.cursor()
 
-    params: list = []
-    entity_clause = ""
-    if entity_id is not None:
-        entity_clause = "AND entity_id = %s"
-        params.append(entity_id)
-
-    # Opening balance: latest balance_snapshot before the period start
-    cur.execute(
-        f"""
-        SELECT COALESCE(SUM(balance), 0)
-        FROM balance_snapshots
-        WHERE (entity_id, date, account_name) IN (
-            SELECT entity_id, MAX(date), account_name
-            FROM balance_snapshots
-            WHERE date < date_trunc('month', CURRENT_DATE) - interval '{months - 1} months'
-              {"AND entity_id = %s" if entity_id else ""}
-            GROUP BY entity_id, account_name
-        )
-        """,
-        [entity_id] if entity_id else [],
-    )
-    opening_balance = float(cur.fetchone()[0])
-
-    # Monthly income/expense for the period
-    cur.execute(
-        f"""
-        SELECT
-            to_char(date_trunc('month', date), 'YYYY-MM') AS month,
-            COALESCE(SUM(CASE WHEN type = 'in' THEN amount ELSE 0 END), 0) AS income,
-            COALESCE(SUM(CASE WHEN type = 'out' THEN amount ELSE 0 END), 0) AS expense
-        FROM transactions
-        WHERE date >= date_trunc('month', CURRENT_DATE) - interval '{months - 1} months'
-          AND date < date_trunc('month', CURRENT_DATE) + interval '1 month'
-          {entity_clause}
-        GROUP BY date_trunc('month', date)
-        ORDER BY month
-        """,
-        params,
-    )
-    rows = cur.fetchall()
-    cur.close()
-
-    # Build month-by-month with running balance
-    result = []
-    running_balance = opening_balance
-    for r in rows:
-        month_str = r[0]
-        income = float(r[1])
-        expense = float(r[2])
-        net = round(income - expense, 2)
-        month_opening = running_balance
-        running_balance = round(running_balance + net, 2)
-        result.append({
-            "month": month_str,
-            "opening_balance": month_opening,
-            "income": income,
-            "expense": expense,
-            "net": net,
-            "closing_balance": running_balance,
-        })
-
-    return {
-        "months": result,
-        "period_start_balance": opening_balance,
-        "period_end_balance": running_balance if result else opening_balance,
-    }
+# NOTE: /cashflow, /cashflow/detail 엔드포인트는 /api/cashflow/ 라우터로 이전됨
+# (backend/routers/cashflow.py)

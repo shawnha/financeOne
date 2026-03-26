@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FinanceOne — 현금흐름 재설계 구현 플랜</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap');
+  :root{--bg:#050508;--bg2:#0d1117;--bg3:#161b22;--border:rgba(255,255,255,0.06);--text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;--green:#22C55E;--red:#EF4444;--amber:#F59E0B;--blue:#3B82F6;--purple:#8B5CF6;--cyan:#06B6D4}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;font-size:14px;line-height:1.7;padding:32px;max-width:1200px;margin:0 auto}
+  h1{font-size:26px;font-weight:700;letter-spacing:-.5px;margin-bottom:4px}
+  h1 span{color:var(--green)}
+  .subtitle{color:var(--text2);font-size:13px;margin-bottom:28px}
+  h2{font-size:18px;font-weight:600;margin:32px 0 16px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+  h3{font-size:15px;font-weight:600;margin:20px 0 10px;color:var(--text)}
+  .mono{font-family:'Geist Mono',monospace}
+
+  /* Task cards */
+  .task{background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:24px;margin-bottom:20px;position:relative;overflow:hidden}
+  .task::before{content:'';position:absolute;top:0;left:0;width:4px;height:100%;border-radius:4px 0 0 4px}
+  .task.t-be::before{background:var(--cyan)}
+  .task.t-fe::before{background:var(--purple)}
+  .task.t-test::before{background:var(--green)}
+  .task.t-mix::before{background:var(--amber)}
+  .task-num{display:inline-block;font-size:11px;font-weight:700;padding:2px 10px;border-radius:6px;margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px}
+  .tn-be{background:rgba(6,182,212,.12);color:var(--cyan)}
+  .tn-fe{background:rgba(139,92,246,.12);color:var(--purple)}
+  .tn-test{background:rgba(34,197,94,.12);color:var(--green)}
+  .tn-mix{background:rgba(249,115,22,.12);color:var(--amber)}
+  .task h3{margin-top:0}
+  .task-title{font-size:16px;font-weight:600;margin:0 0 8px}
+  .task-desc{font-size:13px;color:var(--text2);margin-bottom:12px}
+
+  /* Files */
+  .files{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+  .file{font-family:'Geist Mono',monospace;font-size:11px;padding:3px 10px;border-radius:6px;background:var(--bg3);color:var(--text2);border:1px solid var(--border)}
+  .file.new{border-color:rgba(34,197,94,.3);color:var(--green)}
+  .file.mod{border-color:rgba(249,115,22,.3);color:var(--amber)}
+
+  /* Steps */
+  .steps{margin:12px 0;padding:0;list-style:none;counter-reset:step}
+  .steps li{counter-increment:step;padding:8px 0 8px 36px;position:relative;font-size:13px;border-left:1px solid var(--border);margin-left:12px}
+  .steps li:last-child{border-left-color:transparent}
+  .steps li::before{content:counter(step);position:absolute;left:-9px;top:8px;width:18px;height:18px;background:var(--bg3);border:1px solid var(--border);border-radius:50%;font-size:10px;font-weight:600;text-align:center;line-height:17px;color:var(--text2)}
+  .steps li.done::before{background:var(--green);color:#000;border-color:var(--green)}
+
+  /* Formula */
+  .formula{background:var(--bg3);border:1px solid var(--border);padding:16px 20px;border-radius:10px;font-family:'Geist Mono',monospace;font-size:13px;line-height:2;color:var(--cyan);margin:16px 0}
+  .formula .op{color:var(--text3)}
+  .formula .highlight{color:var(--amber)}
+  .formula .comment{color:var(--text3);font-size:11px}
+
+  /* Architecture diagram */
+  .arch{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0}
+  .arch-box{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px}
+  .arch-box h4{font-size:13px;font-weight:600;margin-bottom:10px}
+  .arch-row{display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:var(--text2)}
+  .arch-row .label{color:var(--text)}
+  .arch-row .path{font-family:'Geist Mono',monospace;font-size:11px}
+
+  /* Dependency arrow */
+  .dep{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:12px;color:var(--text3)}
+  .dep .arrow{color:var(--green);font-weight:bold}
+
+  /* Tab preview */
+  .tab-preview{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:16px 0}
+  .tp{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center}
+  .tp .name{font-size:13px;font-weight:600;margin-bottom:4px}
+  .tp .desc{font-size:11px;color:var(--text3)}
+  .tp.tp-green{border-top:3px solid var(--green)}.tp.tp-green .name{color:var(--green)}
+  .tp.tp-amber{border-top:3px solid var(--amber)}.tp.tp-amber .name{color:var(--amber)}
+  .tp.tp-purple{border-top:3px solid var(--purple)}.tp.tp-purple .name{color:var(--purple)}
+
+  /* UI wireframe */
+  .wire{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px;margin:12px 0;font-family:'Geist Mono',monospace;font-size:11px;line-height:1.6;color:var(--text2);white-space:pre;overflow-x:auto}
+  .wire .g{color:var(--green)}.wire .r{color:var(--red)}.wire .a{color:var(--amber)}.wire .p{color:var(--purple)}.wire .c{color:var(--cyan)}.wire .w{color:var(--text)}
+
+  /* Timeline */
+  .timeline{display:flex;gap:0;margin:24px 0;overflow-x:auto}
+  .tl-item{flex:1;min-width:120px;padding:12px 8px;text-align:center;border-bottom:3px solid var(--border);position:relative}
+  .tl-item.active{border-bottom-color:var(--green)}
+  .tl-item .tl-num{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:4px}
+  .tl-item .tl-name{font-size:11px;font-weight:500}
+  .tl-item .tl-type{font-size:9px;margin-top:2px;padding:1px 6px;border-radius:3px;display:inline-block}
+  .tl-item .tl-be{background:rgba(6,182,212,.12);color:var(--cyan)}
+  .tl-item .tl-fe{background:rgba(139,92,246,.12);color:var(--purple)}
+  .tl-item .tl-mix{background:rgba(249,115,22,.12);color:var(--amber)}
+
+  /* Collapsible */
+  details{margin:8px 0}
+  details summary{cursor:pointer;font-size:13px;font-weight:500;color:var(--text2);padding:6px 0}
+  details summary:hover{color:var(--text)}
+  details[open] summary{color:var(--text)}
+
+  /* Table */
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px}
+  th{text-align:left;padding:8px 12px;background:var(--bg3);color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+  td{padding:8px 12px;border-top:1px solid var(--border);color:var(--text2)}
+  td code{font-family:'Geist Mono',monospace;font-size:11px;background:var(--bg3);padding:1px 6px;border-radius:4px;color:var(--text)}
+
+  /* Badge colors */
+  .badge{display:inline-block;font-size:9px;font-weight:600;padding:2px 8px;border-radius:4px;margin-right:4px}
+  .b-in{background:rgba(34,197,94,.12);color:var(--green)}
+  .b-out{background:rgba(239,68,68,.12);color:var(--red)}
+  .b-card{background:rgba(139,92,246,.12);color:var(--purple)}
+  .b-fix{background:rgba(100,116,139,.15);color:var(--text2)}
+  .b-fc{background:rgba(249,115,22,.12);color:var(--amber)}
+  .b-saas{background:rgba(6,182,212,.12);color:var(--cyan)}
+  .b-trans{background:rgba(59,130,246,.12);color:var(--blue)}
+
+  .note{background:rgba(249,115,22,.06);border:1px solid rgba(249,115,22,.15);border-radius:8px;padding:12px 16px;margin:16px 0;font-size:12px;color:var(--amber)}
+  .note strong{display:block;margin-bottom:4px}
+
+  @media(max-width:768px){body{padding:16px}.arch,.tab-preview{grid-template-columns:1fr}.timeline{flex-wrap:wrap}}
+</style>
+</head>
+<body>
+
+<h1>현금흐름 재설계 — <span>구현 플랜</span></h1>
+<p class="subtitle">목업 기준 3탭 구조 · 8 Tasks · Backend + Frontend</p>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- Overview -->
+<!-- ═══════════════════════════════════════════ -->
+
+<h2>Overview</h2>
+
+<div class="tab-preview">
+  <div class="tp tp-green">
+    <div class="name">탭1: 실제 현금흐름</div>
+    <div class="desc">은행 거래 기반 · 일별 잔고 추적<br>카드대금 3단계 드릴다운</div>
+  </div>
+  <div class="tp tp-amber">
+    <div class="name">탭2: 예상 현금흐름</div>
+    <div class="desc">forecasts 기반 · 시차 보정<br>예상 vs 실제 비교</div>
+  </div>
+  <div class="tp tp-purple">
+    <div class="name">탭3: 비용 (카드 사용)</div>
+    <div class="desc">카드/회원별 드릴다운<br>내부계정 배지 · 월별 비교</div>
+  </div>
+</div>
+
+<div class="formula">
+  <strong style="color:var(--amber);font-size:12px">예상 기말 공식</strong><br>
+  예상 기말 <span class="op">=</span> 전월 확정 기말<br>
+  &nbsp;&nbsp;<span class="op">+</span> 예상 입금<br>
+  &nbsp;&nbsp;<span class="op">-</span> 예상 출금<br>
+  &nbsp;&nbsp;<span class="op">-</span> 예상 카드 사용액<br>
+  &nbsp;&nbsp;<span class="op">+</span> <span class="highlight">(전월 카드 사용액 - 당월 예상 카드 사용액)</span> <span class="comment">← 시차 보정</span>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- Timeline -->
+<!-- ═══════════════════════════════════════════ -->
+
+<h2>리뷰 시 반영 필요 (미확정)</h2>
+
+<div class="task t-mix">
+  <span class="task-num tn-mix">미확정 — 리뷰 대기</span>
+  <div class="task-title">카드 설정 테이블 · forecasts 컬럼 · 카드 사용액 로직</div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
+    <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px">
+      <div style="font-size:12px;font-weight:600;color:var(--purple);margin-bottom:6px">1. 카드 설정 테이블 분리</div>
+      <div style="font-size:11px;color:var(--text2);line-height:1.6">
+        카드 결제일(롯데 15일, 우리 25일), 카드사 정보를 forecasts와 별도 테이블로 관리.<br><br>
+        <code>card_settings</code>: entity_id, card_name, source_type, payment_day, card_number<br><br>
+        → 차트 결제일 마커, 시차 보정 카드별 분리에 사용
+      </div>
+    </div>
+    <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px">
+      <div style="font-size:12px;font-weight:600;color:var(--amber);margin-bottom:6px">2. forecasts 컬럼 보강</div>
+      <div style="font-size:11px;color:var(--text2);line-height:1.6">
+        카드 사용은 은행 입출금이 아닌 별도 개념.<br><br>
+        (A) <code>type</code>에 'card' 추가<br>
+        (B) <code>category</code>='카드사용' + <code>subcategory</code>='lotte_card' 유지<br><br>
+        → 리뷰에서 결정
+      </div>
+    </div>
+    <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px">
+      <div style="font-size:12px;font-weight:600;color:var(--cyan);margin-bottom:6px">3. 예상 카드 사용액</div>
+      <div style="font-size:11px;color:var(--text2);line-height:1.6">
+        기본값 = 전월 카드 사용 실적<br>
+        (transactions에서 자동 계산)<br><br>
+        forecasts에 없으면 전월 실적 fallback<br>
+        별도 예측 공식은 추후 정의
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2>Task Timeline</h2>
+
+<div class="timeline">
+  <div class="tl-item"><div class="tl-num">Task 1</div><div class="tl-name">기초잔고 역산<br>+ 실제/카드 API</div><div class="tl-type tl-be">Backend</div></div>
+  <div class="tl-item"><div class="tl-num">Task 2</div><div class="tl-name">Forecasts<br>CRUD API</div><div class="tl-type tl-be">Backend</div></div>
+  <div class="tl-item"><div class="tl-num">Task 3</div><div class="tl-name">예상 현금흐름<br>시차 보정 API</div><div class="tl-type tl-be">Backend</div></div>
+  <div class="tl-item"><div class="tl-num">Task 4</div><div class="tl-name">3탭 + 실제<br>현금흐름 UI</div><div class="tl-type tl-fe">Frontend</div></div>
+  <div class="tl-item"><div class="tl-num">Task 5</div><div class="tl-name">예상<br>현금흐름 UI</div><div class="tl-type tl-fe">Frontend</div></div>
+  <div class="tl-item"><div class="tl-num">Task 6</div><div class="tl-name">비용<br>(카드) UI</div><div class="tl-type tl-fe">Frontend</div></div>
+  <div class="tl-item"><div class="tl-num">Task 7</div><div class="tl-name">정리 +<br>통합 테스트</div><div class="tl-type tl-mix">Mixed</div></div>
+  <div class="tl-item"><div class="tl-num">Task 8</div><div class="tl-name">E2E<br>검증</div><div class="tl-type tl-mix">Mixed</div></div>
+</div>
+
+<div class="dep"><span class="arrow">→</span> Task 1-3: 순차 (API 의존) &nbsp;|&nbsp; Task 4-6: Task 1-3 완료 후 병렬 가능 &nbsp;|&nbsp; Task 7-8: 전체 완료 후</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- File Structure -->
+<!-- ═══════════════════════════════════════════ -->
+
+<h2>File Structure</h2>
+
+<div class="arch">
+  <div class="arch-box">
+    <h4 style="color:var(--cyan)">Backend</h4>
+    <div class="arch-row"><span class="label">cashflow_service.py</span><span class="file new">신규</span></div>
+    <div class="arch-row"><span class="path">backend/services/</span><span style="font-size:11px;color:var(--text3)">기초잔고 역산 · 시차 보정</span></div>
+    <div class="arch-row" style="margin-top:8px"><span class="label">cashflow.py</span><span class="file new">신규</span></div>
+    <div class="arch-row"><span class="path">backend/routers/</span><span style="font-size:11px;color:var(--text3)">실제/예상/카드비용 3 API</span></div>
+    <div class="arch-row" style="margin-top:8px"><span class="label">forecasts.py</span><span class="file new">신규</span></div>
+    <div class="arch-row"><span class="path">backend/routers/</span><span style="font-size:11px;color:var(--text3)">CRUD API</span></div>
+    <div class="arch-row" style="margin-top:8px"><span class="label">dashboard.py</span><span class="file mod">수정</span></div>
+    <div class="arch-row"><span class="path">backend/routers/</span><span style="font-size:11px;color:var(--text3)">cashflow 엔드포인트 제거</span></div>
+  </div>
+  <div class="arch-box">
+    <h4 style="color:var(--purple)">Frontend</h4>
+    <div class="arch-row"><span class="label">page.tsx</span><span class="file mod">교체</span></div>
+    <div class="arch-row"><span class="path">cashflow/</span><span style="font-size:11px;color:var(--text3)">3탭 셸 + 탭 전환</span></div>
+    <div class="arch-row" style="margin-top:8px"><span class="label">actual-tab.tsx</span><span class="file new">신규</span></div>
+    <div class="arch-row"><span class="path">cashflow/</span><span style="font-size:11px;color:var(--text3)">실제 현금흐름</span></div>
+    <div class="arch-row" style="margin-top:8px"><span class="label">forecast-tab.tsx</span><span class="file new">신규</span></div>
+    <div class="arch-row"><span class="path">cashflow/</span><span style="font-size:11px;color:var(--text3)">예상 현금흐름</span></div>
+    <div class="arch-row" style="margin-top:8px"><span class="label">expense-tab.tsx</span><span class="file new">신규</span></div>
+    <div class="arch-row"><span class="path">cashflow/</span><span style="font-size:11px;color:var(--text3)">카드 비용</span></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- Task 1 -->
+<!-- ═══════════════════════════════════════════ -->
+
+<h2>Tasks</h2>
+
+<div class="task t-be">
+  <span class="task-num tn-be">Task 1 — Backend</span>
+  <div class="task-title">기초잔고 역산 + 실제 현금흐름 API + 카드비용 API</div>
+  <div class="task-desc">balance_snapshots 기준으로 거래 역산하여 각 월 기초/기말잔고 계산. 3개 조회 API 엔드포인트 생성.</div>
+  <div class="note"><strong>기존 업로드 기능 유지</strong>데이터 입력은 기존 Excel/CSV 업로드(<code>/api/upload</code>)가 담당 — 절대 제거하지 않음. 여기서 만드는 API는 업로드된 데이터를 조회/계산하는 읽기 전용 API.</div>
+  <div class="files">
+    <span class="file new">backend/services/cashflow_service.py</span>
+    <span class="file new">backend/routers/cashflow.py</span>
+    <span class="file mod">backend/main.py</span>
+    <span class="file new">backend/tests/test_cashflow.py</span>
+  </div>
+
+  <details>
+    <summary>핵심 로직: 기초잔고 역산</summary>
+    <div class="wire"><span class="a">우리은행 Excel (역순 리스트):</span>
+  <span class="w">행1: 12/31 잔고 ₩161,050,376</span>  <span class="c">← closing (first_balance)</span>
+  <span class="w">...</span>
+  <span class="w">행N: 12/01 입금 +₩500K, 잔고 ₩211,500,000</span>  <span class="c">← 마지막 행</span>
+
+<span class="g">기초잔고 = 마지막 행 잔고 - 마지막 행 거래 = ₩211,000,000</span>
+<span class="c">→ 파서가 이미 opening_balance로 반환 중</span>
+
+<span class="a">변경사항:</span>
+  <span class="w">1. upload.py: opening_balance도 balance_snapshots에 저장</span>
+  <span class="w">2. cashflow API: 스냅샷 조회 1개로 기초잔고 확보</span>
+  <span class="r">   별도 역산/체이닝 불필요!</span></div>
+  </details>
+
+  <details>
+    <summary>API 엔드포인트 3개</summary>
+    <table>
+      <tr><th>엔드포인트</th><th>용도</th><th>파라미터</th></tr>
+      <tr><td><code>GET /api/cashflow/actual</code></td><td>특정 월 은행 거래 일별 리스트 + 잔고</td><td>entity_id, year, month</td></tr>
+      <tr><td><code>GET /api/cashflow/summary</code></td><td>월별 요약 (차트용)</td><td>entity_id, months</td></tr>
+      <tr><td><code>GET /api/cashflow/card-expense</code></td><td>카드 사용 상세 (카드/회원별)</td><td>entity_id, year, month</td></tr>
+    </table>
+  </details>
+
+  <ol class="steps">
+    <li>테스트 작성 — calc_opening_balance 역산</li>
+    <li>테스트 실행 → 실패 확인</li>
+    <li>cashflow_service.py 구현 (역산 + 일별 잔고 + 월별 요약)</li>
+    <li>테스트 실행 → 통과 확인</li>
+    <li>cashflow 라우터 작성 (3 엔드포인트)</li>
+    <li>main.py에 라우터 등록</li>
+    <li>curl로 API 수동 테스트</li>
+    <li>커밋</li>
+  </ol>
+</div>
+
+<!-- Task 2 -->
+<div class="task t-be">
+  <span class="task-num tn-be">Task 2 — Backend</span>
+  <div class="task-title">Forecasts CRUD API</div>
+  <div class="task-desc">예상 현금흐름의 입력 데이터. 카테고리별 예상 입금/출금을 CRUD.</div>
+  <div class="files">
+    <span class="file new">backend/routers/forecasts.py</span>
+    <span class="file mod">backend/main.py</span>
+  </div>
+
+  <details>
+    <summary>forecasts 테이블 (이미 존재)</summary>
+    <table>
+      <tr><th>컬럼</th><th>타입</th><th>설명</th></tr>
+      <tr><td><code>category</code></td><td>text</td><td>매출, SaaS, 수수료, 교통비, 임차료, 카드사용 등</td></tr>
+      <tr><td><code>type</code></td><td>text</td><td>'in' (입금) / 'out' (출금)</td></tr>
+      <tr><td><code>forecast_amount</code></td><td>numeric</td><td>예상 금액</td></tr>
+      <tr><td><code>actual_amount</code></td><td>numeric</td><td>실제 금액 (월말 확정 후)</td></tr>
+      <tr><td><code>is_recurring</code></td><td>boolean</td><td>반복 항목 여부</td></tr>
+    </table>
+  </details>
+
+  <ol class="steps">
+    <li>forecasts 라우터 작성 (GET/POST/PUT/DELETE)</li>
+    <li>main.py에 등록</li>
+    <li>커밋</li>
+  </ol>
+</div>
+
+<!-- Task 3 -->
+<div class="task t-be">
+  <span class="task-num tn-be">Task 3 — Backend</span>
+  <div class="task-title">예상 현금흐름 API (시차 보정 포함)</div>
+  <div class="task-desc">forecasts + 카드 시차 보정으로 예상 기말 계산. 실제 진행과 비교.</div>
+  <div class="files">
+    <span class="file mod">backend/services/cashflow_service.py</span>
+    <span class="file mod">backend/routers/cashflow.py</span>
+    <span class="file mod">backend/tests/test_cashflow.py</span>
+  </div>
+
+  <div class="note">
+    <strong>카드 이중 차감 방지</strong>
+    forecast_expense는 forecasts의 type='out' 전체 합산 (카드 카테고리 포함). 카드 사용액은 별도 항으로 분리 차감. 공식: 기초 + 입금 - 출금 - 카드사용 + 시차보정.
+  </div>
+
+  <details>
+    <summary>시차 보정 상세</summary>
+    <div class="wire"><span class="p">시차 보정 = 전월 카드 사용(확정) - 당월 카드 사용(예상)</span>
+
+<span class="w">예시: 1월 카드 ₩17.7M, 2월 예상 ₩12.3M</span>
+<span class="g">보정 = 17.7M - 12.3M = +₩5.4M</span>
+<span class="a">→ 2월에 결제할 카드대금(=1월분 ₩17.7M)이 2월 카드 사용(₩12.3M)보다 ₩5.4M 더 많음</span>
+<span class="a">→ 즉, 전월 사용 > 당월 사용이면 카드대금 결제가 늘어남</span>
+
+<span class="w">카드별 분리 (드릴다운용):</span>
+  <span class="c">롯데: 1월 ₩14.7M - 2월 ₩11.5M = +₩3.2M</span>
+  <span class="c">우리: 1월 ₩3.0M - 2월 ₩0.8M = +₩2.2M</span></div>
+  </details>
+
+  <details>
+    <summary>API 응답 구조</summary>
+    <table>
+      <tr><th>필드</th><th>설명</th></tr>
+      <tr><td><code>opening_balance</code></td><td>전월 확정 기말</td></tr>
+      <tr><td><code>forecast_closing</code></td><td>공식 적용 결과</td></tr>
+      <tr><td><code>actual_closing</code></td><td>실제 진행 기준 기말</td></tr>
+      <tr><td><code>diff</code></td><td>actual - forecast</td></tr>
+      <tr><td><code>card_timing</code></td><td>시차 보정 상세 (전월카드, 당월카드, 보정값)</td></tr>
+      <tr><td><code>items</code></td><td>forecasts 항목 배열</td></tr>
+    </table>
+  </details>
+
+  <ol class="steps">
+    <li>시차 보정 테스트 작성 (양수/음수/제로)</li>
+    <li>테스트 실행 → 실패 확인</li>
+    <li>calc_card_timing_adjustment + get_forecast_cashflow 구현</li>
+    <li>cashflow 라우터에 /forecast 엔드포인트 추가</li>
+    <li>테스트 실행 → 통과</li>
+    <li>커밋</li>
+  </ol>
+</div>
+
+<!-- Task 4 -->
+<div class="task t-fe">
+  <span class="task-num tn-fe">Task 4 — Frontend</span>
+  <div class="task-title">3탭 레이아웃 + 실제 현금흐름 탭</div>
+  <div class="task-desc">page.tsx를 3탭 셸로 교체. 탭1: 차트 + KPI + 거래 드릴다운 리스트.</div>
+  <div class="files">
+    <span class="file mod">frontend/src/app/cashflow/page.tsx</span>
+    <span class="file new">frontend/src/app/cashflow/actual-tab.tsx</span>
+  </div>
+
+  <details open>
+    <summary>UI: 3탭 셸</summary>
+    <div class="wire"><span class="w">현금흐름 — </span><span class="g">한아원코리아</span>
+<span class="a">우리은행 법인통장</span>
+
+┌─────────────────────────────────────────────────────┐
+│ <span class="g">[실제 현금흐름]</span>   <span class="a">[예상 현금흐름]</span>   <span class="p">[비용 (카드 사용)]</span>  │
+│  <span class="g">━━━━━━━━━━━━━</span>                                       │
+└─────────────────────────────────────────────────────┘
+<span class="c">활성 탭: green border-b-2</span>
+<span class="c">예상:    amber border-b-2</span>
+<span class="c">비용:    purple border-b-2</span></div>
+  </details>
+
+  <details open>
+    <summary>UI: 월 선택 + 차트</summary>
+    <div class="wire">월: <span class="a">[12월]</span> <span class="g">[1월●]</span> <span class="a">[2월]</span>
+
+┌─ Recharts ComposedChart ─────────────────────┐
+│  <span class="g">■</span> 입금 bar (green gradient)                  │
+│  <span class="r">■</span> 출금 bar (red gradient)                    │
+│  <span class="a">─</span> 순현금흐름 area+line (amber)               │
+│  선택 월 = bar 더 굵고 opacity:1              │
+│  비선택 = opacity:0.35                        │
+└──────────────────────────────────────────────┘
+범례: <span class="g">●</span> 입금  <span class="r">●</span> 출금  <span class="a">●</span> 순현금흐름</div>
+  </details>
+
+  <details open>
+    <summary>UI: 4 KPI 카드</summary>
+    <div class="wire">┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+│<span class="a">기초 잔고</span>   │ │<span class="a">총 입금</span>    │ │<span class="a">총 출금</span>    │ │<span class="a">기말 잔고</span>   │
+│<span class="w">₩161.0M</span>   │ │<span class="g">+₩236.0M</span>  │ │<span class="r">-₩289.9M</span>  │ │<span class="w">₩107.2M</span>   │
+│           │ │           │ │           │ │<span class="r">순 -₩53.9M</span> │
+└──────────┘ └──────────┘ └──────────┘ └──────────┘
+<span class="c">grid-cols-4 gap-3 · font-mono · 반응형 cols-2</span></div>
+  </details>
+
+  <details open>
+    <summary>UI: 거래 리스트 (5컬럼 + 3단계 드릴다운)</summary>
+    <div class="wire">┌────────┬───────┬───────────────────────┬──────────┬──────────┐
+│ <span class="a">날짜</span>    │ <span class="a">유형</span>   │ <span class="a">항목</span>                    │ <span class="a">금액</span>      │ <span class="a">잔고</span>      │
+├────────┼───────┼───────────────────────┼──────────┼──────────┤
+│<span class="w">12-31</span>   │       │ <span class="w">시작 잔고</span>               │ —        │<span class="w">₩161.0M</span>  │ <span class="g">← bg green/3%</span>
+│<span class="w">01-02</span>   │<span class="g"> 입금</span>   │ 스마트스토어정산          │<span class="g">+₩1.2M</span>   │<span class="w">₩162.3M</span>  │
+│<span class="w">01-04</span>   │<span class="r"> 출금</span>   │ NICE_통신판매            │<span class="r">-₩235K</span>   │<span class="w">₩162.0M</span>  │
+│<span class="w">01-08</span>   │<span class="p"> 선결제</span> │ 롯데카드(주) 선결제       │<span class="r">-₩3.0M</span>   │<span class="w">₩159.0M</span>  │
+│<span class="w">01-15</span>   │<span class="p">카드대금</span>│ 롯데카드 12월분 <span class="a">▾</span>       │<span class="r">-₩25.3M</span>  │<span class="w">₩xxx</span>     │ <span class="p">← 클릭 드릴다운</span>
+│        │<span class="p"> 회원</span>   │  ┗ 하선우 (****1234) <span class="a">▾</span>  │<span class="r">-₩5.7M</span>   │          │ <span class="c">pl-7 bg-black/12</span>
+│        │       │   ┗ <span class="c">[SaaS]</span> Anthropic     │          │          │ <span class="c">pl-12 bg-black/18</span>
+│        │       │   ┗ <span class="b-trans">[교통비]</span> 카카오T     │          │          │
+│        │       │   ┗ <span class="a">[기타]</span> 외 45건       │          │          │
+│<span class="w">01-30</span>   │       │ <span class="w">기말 잔고</span>               │ —        │<span class="g">₩107.2M</span>  │ <span class="g">← border-t-2 green</span>
+└────────┴───────┴───────────────────────┴──────────┴──────────┘
+
+<span class="a">유형 배지 색상:</span>
+  <span class="b-in">입금</span> <span class="b-out">출금</span> <span class="b-card">카드대금</span> <span class="b-card">선결제</span>
+
+<span class="a">내부계정 배지 (3단계):</span>
+  <span class="b-saas">SaaS</span> <span class="b-trans">교통비</span> <span class="b-card">수수료</span> <span class="b-fc">접대비</span> <span class="b-in">복리후생</span> <span class="b-fix">기타</span></div>
+  </details>
+
+  <ol class="steps">
+    <li>page.tsx를 3탭 셸로 교체</li>
+    <li>actual-tab.tsx 구현 (차트 + KPI + 거래 리스트 + 드릴다운)</li>
+    <li>커밋</li>
+  </ol>
+</div>
+
+<!-- Task 5 -->
+<div class="task t-fe">
+  <span class="task-num tn-fe">Task 5 — Frontend</span>
+  <div class="task-title">예상 현금흐름 탭</div>
+  <div class="task-desc">forecasts 기반 예상 vs 실제 비교. 시차 보정 행. 7컬럼 토글.</div>
+  <div class="files">
+    <span class="file new">frontend/src/app/cashflow/forecast-tab.tsx</span>
+  </div>
+
+  <details open>
+    <summary>UI: 차트 — 예상 vs 실제 잔고</summary>
+    <div class="wire">┌─ Recharts AreaChart ─────────────────────────────────┐
+│  <span class="a">---</span> 예상 잔고 (amber dashed + area)                    │
+│  <span class="g">───</span> 실제 잔고 (green solid + area, 현재까지만)          │
+│                                                       │
+│  <span class="a">₩107M</span>                                     <span class="a">₩95M</span>    │
+│    ╲                      <span class="p">│롯데│</span>            <span class="p">│우리│</span>   │
+│     ╲   <span class="g">₩96.2M←현재</span>     <span class="a">↘카드대금 급락</span>              │
+│      ╲ <span class="g">╱</span>                                               │
+│       <span class="g">╱</span>                                                │
+└───────────────────────────────────────────────────────┘
+범례: <span class="a">●</span> 예상 잔고  <span class="g">●</span> 실제 잔고 (glow)  <span class="p">●</span> 카드 결제일</div>
+  </details>
+
+  <details open>
+    <summary>UI: KPI + "실제 비교 펼치기"</summary>
+    <div class="wire">┌──────────────┐ ┌──────────────┐ ┌──────────────────┐ ┌──────────────────┐
+│<span class="a">기초 (1월 확정)</span> │ │<span class="a">예상 기말</span>      │ │<span class="a">실제 진행 기준 기말</span>  │ │<span class="a">카드 사용 (진행)</span>   │
+│<span class="w">₩107,168,640</span>  │ │<span class="a">₩95,400,000</span>   │ │<span class="g">₩96,200,000</span>       │ │<span class="a">₩5,200,000</span>       │
+│              │ │              │ │차이: <span class="g">+₩800K</span> <span class="g">■■■</span>  │ │예상 ₩12.3M 중 42% │
+└──────────────┘ └──────────────┘ └──────────────────┘ └──────────────────┘
+
+Diff bar: <span class="g">±5% → green</span>  <span class="a">±10% → amber</span>  <span class="r">&gt;10% → red</span>
+
+                                        <span class="w">[실제 비교 펼치기 ▸]</span></div>
+  </details>
+
+  <details open>
+    <summary>UI: 이벤트 리스트 (4컬럼 ↔ 7컬럼 토글)</summary>
+    <div class="wire"><span class="a">접힌 상태 (기본):</span>
+│ <span class="a">날짜</span>   │ <span class="a">유형</span>    │ <span class="a">항목</span>              │ <span class="a">예상 금액</span> │ <span class="a">예상 잔고</span>  │
+
+<span class="g">펼친 상태 (실제 비교):</span>
+│ <span class="a">날짜</span>   │ <span class="a">유형</span>    │ <span class="a">항목</span>         │ <span class="a">예상 금액</span> │ <span class="g">실제 진행</span> │ <span class="a">예상 잔고</span>│ <span class="g">실제 잔고</span>│
+
+┌────────┬────────┬──────────────────┬──────────┬──────────┐
+│<span class="w">01-31</span>   │        │ 시작 잔고          │ —        │<span class="w">₩107.2M</span>  │ <span class="g">bg green/3%</span>
+│<span class="w">02월</span>    │<span class="g">매출</span>     │ 스마트스토어 정산   │<span class="g">+₩226.7M</span> │<span class="a">₩333.9M</span>  │
+│<span class="w">02월</span>    │<span class="c">SaaS</span>    │ SaaS 구독료 <span class="a">▾</span>    │<span class="r">-₩2.4M</span>   │<span class="a">₩331.5M</span>  │ <span class="c">← 드릴다운</span>
+│        │        │  ┗ Anthropic     │<span class="r">-₩167K</span>   │          │ <span class="c">pl-10</span>
+│        │        │  ┗ Cursor AI     │<span class="r">-₩29K</span>    │          │
+│<span class="w">02월</span>    │<span class="p">수수료</span>   │ 지급수수료         │<span class="r">-₩6.8M</span>   │<span class="a">₩324.7M</span>  │
+│<span class="w">02-10</span>   │<span class="w">임차료</span>   │ 임차료 (고정)      │<span class="r">-₩4.0M</span>   │<span class="a">₩318.0M</span>  │
+│<span class="w">02-28</span>   │<span class="a">시차보정</span> │ 카드 시차 보정 <span class="a">▾</span>  │<span class="g">+₩5.4M</span>   │<span class="a">₩318.2M</span>  │ <span class="p">bg purple/3%</span>
+│        │<span class="p">롯데</span>     │  ┗ 1월₩14.7M-2월₩11.5M │<span class="g">+₩3.2M</span>│       │
+│        │<span class="p">우리</span>     │  ┗ 1월₩3.0M-2월₩0.8M  │<span class="g">+₩2.2M</span> │       │
+│<span class="w">02-28</span>   │        │ <span class="w">기말 잔고</span>          │ —        │<span class="a">₩95.4M</span>   │ <span class="a">bg amber/3%</span>
+└────────┴────────┴──────────────────┴──────────┴──────────┘</div>
+  </details>
+
+  <details open>
+    <summary>UI: 공식 + 하단 비교 박스</summary>
+    <div class="wire"><span class="c">┌─ 공식 ───────────────────────────────────────────────┐</span>
+<span class="c">│ 2월 예상 기말 = 1월 확정 기말                            │</span>
+<span class="c">│   + 2월 예상 입금                                       │</span>
+<span class="c">│   - 2월 예상 출금                                       │</span>
+<span class="c">│   - 2월 예상 카드 사용액                                  │</span>
+<span class="c">│   + (1월 카드 사용액 - 2월 예상 카드 사용액) ← 시차 보정   │</span>
+<span class="c">└───────────────────────────────────────────────────────┘</span>
+<span class="a">font-mono · text-cyan · bg-muted/30</span>
+
+┌─ <span class="p">카드 시차</span> ──────────────┐  ┌─ <span class="a">1월 예상 vs 실제</span> ────────┐
+│ 1월 카드 (확정)  <span class="w">₩17.7M</span>  │  │ 예상 기말    <span class="a">₩108.2M</span>      │
+│ 2월 카드 (진행)  <span class="a">₩5.2M</span>   │  │ 실제 기말    <span class="w">₩107.2M</span>      │
+│ 2월 카드 (예상)  <span class="a">₩12.3M</span>  │  │ ──────────────────────── │
+│ ──────────────────────  │  │ 차이        <span class="r">-₩1.0M</span>       │
+│ 시차 보정      <span class="g">+₩5.4M</span>   │  │ 정확도 99.0% <span class="g">■■■■</span>        │
+└──────────────────────────┘  └───────────────────────────┘
+<span class="a">grid-cols-2 gap-4 · 반응형 cols-1</span></div>
+  </details>
+
+  <ol class="steps">
+    <li>forecast-tab.tsx 구현 (차트 + KPI + 토글 + 리스트 + 드릴다운 + 비교 박스)</li>
+    <li>커밋</li>
+  </ol>
+</div>
+
+<!-- Task 6 -->
+<div class="task t-fe">
+  <span class="task-num tn-fe">Task 6 — Frontend</span>
+  <div class="task-title">비용 (카드 사용) 탭</div>
+  <div class="task-desc">카드/회원별 아코디언 + 내부계정 배지 + 월별 비교.</div>
+  <div class="files">
+    <span class="file new">frontend/src/app/cashflow/expense-tab.tsx</span>
+  </div>
+
+  <details open>
+    <summary>UI: KPI + 카드/회원 아코디언</summary>
+    <div class="wire">카드 사용 월: <span class="a">[12월]</span> <span class="p">[1월●]</span> <span class="a">[2월]</span>
+1월 카드 사용 → <span class="a">2월</span> 결제 예정
+
+┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+│<span class="a">총 지출</span>        │ │<span class="a">환불</span>           │ │<span class="a">순 사용</span>        │
+│<span class="r">₩21,626,970</span>   │ │<span class="g">₩3,906,075</span>    │ │<span class="p">₩17,720,895</span>   │
+│607건          │ │12건           │ │              │
+└──────────────┘ └──────────────┘ └──────────────┘
+
+┌────────────────────────────────────────────────────────┐
+│ <span class="p">롯데카드 ****1234 (하선우) — 순 ₩8,128,425 ▾</span>            │
+│   <span class="b-saas">SaaS</span> Anthropic Claude              <span class="r">-₩167,145</span>          │
+│   <span class="b-saas">SaaS</span> Cursor AI                     <span class="r">-₩28,958</span>           │
+│   <span class="b-trans">교통비</span> 카카오T × 12건               <span class="r">-₩201,600</span>          │
+│   <span class="b-fix">취소</span> 이노페이                       <span class="g">+₩55,000</span>           │
+│   ... 외 178건                                          │
+│   <span class="w">소계: ₩10.2M / 환불 ₩2.1M / 순 ₩8.1M</span>                │
+├────────────────────────────────────────────────────────┤
+│ <span class="p">롯데카드 ****5678 (김선우) — 순 ₩6,599,598 ▾</span>            │
+│   ...                                                   │
+├────────────────────────────────────────────────────────┤
+│ <span class="p">우리카드 ****9012 — 순 ₩2,992,872 ▾</span>                     │
+│   ...                                                   │
+╞════════════════════════════════════════════════════════╡
+│ <span class="w">1월 합계</span>                              <span class="p">₩17,720,895</span>      │
+└────────────────────────────────────────────────────────┘</div>
+  </details>
+
+  <details open>
+    <summary>UI: 하단 비교 박스</summary>
+    <div class="wire">┌─ 내부 계정별 (1월) ────────┐  ┌─ 월별 비교 ──────────────┐
+│ <span class="b-saas">SaaS</span> 구독료    <span class="w">₩2.4M</span>    │  │ 12월          <span class="w">₩29.9M</span>     │
+│ <span class="b-card">수수료</span> 지급수수료 <span class="w">₩6.8M</span>   │  │ 1월           <span class="w">₩17.7M</span>     │
+│ <span class="b-trans">교통비</span> 여비교통비 <span class="w">₩890K</span>   │  │ ─────────────────────── │
+│ <span class="b-fc">접대비</span> 접대비    <span class="w">₩1.2M</span>   │  │ 변동           <span class="g">-40.8%</span>     │
+│ <span class="b-in">복리후생</span> 복리후생비 <span class="w">₩650K</span> │  │  (green = 비용 감소)      │
+│ <span class="b-fix">기타</span> 기타       <span class="w">₩5.8M</span>   │  │                           │
+│ ─────────────────────── │  │                           │
+│ 합계            <span class="w">₩17.7M</span>   │  │                           │
+└──────────────────────────┘  └───────────────────────────┘
+<span class="a">데이터: API account_breakdown + prev_month_net + change_pct</span></div>
+  </details>
+
+  <ol class="steps">
+    <li>expense-tab.tsx 구현 (KPI + 아코디언 + 비교 박스)</li>
+    <li>커밋</li>
+  </ol>
+</div>
+
+<!-- Task 7 -->
+<div class="task t-mix">
+  <span class="task-num tn-mix">Task 7 — Mixed</span>
+  <div class="task-title">dashboard.py 정리 + 통합 테스트</div>
+  <div class="task-desc">중복 엔드포인트 제거 + 전체 테스트 통과 확인.</div>
+  <div class="files">
+    <span class="file mod">backend/routers/dashboard.py</span>
+    <span class="file mod">backend/tests/test_cashflow.py</span>
+  </div>
+  <ol class="steps">
+    <li>dashboard.py에서 /cashflow, /cashflow/detail 제거</li>
+    <li>프론트엔드 기존 참조 정리</li>
+    <li>전체 테스트 실행 → ALL PASS</li>
+    <li>커밋</li>
+  </ol>
+</div>
+
+<!-- Task 8 -->
+<div class="task t-test">
+  <span class="task-num tn-test">Task 8 — Verify</span>
+  <div class="task-title">실제 데이터 E2E 검증</div>
+  <div class="task-desc">업로드된 데이터로 3탭 모두 동작 확인.</div>
+  <ol class="steps">
+    <li>실제 현금흐름: 기초잔고 역산 + 거래 드릴다운</li>
+    <li>예상 현금흐름: 시차 보정 계산 + 예상 vs 실제</li>
+    <li>비용 탭: 카드/회원 그룹핑 + 변동률</li>
+    <li>최종 커밋</li>
+  </ol>
+</div>
+
+<script>
+// Collapsible details - all open by default, click to toggle
+</script>
+</body>
+</html>

@@ -1,13 +1,16 @@
 """우리은행 .xlsx parser."""
 
 import io
+import logging
 import re
 import openpyxl
+
+logger = logging.getLogger(__name__)
 import openpyxl.styles.colors as _colors
 from datetime import date, datetime
 from typing import Optional
 
-from .base import BaseParser, ParsedTransaction
+from .base import BaseParser, ParsedTransaction, ParseResult
 from .utils import parse_amount, parse_date
 
 # Patch openpyxl aRGB regex to accept both 6-char (#RRGGBB) and 8-char (AARRGGBB)
@@ -33,13 +36,19 @@ class WooriBankParser(BaseParser):
             return False
 
     def parse(self, file_bytes: bytes, filename: str) -> list[ParsedTransaction]:
+        return self.parse_with_balance(file_bytes, filename).transactions
+
+    def parse_with_balance(self, file_bytes: bytes, filename: str) -> ParseResult:
         wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
         sheet = wb.active
 
         results: list[ParsedTransaction] = []
+        first_balance: float | None = None
+        last_balance: float | None = None
+        last_date: date | None = None
 
         # 1-indexed: Row 4 = headers, data starts at row 5
-        # Columns (1-indexed): B=2(거래일시), C=3(적요), D=4(기재내용), E=5(지급), F=6(입금)
+        # Columns (1-indexed): B=2(거래일시), C=3(적요), D=4(기재내용), E=5(지급), F=6(입금), G=7(잔액)
         for row in sheet.iter_rows(min_row=5, values_only=False):
             try:
                 # Column B (index 1): 거래일시
@@ -82,6 +91,16 @@ class WooriBankParser(BaseParser):
                 else:
                     continue
 
+                # Column G (index 6): 잔액
+                balance_raw = row[6].value if len(row) > 6 else None
+                if balance_raw is not None:
+                    bal = parse_amount(str(balance_raw))
+                    if bal is not None:
+                        if first_balance is None:
+                            first_balance = bal
+                        last_balance = bal
+                        last_date = tx_date
+
                 # 적요 = '체크우리' means check card transaction
                 is_check_card = memo == "체크우리"
 
@@ -98,8 +117,16 @@ class WooriBankParser(BaseParser):
                     source_type="woori_bank",
                     is_check_card=is_check_card,
                 ))
-            except Exception:
+            except Exception as e:
+                logger.warning("Parse row failed: %s", e)
                 continue
 
         wb.close()
-        return results
+        # 우리은행 Excel은 최신순 (첫 행=최신, 마지막 행=가장 오래된 거래)
+        # 따라서 first_balance = 기말잔고, last_balance = 기초잔고
+        return ParseResult(
+            transactions=results,
+            opening_balance=last_balance,  # 마지막 행 = 가장 오래된 = 기초
+            closing_balance=first_balance,  # 첫 행 = 가장 최신 = 기말
+            balance_date=results[0].date if results else None,  # 최신 거래 날짜
+        )

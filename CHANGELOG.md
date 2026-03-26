@@ -2,6 +2,55 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [0.6.0] - 2026-03-26 — Supabase 마이그레이션 + 백엔드 리팩토링
+
+### Changed
+- **DB: Neon → Supabase** — hanahone-erp 프로젝트 (kxsofwbwzoovnwgxiwgi), financeone 스키마
+- **connection.py** — SET search_path TO financeone, public + 로깅
+- **schema.sql** — IF NOT EXISTS, base_currency 컬럼, idx_tx_file_id 인덱스, NULLS NOT DISTINCT
+- **EXTRACT → range queries** — 11개 EXTRACT(YEAR/MONTH) → date >= / date < 변환 (인덱스 활용)
+- **fetch_all 유틸** — 14개 파일 24개 위치의 cols/dict(zip) 패턴 → fetch_all(cur)
+- **statement_generator 분리** — 1074줄 → 7 모듈 (balance_sheet, income_statement, cash_flow, trial_balance, deficit, consolidated, helpers)
+- **upload dedup** — O(n²) → O(1) set 기반 중복 체크 (dedup_service.py)
+- **하드코딩 제거** — ENTITIES dict, HOI_ENTITY_ID, CASH_ACCOUNT_CODE, EQUITY_INCEPTION_DATE → DB/env
+- **VERSION 파일** — main.py 버전 하드코딩 → VERSION 파일 (0.5.0)
+- **에러 핸들링** — dashboard, cashflow, intercompany 라우터 try/except + 파서 로깅
+
+### Added
+- `backend/utils/db.py` — fetch_all(), build_date_range() 유틸
+- `backend/services/dedup_service.py` — O(1) 중복 감지 서비스
+- `backend/services/statements/` — 7개 모듈로 분리
+- `backend/tests/test_api_integration.py` — API 통합 테스트 10개
+- 총 80 tests (70 기존 + 10 통합)
+
+## [0.5.0] - 2026-03-26 — 현금흐름 3탭 재설계 + 프로덕션 배포
+
+### Added
+- **현금흐름 3탭 UI** — 실제/예상/비용 탭 구조 (green/amber/purple 색상 코딩)
+- **cashflow_service.py** — 기초잔고 역산, 일별 running balance, 월별 요약, 카드 그룹핑, 시차보정 엔진
+- **4 Cashflow API** — `/actual` (일별 거래+잔고), `/summary` (월별 차트), `/card-expense` (카드 그룹핑), `/forecast` (시차보정)
+- **Forecasts CRUD API** — 예상 입금/출금 항목 생성·수정·삭제 (`/api/forecasts`)
+- **card_settings 테이블+API** — 카드 결제일, 카드사 정보 관리 (`/api/card-settings`)
+- **실제 현금흐름 탭** — ComposedChart(Bar+Line) + KPI 4개 + 거래 드릴다운 리스트 + 월 pill 네비
+- **예상 현금흐름 탭** — forecast 항목 테이블 (7컬럼 토글) + 입력 모달 + 시차보정 박스 + 공식 표시
+- **비용 (카드) 탭** — 카드/회원 아코디언 + 내부계정 breakdown + 월별 비교
+- **opening_balance 저장** — 우리은행 Excel 업로드 시 기초잔고도 balance_snapshots에 저장
+- **프로덕션 배포 설정** — Railway (nixpacks.toml, Procfile) + Vercel (vercel.json)
+- **통화 포맷** — HOI=$, 한국법인=₩ entity-aware 포맷팅
+- **Excel 파싱 개선** — 역순 정렬 처리, 동일키 중복 허용, 7가지 파싱 로직 수정
+- 16 new pytest cases (cashflow) — 총 70 tests
+- design-system/pages/cashflow.md 디자인 사양 문서
+
+### Changed
+- DB: 20 → 21 테이블 (card_settings 추가)
+- dashboard.py → cashflow 엔드포인트를 전용 라우터로 분리
+- cashflow/page.tsx → 3탭 셸로 교체
+- Geist/Geist Mono 폰트 적용 (IBM Plex에서 전환)
+
+### Fixed
+- Recharts Bar opacity 함수 prop → 사전 계산 값으로 수정
+- 우리은행 Excel 역순 정렬 시 기초/기말 잔고 뒤바뀜
+
 ## [Unreleased]
 
 ## [0.3.0] - 2026-03-23 — Phase 3: 3개 법인 연결재무제표

@@ -8,6 +8,8 @@ from datetime import date
 from decimal import Decimal
 from psycopg2.extensions import connection as PgConnection
 
+from backend.utils.db import fetch_all
+
 
 def detect_intercompany(
     conn: PgConnection,
@@ -44,8 +46,7 @@ def detect_intercompany(
         """,
         [date_tolerance_days, entity_ids, entity_ids, start_date, end_date],
     )
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    rows = fetch_all(cur)
     cur.close()
 
     # intercompany_pairs 테이블에 저장
@@ -142,7 +143,6 @@ def get_eliminations(
         """,
         [entity_ids, entity_ids, start_date, end_date],
     )
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    rows = fetch_all(cur)
     cur.close()
     return rows
