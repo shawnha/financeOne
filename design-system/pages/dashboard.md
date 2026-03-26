@@ -12,9 +12,9 @@
 - 3개 법인 전 화면 통일 표시 (Dashboard, Transactions, Upload, Slack Match)
 
 ## KPI Cards (1x1, 4개)
-- 금액: 28px IBM Plex Mono bold, tabular-nums (`--color-text`)
+- 금액: 28px Geist Mono bold, tabular-nums (`--color-text`)
 - 증감: 12px, 화살표 + 퍼센트 (`--profit-color` / `--loss-color`)
-- 레이블: 12px IBM Plex Sans, `--neutral-color`
+- 레이블: 12px Geist, `--neutral-color`
 - 카드 배경: `--color-secondary` (#1E293B), radius 12px, padding 24px
 
 ## Cash Flow Chart (2x1)

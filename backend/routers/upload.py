@@ -37,12 +37,15 @@ async def upload_transactions(
     # Auto-detect parser
     parser = detect_parser(file_bytes, filename)
     if parser is None:
-        raise HTTPException(400, "파일 형식을 인식할 수 없습니다. 지원: 롯데카드, 우리카드, 우리은행, CSV")
+        raise HTTPException(400, f"파일 형식을 인식할 수 없습니다. 지원: 롯데카드, 우리카드, 우리은행, CSV (파일명: {filename}, 크기: {len(file_bytes)}bytes)")
 
     # Parse transactions
-    parsed = parser.parse(file_bytes, filename)
+    try:
+        parsed = parser.parse(file_bytes, filename)
+    except Exception as parse_err:
+        raise HTTPException(400, f"파싱 중 오류: {type(parser).__name__} - {parse_err}")
     if not parsed:
-        raise HTTPException(400, "파싱된 거래가 없습니다. 파일 내용을 확인해주세요.")
+        raise HTTPException(400, f"파싱된 거래가 없습니다. (파서: {type(parser).__name__}, 파일: {filename}, 크기: {len(file_bytes)}bytes)")
 
     source_type = parsed[0].source_type if parsed else "unknown"
 
@@ -188,7 +191,11 @@ async def upload_transactions(
         return {
             "file_id": file_id,
             "filename": filename,
+            "file": filename,
             "source_type": source_type,
+            "uploaded": inserted_count,
+            "duplicates": duplicate_count,
+            "errors": [],
             "stats": {
                 "total_parsed": len(parsed),
                 "inserted": inserted_count,

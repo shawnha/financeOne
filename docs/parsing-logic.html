@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FinanceOne — 파싱 로직 상세</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap');
+  :root { --bg:#050508; --bg2:#0d1117; --bg3:#161b22; --border:rgba(255,255,255,0.06); --text:#e2e8f0; --text2:#94a3b8; --text3:#64748b; --accent:#22C55E; --blue:#3B82F6; --purple:#8B5CF6; --amber:#F59E0B; --rose:#F43F5E; --cyan:#06B6D4; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:'Geist',system-ui,sans-serif; font-size:14px; line-height:1.7; padding:48px; max-width:1100px; margin:0 auto; }
+  h1 { font-size:28px; font-weight:700; letter-spacing:-0.5px; margin-bottom:8px; }
+  h1 span { color:var(--accent); }
+  .subtitle { color:var(--text2); font-size:15px; margin-bottom:48px; }
+  h2 { font-size:20px; font-weight:600; margin:48px 0 20px; padding-bottom:10px; border-bottom:1px solid var(--border); }
+  h2 .tag { font-size:11px; font-weight:600; padding:3px 8px; border-radius:6px; margin-left:8px; vertical-align:middle; }
+  .tag-blue { background:rgba(59,130,246,0.15); color:var(--blue); }
+  .tag-green { background:rgba(34,197,94,0.15); color:var(--accent); }
+  .tag-amber { background:rgba(249,115,22,0.15); color:var(--amber); }
+  .tag-rose { background:rgba(244,63,94,0.15); color:var(--rose); }
+  h3 { font-size:15px; font-weight:600; color:var(--cyan); margin:28px 0 12px; }
+  p { color:var(--text2); margin-bottom:12px; }
+  strong { color:var(--text); }
+  code { font-family:'Geist Mono',monospace; font-size:12px; background:var(--bg3); border:1px solid var(--border); padding:1px 6px; border-radius:4px; color:var(--cyan); }
+  pre { background:var(--bg3); border:1px solid var(--border); border-radius:10px; padding:18px 20px; overflow-x:auto; margin:12px 0 20px; font-family:'Geist Mono',monospace; font-size:12.5px; line-height:1.7; color:#a9c0e0; }
+  table { width:100%; border-collapse:collapse; margin:16px 0 24px; font-size:13px; }
+  th { background:var(--bg3); color:var(--text2); font-weight:600; padding:10px 14px; text-align:left; border:1px solid var(--border); font-size:11px; text-transform:uppercase; letter-spacing:0.5px; }
+  td { padding:9px 14px; border:1px solid var(--border); color:var(--text2); vertical-align:top; }
+  .callout { border-left:3px solid; padding:16px 20px; border-radius:0 8px 8px 0; margin:20px 0; background:var(--bg2); font-size:13px; color:var(--text2); }
+  .callout-rose { border-left-color:var(--rose); }
+  .callout-amber { border-left-color:var(--amber); }
+  .callout-green { border-left-color:var(--accent); }
+  .callout strong { color:var(--text); display:block; margin-bottom:4px; }
+  .excel-grid { background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:16px; overflow-x:auto; margin:16px 0; }
+  .excel-grid table { margin:0; }
+  .excel-grid th { background:var(--bg3); color:var(--amber); font-size:10px; padding:6px 10px; min-width:80px; }
+  .excel-grid td { padding:6px 10px; font-size:12px; font-family:'Geist Mono',monospace; }
+  .excel-grid .highlight { background:rgba(34,197,94,0.08); }
+  .excel-grid .skip { background:rgba(244,63,94,0.08); color:var(--rose); text-decoration:line-through; }
+  .flow { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:16px 0; }
+  .flow-step { background:var(--bg3); border:1px solid var(--border); border-radius:8px; padding:8px 14px; font-size:12px; color:var(--text2); }
+  .flow-arrow { color:var(--text3); font-size:16px; }
+  @media(max-width:768px) { body { padding:24px 16px; } }
+</style>
+</head>
+<body>
+
+<h1>FinanceOne — <span>파싱 로직</span> 상세</h1>
+<p class="subtitle">Excel/CSV 파일이 어떻게 파싱되어 DB에 저장되는지. 컬럼 매핑, 중복 감지, 알려진 문제점.</p>
+
+<!-- ═══════════════════════════ 전체 흐름 ═══════════════════════════ -->
+
+<h2>전체 업로드 흐름</h2>
+
+<div class="flow">
+  <div class="flow-step">파일 업로드<br><small>POST /api/upload</small></div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-step">파서 자동 감지<br><small>detect_parser()</small></div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-step">파싱<br><small>parser.parse()</small></div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-step">중복 감지<br><small>date+amount+counterparty</small></div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-step">DB INSERT<br><small>transactions 테이블</small></div>
+</div>
+
+<h3>파서 자동 감지 순서</h3>
+<pre>for parser in [LotteCardParser(), WooriCardParser(), WooriBankParser(), CSVParser()]:
+    if parser.detect(file_bytes, filename):
+        return parser  # 첫 번째 매칭된 파서 사용</pre>
+
+<table>
+  <tr><th>파서</th><th>감지 조건</th><th>파일 형식</th></tr>
+  <tr><td>롯데카드</td><td>Row 0에 <code>"카드승인내역"</code> 포함</td><td>.xls (xlrd)</td></tr>
+  <tr><td>우리카드</td><td>Row 1~17에 <code>"승인 상세내역"</code> 포함</td><td>.xls (xlrd)</td></tr>
+  <tr><td>우리은행</td><td>Row 1에 <code>"우리은행"</code> + <code>"거래내역"</code> 포함</td><td>.xlsx (openpyxl)</td></tr>
+  <tr><td>CSV</td><td>위 3개 모두 불일치 시 fallback</td><td>.csv</td></tr>
+</table>
+
+<!-- ═══════════════════════════ 우리은행 ═══════════════════════════ -->
+
+<h2>우리은행 파서 <span class="tag tag-blue">.xlsx</span></h2>
+<p>파일: <code>backend/services/parsers/woori_bank.py</code></p>
+
+<h3>Excel 구조 (Row 1 = 제목, Row 4 = 헤더, Row 5+ = 데이터)</h3>
+
+<div class="excel-grid">
+<table>
+  <tr>
+    <th>A (col 0)</th><th>B (col 1)</th><th>C (col 2)</th><th>D (col 3)</th><th>E (col 4)</th><th>F (col 5)</th><th>G (col 6)</th>
+  </tr>
+  <tr><td colspan="7" style="color:var(--amber)">Row 1: "우리은행 거래내역조회"</td></tr>
+  <tr><td colspan="7" style="color:var(--text3)">Row 2~3: 메타 정보</td></tr>
+  <tr>
+    <td style="color:var(--text3)">번호</td>
+    <td style="color:var(--accent)">거래일시</td>
+    <td style="color:var(--accent)">적요</td>
+    <td style="color:var(--accent)">기재내용</td>
+    <td style="color:var(--accent)">지급</td>
+    <td style="color:var(--accent)">입금</td>
+    <td style="color:var(--text3)">잔액</td>
+  </tr>
+  <tr class="highlight">
+    <td>1</td>
+    <td>2026.01.02 09:15:30</td>
+    <td>타행이체</td>
+    <td>리앤목특허법인</td>
+    <td>660,000</td>
+    <td></td>
+    <td>160,390,376</td>
+  </tr>
+  <tr class="highlight">
+    <td>2</td>
+    <td>2026.01.02 11:30:00</td>
+    <td>체크우리</td>
+    <td>CU편의점</td>
+    <td>3,500</td>
+    <td></td>
+    <td>160,386,876</td>
+  </tr>
+  <tr class="highlight">
+    <td>3</td>
+    <td>2026.01.03 14:00:00</td>
+    <td>입금</td>
+    <td>스마트스토어정산</td>
+    <td></td>
+    <td>1,430,548</td>
+    <td>161,817,424</td>
+  </tr>
+</table>
+</div>
+
+<h3>컬럼 매핑</h3>
+<table>
+  <tr><th>Excel 컬럼</th><th>인덱스</th><th>→ ParsedTransaction 필드</th><th>처리 방식</th></tr>
+  <tr><td>거래일시 (B)</td><td>col 1</td><td><code>date</code></td><td>datetime이면 .date(), 문자열이면 공백 앞부분만 파싱 ("2026.01.02 09:15" → 2026-01-02)</td></tr>
+  <tr><td>적요 (C)</td><td>col 2</td><td><code>description</code> 앞부분</td><td>"체크우리"이면 <code>is_check_card = True</code></td></tr>
+  <tr><td>기재내용 (D)</td><td>col 3</td><td><code>counterparty</code></td><td>거래처명으로 사용</td></tr>
+  <tr><td>지급 (E)</td><td>col 4</td><td><code>amount</code> + <code>type="out"</code></td><td>값이 있고 >0이면 지출</td></tr>
+  <tr><td>입금 (F)</td><td>col 5</td><td><code>amount</code> + <code>type="in"</code></td><td>값이 있고 >0이면 수입</td></tr>
+  <tr><td>잔액 (G)</td><td>col 6</td><td><strong>사용하지 않음</strong></td><td>파싱하지 않음 — 검증에 활용 가능하지만 현재 무시</td></tr>
+</table>
+
+<h3>description 생성</h3>
+<pre>counterparty = row[3]  # 기재내용
+description = f"{row[2]} {row[3]}"  # "적요 기재내용" (예: "타행이체 리앤목특허법인")</pre>
+
+<h3>체크카드 처리</h3>
+<p>적요가 <code>"체크우리"</code>이면 <code>is_check_card = True</code> 설정. 이 거래는 우리카드 체크계좌 거래와 중복이므로 마킹됨.</p>
+
+<div class="callout callout-rose">
+  <strong>알려진 문제 1: 잔액 컬럼 무시</strong>
+  잔액(G) 컬럼을 파싱하지 않아서 기말잔고 검증이 불가능합니다. 잔액 컬럼의 마지막 행 값을 balance_snapshots에 자동 저장하면 수동 입력 없이 기초/기말 잔고를 설정할 수 있습니다.
+</div>
+
+<!-- ═══════════════════════════ 롯데카드 ═══════════════════════════ -->
+
+<h2>롯데카드 파서 <span class="tag tag-amber">.xls</span></h2>
+<p>파일: <code>backend/services/parsers/lotte_card.py</code></p>
+
+<h3>Excel 구조 (Row 0 = 제목, Row 1 = 헤더, Row 2+ = 데이터)</h3>
+
+<div class="excel-grid">
+<table>
+  <tr>
+    <th>A(0)</th><th>B(1)</th><th>C(2)</th><th>D(3)</th><th>E(4)</th><th>F(5)</th><th>G(6)</th><th>H(7)</th><th>I(8)</th><th>…</th><th>L(11)</th><th>…</th><th>P(15)</th>
+  </tr>
+  <tr><td colspan="13" style="color:var(--amber)">Row 0: "카드승인내역"</td></tr>
+  <tr>
+    <td style="color:var(--text3)">No</td>
+    <td style="color:var(--text3)">카드번호</td>
+    <td style="color:var(--text3)">카드구분</td>
+    <td style="color:var(--accent)">회원명</td>
+    <td style="color:var(--text3)">…</td>
+    <td style="color:var(--accent)">승인일자</td>
+    <td style="color:var(--text3)">…</td>
+    <td style="color:var(--accent)">가맹점명</td>
+    <td style="color:var(--accent)">승인금액</td>
+    <td>…</td>
+    <td style="color:var(--rose)">취소여부</td>
+    <td>…</td>
+    <td style="color:var(--accent)">화폐단위</td>
+  </tr>
+  <tr class="highlight">
+    <td>1</td><td>****1234</td><td>법인</td><td>하선우</td><td>…</td>
+    <td>2026.01.15</td><td>…</td><td>카카오T</td><td>16,800</td><td>…</td><td></td><td>…</td><td>KRW</td>
+  </tr>
+  <tr class="skip">
+    <td>2</td><td>****1234</td><td>법인</td><td>하선우</td><td>…</td>
+    <td>2026.01.16</td><td>…</td><td>이노페이</td><td>55,000</td><td>…</td><td style="color:var(--rose)">Y</td><td>…</td><td>KRW</td>
+  </tr>
+</table>
+</div>
+
+<h3>컬럼 매핑</h3>
+<table>
+  <tr><th>Excel 컬럼</th><th>인덱스</th><th>→ ParsedTransaction 필드</th><th>처리 방식</th></tr>
+  <tr><td>회원명 (D)</td><td>col 3</td><td><code>member_name</code></td><td>카드 사용자 이름</td></tr>
+  <tr><td>승인일자 (F)</td><td>col 5</td><td><code>date</code></td><td>"YYYY.MM.DD" → date(Y, M, D)</td></tr>
+  <tr><td>가맹점명 (H)</td><td>col 7</td><td><code>counterparty</code></td><td>가맹점명</td></tr>
+  <tr><td>승인금액 (I)</td><td>col 8</td><td><code>amount</code></td><td>항상 <code>type="out"</code> (카드는 지출만)</td></tr>
+  <tr><td>취소여부 (L)</td><td>col 11</td><td>—</td><td><strong>"Y"이면 해당 행 전체 SKIP</strong></td></tr>
+  <tr><td>화폐단위 (P)</td><td>col 15</td><td><code>currency</code></td><td>기본 "KRW"</td></tr>
+</table>
+
+<h3>description 생성</h3>
+<pre>description = f"롯데카드 {counterparty}"  # 예: "롯데카드 카카오T"</pre>
+
+<div class="callout callout-amber">
+  <strong>알려진 문제 2: 취소 건 처리</strong>
+  취소여부가 "Y"인 행은 완전히 건너뜁니다. 하지만 <strong>취소된 거래 자체는 원래 승인 건과 별개 행</strong>입니다. 취소 건을 건너뛰면 원래 승인 금액은 그대로 남아서 지출이 과대 계상될 수 있습니다.
+  <br><br>
+  예: 1/15 카카오T ₩16,800 (승인) → 1/16 카카오T ₩16,800 (취소 Y) → 현재 로직은 취소만 SKIP하고 승인은 그대로 INSERT.
+  <br><br>
+  <strong>올바른 처리:</strong> 취소 건이 있으면 원래 승인 건도 함께 제거하거나, 취소를 type="in" (환불)으로 INSERT해야 합니다.
+</div>
+
+<!-- ═══════════════════════════ 우리카드 ═══════════════════════════ -->
+
+<h2>우리카드 파서 <span class="tag tag-green">.xls</span></h2>
+<p>파일: <code>backend/services/parsers/woori_card.py</code></p>
+
+<h3>Excel 구조 (Row 0~17 = 메타, Row 18 = 헤더, Row 19+ = 데이터)</h3>
+
+<div class="excel-grid">
+<table>
+  <tr>
+    <th>A(0)</th><th>…(1~6)</th><th>H(7)</th><th>…(8~10)</th><th>L(11)</th><th>…(12~14)</th><th>P(15)</th><th>…(16~17)</th><th>S(18)</th>
+  </tr>
+  <tr><td colspan="9" style="color:var(--amber)">Row 0~17: 메타 (기간 정보 포함, 예: "2026.01.01 ~ 2026.01.31")</td></tr>
+  <tr>
+    <td style="color:var(--accent)">이용일자</td><td>…</td>
+    <td style="color:var(--accent)">이용가맹점명</td><td>…</td>
+    <td style="color:var(--accent)">매출구분</td><td>…</td>
+    <td style="color:var(--accent)">승인금액</td><td>…</td>
+    <td style="color:var(--rose)">접수/취소</td>
+  </tr>
+  <tr class="highlight">
+    <td>01.15 14:30</td><td>…</td>
+    <td>CURSOR, AI POWERED IDE</td><td>…</td>
+    <td>신용</td><td>…</td>
+    <td>28,958</td><td>…</td>
+    <td>접수</td>
+  </tr>
+  <tr class="highlight">
+    <td>01.20 09:00</td><td>…</td>
+    <td>OPENAI *CHATGPT SUBSCR</td><td>…</td>
+    <td>체크계좌</td><td>…</td>
+    <td>31,853</td><td>…</td>
+    <td>접수</td>
+  </tr>
+  <tr class="skip">
+    <td>01.22 15:00</td><td>…</td>
+    <td>(주)인앤아웃</td><td>…</td>
+    <td>신용</td><td>…</td>
+    <td>150,000</td><td>…</td>
+    <td style="color:var(--rose)">취소</td>
+  </tr>
+</table>
+</div>
+
+<h3>컬럼 매핑</h3>
+<table>
+  <tr><th>Excel 컬럼</th><th>인덱스</th><th>→ ParsedTransaction 필드</th><th>처리 방식</th></tr>
+  <tr><td>이용일자 (A)</td><td>col 0</td><td><code>date</code></td><td>"MM.DD HH:MM" → 메타에서 연도 추출 후 date(year, M, D). <strong>연도가 없음!</strong></td></tr>
+  <tr><td>이용가맹점명 (H)</td><td>col 7</td><td><code>counterparty</code></td><td>가맹점명</td></tr>
+  <tr><td>매출구분 (L)</td><td>col 11</td><td><code>is_check_card</code></td><td><strong>"체크계좌"이면 is_check_card = True</strong></td></tr>
+  <tr><td>승인금액 (P)</td><td>col 15</td><td><code>amount</code></td><td>항상 <code>type="out"</code></td></tr>
+  <tr><td>접수/취소 (S)</td><td>col 18</td><td>—</td><td><strong>"취소"이면 해당 행 전체 SKIP</strong></td></tr>
+</table>
+
+<h3>연도 추출</h3>
+<pre>// Row 0~17에서 "2026.01.01 ~ 2026.01.31" 패턴을 찾아 연도 추출
+// 못 찾으면 파일명에서 연도 추출, 그래도 없으면 현재 연도 사용</pre>
+
+<h3>description 생성</h3>
+<pre>description = f"우리카드 {counterparty}"  # 예: "우리카드 CURSOR, AI POWERED IDE"</pre>
+
+<div class="callout callout-rose">
+  <strong>알려진 문제 3: 취소 건 처리 (롯데카드와 동일)</strong>
+  "취소" 행은 SKIP되지만, 원래 승인 건은 그대로 남아서 지출 과대 계상 가능.
+</div>
+
+<!-- ═══════════════════════════ 업로드 중복 감지 ═══════════════════════════ -->
+
+<h2>업로드 시 중복 감지 <span class="tag tag-rose">문제 있음</span></h2>
+<p>파일: <code>backend/routers/upload.py</code> (line 64-73)</p>
+
+<h3>현재 로직</h3>
+<pre>// 중복 판단 기준: (entity_id, date, amount, counterparty)
+SELECT id FROM transactions
+WHERE entity_id = %s AND date = %s AND amount = %s AND counterparty = %s
+LIMIT 1
+
+// 중복이면 is_duplicate = True 마킹
+// ⚠️ 하지만 INSERT는 무조건 실행됨 → 같은 파일 2번 업로드하면 2배로 들어감</pre>
+
+<div class="callout callout-rose">
+  <strong>핵심 문제 4: 중복이어도 INSERT됨</strong>
+  <code>is_dup = True</code>로 마킹만 하고 <strong>INSERT는 항상 실행</strong>합니다. 같은 파일을 2번 업로드하면 모든 거래가 2배로 들어갑니다.
+  <br><br>
+  <strong>수정 필요:</strong> 중복이면 INSERT를 건너뛰어야 합니다.
+</div>
+
+<div class="callout callout-rose">
+  <strong>핵심 문제 5: 중복 판단 키가 부족</strong>
+  <code>(date, amount, counterparty)</code>만으로 판단하면:
+  <br>
+  ❌ 같은 날 같은 거래처에 같은 금액을 2번 보낸 경우 → 두 번째 거래가 중복으로 처리됨<br>
+  ❌ 리앤목특허법인에 1/14 660,000원을 2번 이체한 경우 → 1건만 남음
+  <br><br>
+  <strong>수정 필요:</strong> <code>(date, amount, counterparty, description)</code> 또는 <code>(date, amount, counterparty, source_type, file_id)</code>를 키로 사용해야 합니다.
+</div>
+
+<div class="callout callout-amber">
+  <strong>문제 6: 체크카드 무조건 중복 마킹</strong>
+  <code>is_check_card = True</code>이면 DB 조회 없이 무조건 <code>is_dup = True</code>. 하지만 은행 거래 업로드 전에 카드를 먼저 업로드하면 은행에 대응 건이 없어도 중복 처리됨.
+  <br><br>
+  <strong>올바른 처리:</strong> 체크카드 중복은 은행 거래가 존재할 때만 마킹해야 합니다.
+</div>
+
+<!-- ═══════════════════════════ 요약 ═══════════════════════════ -->
+
+<h2>문제 요약 + 수정 필요 사항</h2>
+
+<table>
+  <tr><th>#</th><th>문제</th><th>심각도</th><th>현재 동작</th><th>수정 방향</th></tr>
+  <tr>
+    <td>1</td>
+    <td>우리은행 잔액 컬럼 무시</td>
+    <td style="color:var(--amber)">MEDIUM</td>
+    <td>잔액(G) 컬럼 파싱 안 함</td>
+    <td>마지막 행 잔액을 balance_snapshots에 자동 저장</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td>카드 취소 건 → 원래 승인 잔존</td>
+    <td style="color:var(--rose)">HIGH</td>
+    <td>취소 행만 SKIP, 원래 승인은 그대로</td>
+    <td>취소 건을 type="in" (환불)로 INSERT하거나, 대응 승인 건 찾아서 함께 제거</td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td>같은 파일 재업로드 시 2배</td>
+    <td style="color:var(--rose)">CRITICAL</td>
+    <td>중복 마킹만 하고 INSERT는 실행</td>
+    <td>중복이면 INSERT 건너뛰기 (<code>if is_dup: continue</code>)</td>
+  </tr>
+  <tr>
+    <td>4</td>
+    <td>같은 날 같은 금액 정상 거래 누락</td>
+    <td style="color:var(--rose)">HIGH</td>
+    <td>(date, amount, counterparty)만으로 중복 판단</td>
+    <td>description도 키에 포함, 또는 file_id 기반 중복 방지</td>
+  </tr>
+  <tr>
+    <td>5</td>
+    <td>체크카드 무조건 중복</td>
+    <td style="color:var(--amber)">MEDIUM</td>
+    <td>is_check_card이면 무조건 is_dup</td>
+    <td>은행 거래 존재 여부 확인 후 마킹</td>
+  </tr>
+  <tr>
+    <td>6</td>
+    <td>우리카드 연도 누락 가능</td>
+    <td style="color:var(--amber)">LOW</td>
+    <td>메타에서 연도 추출 실패 시 현재 연도</td>
+    <td>파일명에서 확실하게 추출하는 로직 보완</td>
+  </tr>
+</table>
+
+<div class="callout callout-green">
+  <strong>다음 단계</strong>
+  1. 한아원코리아 거래 전체 초기화 (DELETE)<br>
+  2. 위 6개 문제 수정<br>
+  3. Excel 파일 재업로드<br>
+  4. 은행 잔액 기준으로 기말잔고 자동 검증
+</div>
+
+</body>
+</html>

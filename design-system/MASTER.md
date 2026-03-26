@@ -60,21 +60,21 @@ This design system combines 4 UUPM patterns:
 
 ## Typography (UUPM: Financial Trust)
 
-- **Heading Font:** IBM Plex Sans
-- **Body Font:** IBM Plex Sans
-- **Mono Font:** IBM Plex Mono (금액, 데이터)
+- **Heading Font:** Geist
+- **Body Font:** Geist
+- **Mono Font:** Geist Mono (금액, 데이터)
 - **Mood:** financial, trustworthy, professional, corporate, banking, serious
 - **Best For:** Banks, finance, insurance, investment, fintech, enterprise
 
 ```css
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap');
 ```
 
 **Tailwind Config:**
 ```js
 fontFamily: {
-  sans: ['IBM Plex Sans', 'sans-serif'],
-  mono: ['IBM Plex Mono', 'monospace'],
+  sans: ['Geist', 'sans-serif'],
+  mono: ['Geist Mono', 'monospace'],
 }
 ```
 
@@ -82,17 +82,17 @@ fontFamily: {
 
 | Element | Font | Size | Weight |
 |---------|------|------|--------|
-| KPI Value (standalone) | IBM Plex Mono | 48px | 700 |
-| KPI Value (inline cards) | IBM Plex Mono | 28px | 700 |
-| H1 (페이지 제목) | IBM Plex Sans | 30px | 700 |
-| H2 (섹션 제목) | IBM Plex Sans | 24px | 600 |
-| H3 (카드 제목) | IBM Plex Sans | 18px | 600 |
-| Body | IBM Plex Sans | 14px | 400 |
-| Caption | IBM Plex Sans | 12px | 400 |
-| Amount (lg) | IBM Plex Mono | 28px | 700 |
-| Amount (md) | IBM Plex Mono | 20px | 600 |
-| Amount (sm) | IBM Plex Mono | 14px | 500 |
-| Table Data | IBM Plex Mono | 13px | 400 |
+| KPI Value (standalone) | Geist Mono | 48px | 700 |
+| KPI Value (inline cards) | Geist Mono | 28px | 700 |
+| H1 (페이지 제목) | Geist | 30px | 700 |
+| H2 (섹션 제목) | Geist | 24px | 600 |
+| H3 (카드 제목) | Geist | 18px | 600 |
+| Body | Geist | 14px | 400 |
+| Caption | Geist | 12px | 400 |
+| Amount (lg) | Geist Mono | 28px | 700 |
+| Amount (md) | Geist Mono | 20px | 600 |
+| Amount (sm) | Geist Mono | 14px | 500 |
+| Table Data | Geist Mono | 13px | 400 |
 
 ### Number Formatting (UUPM: Number Formatting UX)
 
@@ -189,7 +189,7 @@ fontFamily: {
 
 - Row height: 36px (UUPM: `--table-row-height: 36px`)
 - Header: `bg-primary`, font-weight 500, sticky (UUPM: "sticky column headers")
-- Amount columns: right-aligned, `tabular-nums`, IBM Plex Mono
+- Amount columns: right-aligned, `tabular-nums`, Geist Mono
 - Hover: row highlight
 - Zebra striping: alternate row `bg-secondary/50`
 - Overflow: `overflow-x-auto` wrapper (UUPM UX: "Table Handling")
