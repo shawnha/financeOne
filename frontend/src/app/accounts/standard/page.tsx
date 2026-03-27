@@ -1,8 +1,10 @@
 "use client"
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { fetchAPI } from "@/lib/api"
 import { EntityTabs } from "@/components/entity-tabs"
+import { AccountCombobox } from "@/components/account-combobox"
 import { toast } from "sonner"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -26,6 +28,9 @@ interface StandardAccount {
   subcategory: string
   normal_side: string
   sort_order: number
+  mapped_internal_id?: number | null
+  mapped_internal_name?: string | null
+  mapped_internal_code?: string | null
 }
 
 const CATEGORY_ORDER = ["자산", "부채", "자본", "수익", "비용"] as const
@@ -43,25 +48,65 @@ const CATEGORY_COLORS: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 function StandardAccountsContent() {
+  const searchParams = useSearchParams()
+  const entityId = searchParams.get("entity_id")
+
   const [accounts, setAccounts] = useState<StandardAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
+  const [internalAccounts, setInternalAccounts] = useState<{ id: number; code: string; name: string; parent_id: number | null }[]>([])
+
+  useEffect(() => {
+    if (entityId) {
+      fetchAPI<{ id: number; code: string; name: string; parent_id: number | null }[]>(
+        `/accounts/internal?entity_id=${entityId}`
+      ).then(setInternalAccounts).catch(() => {})
+    }
+  }, [entityId])
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await fetchAPI<StandardAccount[]>("/accounts/standard")
+      const url = entityId
+        ? `/accounts/standard?entity_id=${entityId}`
+        : "/accounts/standard"
+      const data = await fetchAPI<StandardAccount[]>(url)
       setAccounts(data)
     } catch {
       toast.error("표준 계정과목을 불러오지 못했습니다")
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [entityId])
 
   useEffect(() => {
     load()
   }, [load])
+
+  const handleMappingChange = async (
+    standardAccountId: number,
+    internalAccountId: number | null,
+    previousInternalId: number | null,
+  ) => {
+    try {
+      if (previousInternalId) {
+        await fetchAPI(`/accounts/internal/${previousInternalId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ standard_account_id: null }),
+        })
+      }
+      if (internalAccountId) {
+        await fetchAPI(`/accounts/internal/${internalAccountId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ standard_account_id: standardAccountId }),
+        })
+      }
+      toast.success("매핑이 업데이트되었습니다")
+      load()
+    } catch {
+      toast.error("매핑 변경에 실패했습니다")
+    }
+  }
 
   // Filter by search query
   const filtered = useMemo(() => {
@@ -156,6 +201,7 @@ function StandardAccountsContent() {
                   <TableHead className="w-[120px]">분류</TableHead>
                   <TableHead className="w-[140px]">세부분류</TableHead>
                   <TableHead className="w-[100px]">차변/대변</TableHead>
+                  <TableHead className="w-[180px]">내부계정</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -167,7 +213,7 @@ function StandardAccountsContent() {
                       className="hover:bg-transparent border-t-2 border-border/60"
                     >
                       <TableCell
-                        colSpan={5}
+                        colSpan={6}
                         className="bg-muted/40 py-2.5"
                       >
                         <div className="flex items-center gap-2">
@@ -215,6 +261,25 @@ function StandardAccountsContent() {
                             {account.normal_side === "debit" ? "차변" : "대변"}
                           </Badge>
                         </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          {entityId ? (
+                            <AccountCombobox
+                              options={internalAccounts}
+                              value={account.mapped_internal_id ? String(account.mapped_internal_id) : ""}
+                              onChange={(v) => {
+                                handleMappingChange(
+                                  account.id,
+                                  v ? Number(v) : null,
+                                  account.mapped_internal_id ?? null,
+                                )
+                              }}
+                              placeholder="매핑 선택"
+                              compact
+                            />
+                          ) : (
+                            <span className="text-xs text-muted-foreground">법인 선택 필요</span>
+                          )}
+                        </TableCell>
                       </TableRow>
                     ))}
                   </>
@@ -229,6 +294,32 @@ function StandardAccountsContent() {
 }
 
 // ---------------------------------------------------------------------------
+// Page Header (uses useSearchParams, must be wrapped in Suspense)
+// ---------------------------------------------------------------------------
+
+function PageHeader() {
+  const searchParams = useSearchParams()
+  const entityId = searchParams.get("entity_id")
+
+  return (
+    <div className="flex items-center gap-2">
+      <BookOpen className="h-6 w-6 text-muted-foreground" />
+      <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+        표준 계정과목
+      </h1>
+      <Badge variant="secondary" className="ml-2 text-xs">
+        K-GAAP
+      </Badge>
+      {!entityId && (
+        <Badge variant="outline" className="text-xs text-muted-foreground">
+          읽기 전용
+        </Badge>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -239,18 +330,17 @@ export default function StandardAccountsPage() {
         <EntityTabs />
       </Suspense>
 
-      <div className="flex items-center gap-2">
-        <BookOpen className="h-6 w-6 text-muted-foreground" />
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-          표준 계정과목
-        </h1>
-        <Badge variant="secondary" className="ml-2 text-xs">
-          K-GAAP
-        </Badge>
-        <Badge variant="outline" className="text-xs text-muted-foreground">
-          읽기 전용
-        </Badge>
-      </div>
+      <Suspense fallback={
+        <div className="flex items-center gap-2">
+          <BookOpen className="h-6 w-6 text-muted-foreground" />
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            표준 계정과목
+          </h1>
+          <Badge variant="secondary" className="ml-2 text-xs">K-GAAP</Badge>
+        </div>
+      }>
+        <PageHeader />
+      </Suspense>
 
       <Suspense fallback={<Skeleton className="h-64 w-full" />}>
         <StandardAccountsContent />
