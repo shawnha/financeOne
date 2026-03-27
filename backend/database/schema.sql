@@ -96,6 +96,9 @@ CREATE TABLE IF NOT EXISTS transactions (
   counterparty_entity_id INTEGER REFERENCES entities(id),
   intercompany_pair_id   INTEGER,
 
+  -- 취소 건
+  is_cancel              BOOLEAN NOT NULL DEFAULT FALSE,
+
   -- 중복 제거
   is_duplicate           BOOLEAN NOT NULL DEFAULT FALSE,
   duplicate_of_id        INTEGER REFERENCES transactions(id),

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { fetchAPI, APIError } from "@/lib/api"
+import { AccountCombobox } from "@/components/account-combobox"
 import { formatKRW, formatByEntity } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { EntityTabs } from "@/components/entity-tabs"
@@ -44,6 +45,7 @@ interface Transaction {
   mapping_source: string | null
   is_confirmed: boolean
   is_duplicate: boolean
+  is_cancel: boolean
   note: string | null
   member_id: number | null
   member_name: string | null
@@ -77,6 +79,7 @@ interface InternalAccount {
   name: string
   standard_code: string | null
   standard_name: string | null
+  parent_id: number | null
 }
 
 interface Member {
@@ -116,7 +119,7 @@ const SOURCE_LABELS: Record<string, string> = {
 const SOURCE_BADGE_CLASSES: Record<string, string> = {
   lotte_card: "bg-red-500/15 text-red-400 border-red-500/30",
   woori_card: "bg-blue-500/15 text-blue-400 border-blue-500/30",
-  woori_bank: "bg-blue-500/15 text-blue-400 border-blue-500/30",
+  woori_bank: "bg-cyan-500/15 text-cyan-400 border-cyan-500/30",
   manual: "bg-gray-500/15 text-gray-400 border-gray-500/30",
 }
 
@@ -545,6 +548,7 @@ export default function TransactionsPage() {
                         "h-9 cursor-pointer",
                         idx % 2 === 1 && "bg-secondary/50",
                         tx.is_duplicate && "bg-gray-900/50",
+                        tx.is_cancel && "opacity-50",
                       )}
                       onClick={(e) => {
                         const target = e.target as HTMLElement
@@ -575,7 +579,10 @@ export default function TransactionsPage() {
 
                       {/* Description */}
                       <TableCell className="p-2 text-sm truncate max-w-[300px]" title={tx.description || ""}>
-                        {tx.description || "\u2014"}
+                        <span className={cn(tx.is_cancel && "line-through")}>
+                          {tx.description || "\u2014"}
+                        </span>
+                        {tx.is_cancel && <Badge variant="outline" className="ml-1.5 text-[10px] px-1 py-0 bg-amber-500/15 text-amber-400 border-amber-500/30">취소</Badge>}
                       </TableCell>
 
                       {/* Counterparty */}
@@ -586,17 +593,17 @@ export default function TransactionsPage() {
                       {/* Income */}
                       <TableCell className={cn(
                         "p-2 text-right font-mono tabular-nums text-sm",
-                        tx.is_duplicate && "line-through",
+                        (tx.is_duplicate || tx.is_cancel) && "line-through",
                       )}>
                         {tx.type === "in" ? (
-                          <span className="text-green-400">{formatByEntity(tx.amount, String(entityId ?? 1))}</span>
+                          <span className={tx.is_cancel ? "text-amber-400" : "text-green-400"}>{formatByEntity(tx.amount, String(entityId ?? 1))}</span>
                         ) : null}
                       </TableCell>
 
                       {/* Expense */}
                       <TableCell className={cn(
                         "p-2 text-right font-mono tabular-nums text-sm",
-                        tx.is_duplicate && "line-through",
+                        (tx.is_duplicate || tx.is_cancel) && "line-through",
                       )}>
                         {tx.type === "out" ? (
                           <span className="text-red-400">{formatByEntity(tx.amount, String(entityId ?? 1))}</span>
@@ -604,58 +611,44 @@ export default function TransactionsPage() {
                       </TableCell>
 
                       {/* Internal Account */}
-                      <TableCell className="p-2" data-account-cell>
+                      <TableCell
+                        className="p-2 cursor-pointer hover:bg-muted/20 transition-colors"
+                        onClick={e => { e.stopPropagation(); if (!(editingCell?.txId === tx.id && editingCell?.field === "internal_account_id")) setEditingCell({ txId: tx.id, field: "internal_account_id" }) }}
+                      >
                         {editingCell?.txId === tx.id && editingCell?.field === "internal_account_id" ? (
-                          <Select
+                          <AccountCombobox
+                            options={internalAccounts}
                             value={tx.internal_account_id ? String(tx.internal_account_id) : ""}
-                            onValueChange={v => handleInlineEdit(tx.id, "internal_account_id", v)}
-                            onOpenChange={open => { if (!open) setEditingCell(null) }}
-                            defaultOpen
-                          >
-                            <SelectTrigger className="h-7 text-xs w-full">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {internalAccounts.map(a => (
-                                <SelectItem key={a.id} value={String(a.id)}>{a.name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            onChange={v => { handleInlineEdit(tx.id, "internal_account_id", v); setEditingCell(null) }}
+                            placeholder="선택..."
+                            compact
+                            autoOpen
+                          />
                         ) : (
-                          <button
-                            className="text-sm text-left hover:underline hover:text-accent-foreground truncate max-w-[120px] block"
-                            onClick={e => { e.stopPropagation(); setEditingCell({ txId: tx.id, field: "internal_account_id" }) }}
-                          >
-                            {tx.internal_account_name || <span className="text-muted-foreground">-</span>}
-                          </button>
+                          <span className={cn("text-xs truncate block", tx.internal_account_name ? "text-foreground" : "text-muted-foreground")}>
+                            {tx.internal_account_name || "-"}
+                          </span>
                         )}
                       </TableCell>
 
                       {/* Standard Account */}
-                      <TableCell className="p-2" data-account-cell>
+                      <TableCell
+                        className="p-2 cursor-pointer hover:bg-muted/20 transition-colors"
+                        onClick={e => { e.stopPropagation(); if (!(editingCell?.txId === tx.id && editingCell?.field === "standard_account_id")) setEditingCell({ txId: tx.id, field: "standard_account_id" }) }}
+                      >
                         {editingCell?.txId === tx.id && editingCell?.field === "standard_account_id" ? (
-                          <Select
+                          <AccountCombobox
+                            options={standardAccounts}
                             value={tx.standard_account_id ? String(tx.standard_account_id) : ""}
-                            onValueChange={v => handleInlineEdit(tx.id, "standard_account_id", v)}
-                            onOpenChange={open => { if (!open) setEditingCell(null) }}
-                            defaultOpen
-                          >
-                            <SelectTrigger className="h-7 text-xs w-full">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {standardAccounts.map(a => (
-                                <SelectItem key={a.id} value={String(a.id)}>{a.name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            onChange={v => { handleInlineEdit(tx.id, "standard_account_id", v); setEditingCell(null) }}
+                            placeholder="선택..."
+                            compact
+                            autoOpen
+                          />
                         ) : (
-                          <button
-                            className="text-sm text-left hover:underline hover:text-accent-foreground truncate max-w-[120px] block"
-                            onClick={e => { e.stopPropagation(); setEditingCell({ txId: tx.id, field: "standard_account_id" }) }}
-                          >
-                            {tx.standard_account_name || <span className="text-muted-foreground">-</span>}
-                          </button>
+                          <span className={cn("text-xs truncate block", tx.standard_account_name ? "text-foreground" : "text-muted-foreground")}>
+                            {tx.standard_account_name || "-"}
+                          </span>
                         )}
                       </TableCell>
 
@@ -764,29 +757,23 @@ export default function TransactionsPage() {
               <div className="space-y-3 pt-2 border-t">
                 <div>
                   <label className="text-sm text-muted-foreground mb-1 block">내부 계정</label>
-                  <Select value={detailForm.internal_account_id} onValueChange={v => setDetailForm(p => ({ ...p, internal_account_id: v }))}>
-                    <SelectTrigger className="h-9">
-                      <SelectValue placeholder="선택하세요" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {internalAccounts.map(a => (
-                        <SelectItem key={a.id} value={String(a.id)}>{a.code} - {a.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <AccountCombobox
+                    options={internalAccounts}
+                    value={detailForm.internal_account_id}
+                    onChange={v => setDetailForm(p => ({ ...p, internal_account_id: v }))}
+                    placeholder="내부 계정 검색..."
+                    showCode
+                  />
                 </div>
                 <div>
                   <label className="text-sm text-muted-foreground mb-1 block">표준 계정</label>
-                  <Select value={detailForm.standard_account_id} onValueChange={v => setDetailForm(p => ({ ...p, standard_account_id: v }))}>
-                    <SelectTrigger className="h-9">
-                      <SelectValue placeholder="선택하세요" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {standardAccounts.map(a => (
-                        <SelectItem key={a.id} value={String(a.id)}>{a.code} - {a.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <AccountCombobox
+                    options={standardAccounts}
+                    value={detailForm.standard_account_id}
+                    onChange={v => setDetailForm(p => ({ ...p, standard_account_id: v }))}
+                    placeholder="표준 계정 검색..."
+                    showCode
+                  />
                 </div>
                 <div>
                   <label className="text-sm text-muted-foreground mb-1 block">메모</label>

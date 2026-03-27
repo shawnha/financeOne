@@ -37,15 +37,34 @@ def seed():
     """)
 
     # --------------------------------------------------
-    # 2. members — CEO
+    # 2. members — 법인별 구성원
     # --------------------------------------------------
-    cur.execute("""
-        INSERT INTO members (entity_id, name, role) VALUES
-          (1, 'Shawn Ha', 'admin'),
-          (2, 'Shawn Ha', 'admin'),
-          (3, 'Shawn Ha', 'admin')
-        ON CONFLICT DO NOTHING
-    """)
+    hok_members = [
+        ("하승완", "admin"),
+        ("김영수", "member"),
+        ("이동현", "member"),
+        ("채종민", "member"),
+        ("한로제", "member"),
+        ("김대윤", "member"),
+        ("유동현", "member"),
+        ("김주원", "member"),
+        ("이창석", "member"),
+        ("주식회사 한아원", "corporate"),
+    ]
+    # HOI + HOR: Shawn Ha only
+    for eid in [1, 3]:
+        cur.execute(
+            "INSERT INTO members (entity_id, name, role) SELECT %s, %s, %s "
+            "WHERE NOT EXISTS (SELECT 1 FROM members WHERE entity_id = %s AND name = %s)",
+            (eid, "Shawn Ha", "admin", eid, "Shawn Ha"),
+        )
+    # HOK: all members
+    for name, role in hok_members:
+        cur.execute(
+            "INSERT INTO members (entity_id, name, role) SELECT %s, %s, %s "
+            "WHERE NOT EXISTS (SELECT 1 FROM members WHERE entity_id = %s AND name = %s)",
+            (2, name, role, 2, name),
+        )
 
     # --------------------------------------------------
     # 3. standard_accounts — K-GAAP 표준계정
@@ -205,10 +224,77 @@ def seed():
             ON CONFLICT DO NOTHING
         """, (key, value, entity_id))
 
+    # --------------------------------------------------
+    # 6. internal_accounts — 내부 계정 (3개 법인 공통, 계층 구조)
+    # --------------------------------------------------
+    # (내부코드, 내부명, 표준계정코드, 부모코드 or None)
+    internal_accounts = [
+        # 자산
+        ("IA-001", "보통예금", "10100", None),
+        ("IA-002", "단기금융상품", "10200", None),
+        ("IA-003", "매출채권", "10300", None),
+        ("IA-004", "미수금", "10400", None),
+        ("IA-005", "선급금", "10500", None),
+        ("IA-006", "재고자산", "10700", None),
+        ("IA-007", "보증금", "13000", None),
+        # 부채
+        ("IA-101", "매입채무", "20100", None),
+        ("IA-102", "미지급금", "20200", None),
+        ("IA-103", "미지급비용", "20300", None),
+        ("IA-104", "예수금", "20400", None),
+        ("IA-105", "단기차입금", "20600", None),
+        # 수익
+        ("IA-201", "매출", "40100", None),
+        ("IA-202", "서비스매출", "40200", None),
+        ("IA-203", "이자수익", "40300", None),
+        ("IA-204", "잡이익", "40600", None),
+        # 비용 — 판관비
+        ("IA-301", "급여", "50200", None),
+        ("IA-302", "복리후생비", "50400", None),
+        ("IA-303", "임차료", "50500", None),
+        ("IA-304", "접대비", "50600", None),
+        ("IA-305", "통신비", "50700", None),
+        ("IA-306", "세금과공과", "50900", None),
+        ("IA-307", "차량유지비", "51200", None),
+        ("IA-308", "여비교통비", "51300", None),
+        ("IA-309", "소모품비", "51400", None),
+        ("IA-310", "지급수수료", "51500", None),
+        ("IA-311", "SaaS 구독료", "51510", "IA-310"),
+        ("IA-312", "결제수수료", "51520", "IA-310"),
+        ("IA-313", "배달플랫폼수수료", "51530", "IA-310"),
+        ("IA-314", "광고선전비", "51600", None),
+        ("IA-315", "교육훈련비", "51700", None),
+        # 비용 — 영업외
+        ("IA-401", "이자비용", "52000", None),
+        ("IA-402", "외환차손", "52100", None),
+        ("IA-403", "잡손실", "52300", None),
+    ]
+
+    for entity_id in [1, 2, 3]:
+        # Pass 1: insert all accounts without parent
+        for idx, (code, name, std_code, _parent) in enumerate(internal_accounts):
+            cur.execute("""
+                INSERT INTO internal_accounts (entity_id, code, name, standard_account_id, sort_order)
+                SELECT %s, %s, %s, sa.id, %s
+                FROM standard_accounts sa WHERE sa.code = %s
+                ON CONFLICT (entity_id, code) DO NOTHING
+            """, (entity_id, code, name, (idx + 1) * 100, std_code))
+
+        # Pass 2: set parent_id for hierarchical accounts
+        for code, _name, _std, parent_code in internal_accounts:
+            if parent_code:
+                cur.execute("""
+                    UPDATE internal_accounts c
+                    SET parent_id = p.id
+                    FROM internal_accounts p
+                    WHERE c.entity_id = %s AND c.code = %s
+                      AND p.entity_id = %s AND p.code = %s
+                """, (entity_id, code, entity_id, parent_code))
+
     conn.commit()
     cur.close()
     conn.close()
-    print("Seed complete: 3 entities, K-GAAP accounts, US GAAP mappings, settings")
+    print("Seed complete: 3 entities, K-GAAP accounts, US GAAP mappings, settings, internal accounts")
 
 
 if __name__ == "__main__":

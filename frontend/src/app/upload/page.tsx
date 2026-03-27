@@ -76,7 +76,7 @@ function SourceBadge({ source }: { source: string }) {
   const config: Record<string, { label: string; className: string }> = {
     lotte_card: { label: "롯데카드", className: "bg-red-500/20 text-red-400 border-red-500/30" },
     woori_card: { label: "우리카드", className: "bg-blue-500/20 text-blue-400 border-blue-500/30" },
-    woori_bank: { label: "우리은행", className: "bg-blue-500/20 text-blue-400 border-blue-500/30" },
+    woori_bank: { label: "우리은행", className: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30" },
     kb_bank: { label: "국민은행", className: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30" },
     shinhan_card: { label: "신한카드", className: "bg-indigo-500/20 text-indigo-400 border-indigo-500/30" },
   }

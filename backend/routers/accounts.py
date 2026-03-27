@@ -33,7 +33,7 @@ def list_internal_accounts(
             """
             SELECT ia.id, ia.entity_id, ia.code, ia.name,
                    sa.code AS standard_code, sa.name AS standard_name,
-                   ia.sort_order
+                   ia.sort_order, ia.parent_id
             FROM internal_accounts ia
             LEFT JOIN standard_accounts sa ON ia.standard_account_id = sa.id
             WHERE ia.entity_id = %s AND ia.is_active = true
@@ -46,7 +46,7 @@ def list_internal_accounts(
             """
             SELECT ia.id, ia.entity_id, ia.code, ia.name,
                    sa.code AS standard_code, sa.name AS standard_name,
-                   ia.sort_order
+                   ia.sort_order, ia.parent_id
             FROM internal_accounts ia
             LEFT JOIN standard_accounts sa ON ia.standard_account_id = sa.id
             WHERE ia.is_active = true
