@@ -96,6 +96,9 @@ CREATE TABLE IF NOT EXISTS transactions (
   counterparty_entity_id INTEGER REFERENCES entities(id),
   intercompany_pair_id   INTEGER,
 
+  -- 파서에서 추출한 원본 멤버명 (재매칭용)
+  parsed_member_name     TEXT,
+
   -- 취소 건
   is_cancel              BOOLEAN NOT NULL DEFAULT FALSE,
 

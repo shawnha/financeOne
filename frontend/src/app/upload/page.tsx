@@ -28,6 +28,7 @@ import {
   X,
   RefreshCw,
   Trash2,
+  RotateCw,
 } from "lucide-react"
 
 // ── Types ──────────────────────────────────────────────
@@ -665,22 +666,40 @@ function UploadHistory({ entityId }: { entityId: string }) {
                     <StatusBadge status={item.status} />
                   </TableCell>
                   <TableCell>
-                    <button
-                      onClick={async () => {
-                        if (!confirm(`"${item.filename}" 파일과 ${item.row_count}건 거래를 삭제하시겠습니까?`)) return
-                        try {
-                          await fetchAPI(`/upload/file/${item.id}`, { method: "DELETE" })
-                          fetchHistory()
-                          window.dispatchEvent(new Event("upload-history-refresh"))
-                        } catch (err) {
-                          alert(err instanceof Error ? err.message : "삭제 실패")
-                        }
-                      }}
-                      className="text-muted-foreground hover:text-[hsl(var(--loss))] transition-colors"
-                      title="삭제"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          try {
+                            const result = await fetchAPI<{ member_matched: number; account_matched: number }>(`/upload/file/${item.id}/rematch`, { method: "POST" })
+                            toast.success(`재매칭 완료: 멤버 ${result.member_matched}건, 계정 ${result.account_matched}건`)
+                            fetchHistory()
+                          } catch (err) {
+                            toast.error(err instanceof Error ? err.message : "재매칭 실패")
+                          }
+                        }}
+                        className="text-muted-foreground hover:text-accent transition-colors"
+                        title="멤버/계정 재매칭"
+                      >
+                        <RotateCw className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`"${item.filename}" 파일과 ${item.row_count}건 거래를 삭제하시겠습니까?`)) return
+                          try {
+                            await fetchAPI(`/upload/file/${item.id}`, { method: "DELETE" })
+                            fetchHistory()
+                            window.dispatchEvent(new Event("upload-history-refresh"))
+                          } catch (err) {
+                            alert(err instanceof Error ? err.message : "삭제 실패")
+                          }
+                        }}
+                        className="text-muted-foreground hover:text-[hsl(var(--loss))] transition-colors"
+                        title="삭제"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

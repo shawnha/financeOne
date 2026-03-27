@@ -135,13 +135,13 @@ async def upload_transactions(
                 INSERT INTO transactions
                     (entity_id, file_id, date, amount, currency, type,
                      description, counterparty, source_type, member_id,
-                     is_duplicate, duplicate_of_id, is_cancel)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, NULL, %s)
+                     is_duplicate, duplicate_of_id, is_cancel, parsed_member_name)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, NULL, %s, %s)
                 """,
                 [
                     entity_id, file_id, tx.date, tx.amount, tx.currency, tx.type,
                     tx.description, tx.counterparty, tx.source_type, member_id,
-                    tx.is_cancel,
+                    tx.is_cancel, tx.member_name,
                 ],
             )
             inserted_count += 1
@@ -417,3 +417,112 @@ def delete_uploaded_file(
     except Exception as e:
         conn.rollback()
         raise HTTPException(500, f"삭제 실패: {e}")
+
+
+@router.post("/file/{file_id}/rematch")
+def rematch_file_transactions(
+    file_id: int,
+    conn: PgConnection = Depends(get_db),
+):
+    """파일의 거래에 멤버/계정 매핑을 재적용."""
+    cur = conn.cursor()
+    try:
+        # 파일 확인
+        cur.execute("SELECT id, entity_id, source_type FROM uploaded_files WHERE id = %s", [file_id])
+        file_row = cur.fetchone()
+        if not file_row:
+            raise HTTPException(404, "업로드 파일을 찾을 수 없습니다.")
+        entity_id = file_row[1]
+
+        # 1. 멤버 재매칭: parsed_member_name → members 테이블 조회
+        cur.execute(
+            """
+            SELECT t.id, t.parsed_member_name
+            FROM transactions t
+            WHERE t.file_id = %s AND t.parsed_member_name IS NOT NULL
+            """,
+            [file_id],
+        )
+        tx_rows = cur.fetchall()
+
+        member_matched = 0
+        member_cache: dict[str, int | None] = {}
+        for tx_id, parsed_name in tx_rows:
+            if parsed_name not in member_cache:
+                cur.execute(
+                    "SELECT id FROM members WHERE entity_id = %s AND name = %s LIMIT 1",
+                    [entity_id, parsed_name],
+                )
+                row = cur.fetchone()
+                member_cache[parsed_name] = row[0] if row else None
+
+            mid = member_cache[parsed_name]
+            if mid is not None:
+                cur.execute(
+                    "UPDATE transactions SET member_id = %s WHERE id = %s AND (member_id IS NULL OR member_id != %s)",
+                    [mid, tx_id, mid],
+                )
+                if cur.rowcount > 0:
+                    member_matched += 1
+
+        # 2. 계정 재매칭: mapping_rules 테이블 기반 (counterparty 패턴 매칭)
+        cur.execute(
+            """
+            SELECT t.id, t.counterparty
+            FROM transactions t
+            WHERE t.file_id = %s AND t.internal_account_id IS NULL AND t.counterparty IS NOT NULL
+            """,
+            [file_id],
+        )
+        unmapped_rows = cur.fetchall()
+
+        account_matched = 0
+        for tx_id, counterparty in unmapped_rows:
+            cur.execute(
+                """
+                SELECT internal_account_id, standard_account_id, confidence
+                FROM mapping_rules
+                WHERE entity_id = %s AND counterparty_pattern = %s AND confidence >= 0.8
+                ORDER BY confidence DESC, hit_count DESC
+                LIMIT 1
+                """,
+                [entity_id, counterparty],
+            )
+            rule = cur.fetchone()
+            if rule:
+                sets = []
+                params_u: list = []
+                if rule[0]:
+                    sets.append("internal_account_id = %s")
+                    params_u.append(rule[0])
+                if rule[1]:
+                    sets.append("standard_account_id = %s")
+                    params_u.append(rule[1])
+                if sets:
+                    sets.append("mapping_source = 'rule'")
+                    sets.append("mapping_confidence = %s")
+                    params_u.append(float(rule[2]))
+                    params_u.append(tx_id)
+                    cur.execute(
+                        f"UPDATE transactions SET {', '.join(sets)} WHERE id = %s",
+                        params_u,
+                    )
+                    account_matched += 1
+
+        conn.commit()
+        cur.close()
+
+        total_tx = len(tx_rows) + len(unmapped_rows)
+        return {
+            "file_id": file_id,
+            "total_transactions": total_tx,
+            "member_matched": member_matched,
+            "account_matched": account_matched,
+            "member_unmatched": len([n for n in member_cache.values() if n is None]),
+            "unmatched_names": [n for n, mid in member_cache.items() if mid is None],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(500, f"재매칭 실패: {e}")
