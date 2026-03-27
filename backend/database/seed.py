@@ -225,60 +225,91 @@ def seed():
         """, (key, value, entity_id))
 
     # --------------------------------------------------
-    # 6. internal_accounts — 내부 계정 (3개 법인 공통, 계층 구조)
+    # 6. internal_accounts — 내부 계정 (수입/비용 트리 구조)
     # --------------------------------------------------
-    # (내부코드, 내부명, 표준계정코드, 부모코드 or None)
+    # (코드, 이름, 표준계정코드, 부모코드)
+    # 코드 자동 생성 — 사용자에게 노출 안 됨
     internal_accounts = [
-        # 자산
-        ("IA-001", "보통예금", "10100", None),
-        ("IA-002", "단기금융상품", "10200", None),
-        ("IA-003", "매출채권", "10300", None),
-        ("IA-004", "미수금", "10400", None),
-        ("IA-005", "선급금", "10500", None),
-        ("IA-006", "재고자산", "10700", None),
-        ("IA-007", "보증금", "13000", None),
-        # 부채
-        ("IA-101", "매입채무", "20100", None),
-        ("IA-102", "미지급금", "20200", None),
-        ("IA-103", "미지급비용", "20300", None),
-        ("IA-104", "예수금", "20400", None),
-        ("IA-105", "단기차입금", "20600", None),
-        # 수익
-        ("IA-201", "매출", "40100", None),
-        ("IA-202", "서비스매출", "40200", None),
-        ("IA-203", "이자수익", "40300", None),
-        ("IA-204", "잡이익", "40600", None),
-        # 비용 — 판관비
-        ("IA-301", "급여", "50200", None),
-        ("IA-302", "복리후생비", "50400", None),
-        ("IA-303", "임차료", "50500", None),
-        ("IA-304", "접대비", "50600", None),
-        ("IA-305", "통신비", "50700", None),
-        ("IA-306", "세금과공과", "50900", None),
-        ("IA-307", "차량유지비", "51200", None),
-        ("IA-308", "여비교통비", "51300", None),
-        ("IA-309", "소모품비", "51400", None),
-        ("IA-310", "지급수수료", "51500", None),
-        ("IA-311", "SaaS 구독료", "51510", "IA-310"),
-        ("IA-312", "결제수수료", "51520", "IA-310"),
-        ("IA-313", "배달플랫폼수수료", "51530", "IA-310"),
-        ("IA-314", "광고선전비", "51600", None),
-        ("IA-315", "교육훈련비", "51700", None),
-        # 비용 — 영업외
-        ("IA-401", "이자비용", "52000", None),
-        ("IA-402", "외환차손", "52100", None),
-        ("IA-403", "잡손실", "52300", None),
+        # ── 수입 (최상위, 드래그 불가) ──
+        ("INC", "수입", None, None),
+        ("INC-001", "매출", "40100", "INC"),
+        ("INC-002", "서비스매출", "40200", "INC"),
+        ("INC-003", "이자수익", "40300", "INC"),
+        ("INC-004", "기타수입", "40600", "INC"),
+
+        # ── 비용 (최상위, 드래그 불가) ──
+        ("EXP", "비용", None, None),
+
+        # 인건비
+        ("EXP-010", "인건비", "50200", "EXP"),
+        ("EXP-010-001", "급여", "50200", "EXP-010"),
+        ("EXP-010-002", "퇴직금", "50300", "EXP-010"),
+        ("EXP-010-003", "4대보험", "50400", "EXP-010"),
+
+        # 사무실
+        ("EXP-020", "사무실", "50500", "EXP"),
+        ("EXP-020-001", "임차료", "50500", "EXP-020"),
+        ("EXP-020-002", "관리비", "50800", "EXP-020"),
+        ("EXP-020-003", "통신비", "50700", "EXP-020"),
+
+        # 식비/복리후생
+        ("EXP-030", "식비/복리후생", "50400", "EXP"),
+        ("EXP-030-001", "점심", "50400", "EXP-030"),
+        ("EXP-030-002", "간식/커피", "50400", "EXP-030"),
+        ("EXP-030-003", "회식", "50600", "EXP-030"),
+
+        # 교통
+        ("EXP-040", "교통", "51300", "EXP"),
+        ("EXP-040-001", "택시", "51300", "EXP-040"),
+        ("EXP-040-002", "주차", "51300", "EXP-040"),
+        ("EXP-040-003", "출장", "51300", "EXP-040"),
+
+        # 마케팅
+        ("EXP-050", "마케팅", "51600", "EXP"),
+        ("EXP-050-001", "광고비", "51600", "EXP-050"),
+        ("EXP-050-002", "인플루언서", "51600", "EXP-050"),
+        ("EXP-050-003", "이벤트", "51600", "EXP-050"),
+
+        # IT/SaaS
+        ("EXP-060", "IT/SaaS", "51510", "EXP"),
+        ("EXP-060-001", "ChatGPT", "51510", "EXP-060"),
+        ("EXP-060-002", "Cursor", "51510", "EXP-060"),
+        ("EXP-060-003", "Google Workspace", "51510", "EXP-060"),
+        ("EXP-060-004", "AWS", "51510", "EXP-060"),
+        ("EXP-060-005", "기타 구독", "51510", "EXP-060"),
+
+        # 수수료
+        ("EXP-070", "수수료", "51500", "EXP"),
+        ("EXP-070-001", "카드수수료", "51500", "EXP-070"),
+        ("EXP-070-002", "결제수수료", "51520", "EXP-070"),
+        ("EXP-070-003", "배달수수료", "51530", "EXP-070"),
+
+        # 세금/공과
+        ("EXP-080", "세금/공과", "50900", "EXP"),
+        ("EXP-080-001", "부가세", "50900", "EXP-080"),
+        ("EXP-080-002", "법인세", "50900", "EXP-080"),
+
+        # 기타비용
+        ("EXP-090", "기타비용", "52300", "EXP"),
     ]
 
     for entity_id in [1, 2, 3]:
         # Pass 1: insert all accounts without parent
         for idx, (code, name, std_code, _parent) in enumerate(internal_accounts):
-            cur.execute("""
-                INSERT INTO internal_accounts (entity_id, code, name, standard_account_id, sort_order)
-                SELECT %s, %s, %s, sa.id, %s
-                FROM standard_accounts sa WHERE sa.code = %s
-                ON CONFLICT (entity_id, code) DO NOTHING
-            """, (entity_id, code, name, (idx + 1) * 100, std_code))
+            if std_code:
+                cur.execute("""
+                    INSERT INTO internal_accounts (entity_id, code, name, standard_account_id, sort_order)
+                    SELECT %s, %s, %s, sa.id, %s
+                    FROM standard_accounts sa WHERE sa.code = %s
+                    ON CONFLICT (entity_id, code) DO NOTHING
+                """, (entity_id, code, name, (idx + 1) * 100, std_code))
+            else:
+                # 최상위 노드 (수입/비용) — standard_account 없음
+                cur.execute("""
+                    INSERT INTO internal_accounts (entity_id, code, name, standard_account_id, sort_order)
+                    VALUES (%s, %s, %s, NULL, %s)
+                    ON CONFLICT (entity_id, code) DO NOTHING
+                """, (entity_id, code, name, (idx + 1) * 100))
 
         # Pass 2: set parent_id for hierarchical accounts
         for code, _name, _std, parent_code in internal_accounts:
