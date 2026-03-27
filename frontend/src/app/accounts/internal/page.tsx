@@ -6,30 +6,37 @@ import { fetchAPI } from "@/lib/api"
 import { EntityTabs } from "@/components/entity-tabs"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from "@dnd-kit/core"
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table"
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
-import {
-  BookOpen, Plus, Pencil, Trash2, AlertTriangle,
-} from "lucide-react"
+import { AlertTriangle, FolderTree, Plus } from "lucide-react"
+import { TreeAccountItem, type TreeAccount } from "@/components/tree-account-item"
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-interface InternalAccount {
+interface RawAccount {
   id: number
   entity_id: number
   code: string
@@ -45,54 +52,58 @@ interface StandardAccount {
   code: string
   name: string
   category: string
-  subcategory: string
 }
 
 interface FormData {
-  code: string
   name: string
   standard_account_id: string
   parent_id: string
-  sort_order: string
 }
 
 const EMPTY_FORM: FormData = {
-  code: "",
   name: "",
   standard_account_id: "",
   parent_id: "",
-  sort_order: "0",
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Build a flat list with depth info for hierarchy display */
-function buildHierarchy(accounts: InternalAccount[]) {
-  const map = new Map<number, InternalAccount[]>()
-  const roots: InternalAccount[] = []
+const ROOT_CODES = ["INC", "EXP"]
 
+function buildTree(accounts: RawAccount[]): TreeAccount[] {
+  const byParent = new Map<number | null, RawAccount[]>()
   for (const a of accounts) {
-    if (a.parent_id) {
-      const children = map.get(a.parent_id) || []
-      children.push(a)
-      map.set(a.parent_id, children)
-    } else {
-      roots.push(a)
-    }
+    const key = a.parent_id
+    const list = byParent.get(key) || []
+    list.push(a)
+    byParent.set(key, list)
   }
 
-  const result: { account: InternalAccount; depth: number }[] = []
-  function walk(items: InternalAccount[], depth: number) {
-    for (const item of items.sort((a, b) => a.sort_order - b.sort_order)) {
-      result.push({ account: item, depth })
-      const children = map.get(item.id)
-      if (children) walk(children, depth + 1)
+  function walk(parentId: number | null, depth: number): TreeAccount[] {
+    const children = byParent.get(parentId) || []
+    return children
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((a) => ({
+        ...a,
+        depth,
+        isRoot: ROOT_CODES.includes(a.code),
+        children: walk(a.id, depth + 1),
+      }))
+  }
+  return walk(null, 0)
+}
+
+function flattenIds(nodes: TreeAccount[], collapsed: Set<number>): number[] {
+  const ids: number[] = []
+  for (const node of nodes) {
+    ids.push(node.id)
+    if (!collapsed.has(node.id)) {
+      ids.push(...flattenIds(node.children, collapsed))
     }
   }
-  walk(roots.sort((a, b) => a.sort_order - b.sort_order), 0)
-  return result
+  return ids
 }
 
 // ---------------------------------------------------------------------------
@@ -103,21 +114,27 @@ function InternalAccountsContent() {
   const searchParams = useSearchParams()
   const entityId = searchParams.get("entity")
 
-  const [accounts, setAccounts] = useState<InternalAccount[]>([])
+  const [accounts, setAccounts] = useState<RawAccount[]>([])
   const [standardAccounts, setStandardAccounts] = useState<StandardAccount[]>([])
   const [loading, setLoading] = useState(true)
+  const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
+
+  // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<FormData>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
-  const [deleteTarget, setDeleteTarget] = useState<InternalAccount | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<RawAccount | null>(null)
 
-  // Fetch accounts
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  )
+
   const load = useCallback(async () => {
     if (!entityId) return
     setLoading(true)
     try {
-      const data = await fetchAPI<InternalAccount[]>(
+      const data = await fetchAPI<RawAccount[]>(
         `/accounts/internal?entity_id=${entityId}`,
       )
       setAccounts(data)
@@ -128,60 +145,142 @@ function InternalAccountsContent() {
     }
   }, [entityId])
 
-  // Fetch standard accounts (once)
   useEffect(() => {
     fetchAPI<StandardAccount[]>("/accounts/standard")
       .then(setStandardAccounts)
       .catch(() => {})
   }, [])
 
-  useEffect(() => {
-    load()
-  }, [load])
+  useEffect(() => { load() }, [load])
 
-  const hierarchy = useMemo(() => buildHierarchy(accounts), [accounts])
+  const tree = useMemo(() => buildTree(accounts), [accounts])
+  const sortableIds = useMemo(() => flattenIds(tree, collapsed), [tree, collapsed])
 
-  // Open dialog for create
-  const handleAdd = () => {
+  const handleToggle = (id: number) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+
+    const activeId = active.id as number
+    const overId = over.id as number
+
+    const activeItem = accounts.find((a) => a.id === activeId)
+    const overItem = accounts.find((a) => a.id === overId)
+    if (!activeItem || !overItem) return
+
+    if (activeItem.parent_id !== overItem.parent_id) {
+      toast.error("같은 그룹 내에서만 순서를 변경할 수 있습니다")
+      return
+    }
+
+    if (ROOT_CODES.includes(activeItem.code)) return
+
+    const siblings = accounts
+      .filter((a) => a.parent_id === activeItem.parent_id)
+      .sort((a, b) => a.sort_order - b.sort_order)
+
+    const oldIndex = siblings.findIndex((s) => s.id === activeId)
+    const newIndex = siblings.findIndex((s) => s.id === overId)
+    if (oldIndex === -1 || newIndex === -1) return
+
+    const reordered = [...siblings]
+    const [moved] = reordered.splice(oldIndex, 1)
+    reordered.splice(newIndex, 0, moved)
+
+    const items = reordered.map((item, idx) => ({
+      id: item.id,
+      sort_order: (idx + 1) * 100,
+      parent_id: item.parent_id,
+    }))
+
+    const updatedAccounts = accounts.map((a) => {
+      const updated = items.find((i) => i.id === a.id)
+      return updated ? { ...a, sort_order: updated.sort_order } : a
+    })
+    setAccounts(updatedAccounts)
+
+    try {
+      await fetchAPI("/accounts/internal/sort-order", {
+        method: "PUT",
+        body: JSON.stringify({ items }),
+      })
+    } catch {
+      toast.error("순서 저장에 실패했습니다")
+      load()
+    }
+  }
+
+  const handleAddChild = (parentId: number) => {
     setEditingId(null)
-    setForm(EMPTY_FORM)
+    setForm({ ...EMPTY_FORM, parent_id: String(parentId) })
     setDialogOpen(true)
   }
 
-  // Open dialog for edit
-  const handleEdit = (account: InternalAccount) => {
+  const handleEdit = (account: TreeAccount) => {
+    if (account.isRoot) return
     setEditingId(account.id)
-    // Find the matching standard account ID
-    const std = standardAccounts.find(
-      (s) => s.code === account.standard_code,
-    )
+    const std = standardAccounts.find((s) => s.code === account.standard_code)
     setForm({
-      code: account.code,
       name: account.name,
       standard_account_id: std ? String(std.id) : "",
       parent_id: account.parent_id ? String(account.parent_id) : "",
-      sort_order: String(account.sort_order),
     })
     setDialogOpen(true)
   }
 
-  // Save (create or update)
   const handleSave = async () => {
-    if (!form.code.trim() || !form.name.trim()) {
-      toast.error("코드와 계정명은 필수입니다")
+    if (!form.name.trim()) {
+      toast.error("계정명은 필수입니다")
       return
     }
     setSaving(true)
-    const body = {
+
+    const parentId = form.parent_id ? Number(form.parent_id) : null
+    const parent = parentId ? accounts.find((a) => a.id === parentId) : null
+    const siblings = accounts.filter((a) => a.parent_id === parentId)
+    const nextSort = siblings.length > 0
+      ? Math.max(...siblings.map((s) => s.sort_order)) + 100
+      : 100
+
+    let code = ""
+    if (!editingId) {
+      if (parent) {
+        const childCodes = siblings
+          .map((s) => s.code)
+          .filter((c) => c.startsWith(parent.code + "-"))
+          .map((c) => {
+            const suffix = c.slice(parent.code.length + 1)
+            return parseInt(suffix, 10)
+          })
+          .filter((n) => !isNaN(n))
+        const nextNum = childCodes.length > 0 ? Math.max(...childCodes) + 1 : 1
+        code = `${parent.code}-${String(nextNum).padStart(3, "0")}`
+      } else {
+        code = `MISC-${Date.now()}`
+      }
+    }
+
+    const body: Record<string, unknown> = {
       entity_id: Number(entityId),
-      code: form.code.trim(),
       name: form.name.trim(),
       standard_account_id: form.standard_account_id
         ? Number(form.standard_account_id)
         : null,
-      parent_id: form.parent_id ? Number(form.parent_id) : null,
-      sort_order: Number(form.sort_order) || 0,
+      parent_id: parentId,
+      sort_order: nextSort,
     }
+    if (!editingId) {
+      body.code = code
+    }
+
     try {
       if (editingId) {
         await fetchAPI(`/accounts/internal/${editingId}`, {
@@ -205,7 +304,6 @@ function InternalAccountsContent() {
     }
   }
 
-  // Delete
   const handleDelete = async () => {
     if (!deleteTarget) return
     try {
@@ -220,23 +318,19 @@ function InternalAccountsContent() {
     }
   }
 
-  // Loading state
   if (loading) {
     return (
       <Card>
-        <CardHeader>
-          <Skeleton className="h-6 w-48" />
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-10 w-full" />
+        <CardHeader><Skeleton className="h-6 w-48" /></CardHeader>
+        <CardContent className="space-y-2">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Skeleton key={i} className="h-8 w-full" />
           ))}
         </CardContent>
       </Card>
     )
   }
 
-  // Waiting for entity selection
   if (!entityId) {
     return (
       <Card>
@@ -254,7 +348,11 @@ function InternalAccountsContent() {
           <CardTitle className="text-base font-medium">
             내부 계정과목 ({accounts.length}건)
           </CardTitle>
-          <Button size="sm" onClick={handleAdd}>
+          <Button size="sm" onClick={() => {
+            setEditingId(null)
+            setForm(EMPTY_FORM)
+            setDialogOpen(true)
+          }}>
             <Plus className="mr-1.5 h-4 w-4" />
             계정 추가
           </Button>
@@ -262,86 +360,32 @@ function InternalAccountsContent() {
         <CardContent>
           {accounts.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-              <BookOpen className="mb-3 h-10 w-10 opacity-40" />
+              <FolderTree className="mb-3 h-10 w-10 opacity-40" />
               <p className="text-sm">등록된 내부 계정이 없습니다</p>
-              <p className="mt-1 text-xs">
-                &quot;계정 추가&quot; 버튼을 눌러 첫 번째 계정을 등록해보세요.
-              </p>
+              <p className="mt-1 text-xs">seed를 실행하거나 계정을 추가해보세요.</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="w-[120px]">코드</TableHead>
-                    <TableHead>계정명</TableHead>
-                    <TableHead>표준계정</TableHead>
-                    <TableHead>상위계정</TableHead>
-                    <TableHead className="w-[80px] text-right">정렬순서</TableHead>
-                    <TableHead className="w-[80px]" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {hierarchy.map(({ account, depth }) => {
-                    const parentAccount = depth > 0
-                      ? accounts.find((a) => a.id === account.parent_id)
-                      : null
-                    return (
-                      <TableRow
-                        key={account.id}
-                        className="cursor-pointer hover:bg-secondary/50"
-                        onClick={() => handleEdit(account)}
-                      >
-                        <TableCell className="font-mono text-sm">
-                          {account.code}
-                        </TableCell>
-                        <TableCell>
-                          <span
-                            style={{ paddingLeft: `${depth * 20}px` }}
-                            className="inline-flex items-center gap-1"
-                          >
-                            {depth > 0 && (
-                              <span className="text-muted-foreground">└</span>
-                            )}
-                            {account.name}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          {account.standard_code ? (
-                            <Badge variant="secondary" className="font-normal">
-                              {account.standard_code} {account.standard_name}
-                            </Badge>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {parentAccount
-                            ? `${parentAccount.code} ${parentAccount.name}`
-                            : "-"}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {account.sort_order}
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setDeleteTarget(account)
-                            }}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            </div>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+                <div className="space-y-0.5">
+                  {tree.map((node) => (
+                    <TreeAccountItem
+                      key={node.id}
+                      account={node}
+                      collapsed={collapsed}
+                      onToggle={handleToggle}
+                      onEdit={handleEdit}
+                      onDelete={(a) => setDeleteTarget(a as unknown as RawAccount)}
+                      onAddChild={handleAddChild}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
           )}
         </CardContent>
       </Card>
@@ -350,39 +394,50 @@ function InternalAccountsContent() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-[480px]">
           <DialogHeader>
-            <DialogTitle>
-              {editingId ? "계정 수정" : "계정 추가"}
-            </DialogTitle>
+            <DialogTitle>{editingId ? "계정 수정" : "계정 추가"}</DialogTitle>
             <DialogDescription>
               {editingId
-                ? "내부 계정과목 정보를 수정합니다."
-                : "새로운 내부 계정과목을 등록합니다."}
+                ? "계정 이름과 표준계정 매핑을 수정합니다."
+                : "새로운 계정을 추가합니다. 코드는 자동 생성됩니다."}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <label className="text-sm font-medium">코드 *</label>
-              <Input
-                placeholder="예: 1010"
-                value={form.code}
-                onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
-              />
-            </div>
-            <div className="grid gap-2">
               <label className="text-sm font-medium">계정명 *</label>
               <Input
-                placeholder="예: 보통예금"
+                placeholder="예: ChatGPT"
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
               />
             </div>
             <div className="grid gap-2">
-              <label className="text-sm font-medium">표준계정</label>
+              <label className="text-sm font-medium">상위 카테고리</label>
+              <Select
+                value={form.parent_id}
+                onValueChange={(v) => setForm((f) => ({ ...f, parent_id: v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="카테고리 선택" />
+                </SelectTrigger>
+                <SelectContent>
+                  {accounts
+                    .filter((a) => a.id !== editingId)
+                    .map((a) => {
+                      const depth = accounts.find((p) => p.id === a.parent_id) ? 1 : 0
+                      return (
+                        <SelectItem key={a.id} value={String(a.id)}>
+                          {depth > 0 && "  └ "}{a.name}
+                        </SelectItem>
+                      )
+                    })}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">표준계정 매핑</label>
               <Select
                 value={form.standard_account_id}
-                onValueChange={(v) =>
-                  setForm((f) => ({ ...f, standard_account_id: v }))
-                }
+                onValueChange={(v) => setForm((f) => ({ ...f, standard_account_id: v }))}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="표준계정 선택 (선택사항)" />
@@ -399,46 +454,9 @@ function InternalAccountsContent() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid gap-2">
-              <label className="text-sm font-medium">상위계정</label>
-              <Select
-                value={form.parent_id}
-                onValueChange={(v) =>
-                  setForm((f) => ({ ...f, parent_id: v }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="상위계정 선택 (선택사항)" />
-                </SelectTrigger>
-                <SelectContent>
-                  {accounts
-                    .filter((a) => a.id !== editingId)
-                    .map((a) => (
-                      <SelectItem key={a.id} value={String(a.id)}>
-                        {a.code} {a.name}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <label className="text-sm font-medium">정렬순서</label>
-              <Input
-                type="number"
-                placeholder="0"
-                value={form.sort_order}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, sort_order: e.target.value }))
-                }
-              />
-            </div>
           </div>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDialogOpen(false)}
-              disabled={saving}
-            >
+            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>
               취소
             </Button>
             <Button onClick={handleSave} disabled={saving}>
@@ -448,11 +466,8 @@ function InternalAccountsContent() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog
-        open={!!deleteTarget}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
-      >
+      {/* Delete Confirmation */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -460,20 +475,17 @@ function InternalAccountsContent() {
               계정 삭제
             </DialogTitle>
             <DialogDescription>
-              <strong>{deleteTarget?.code} {deleteTarget?.name}</strong> 계정을
-              삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.
+              <strong>{deleteTarget?.name}</strong> 계정을 삭제하시겠습니까?
+              {deleteTarget && accounts.some((a) => a.parent_id === deleteTarget.id) && (
+                <span className="block mt-2 text-destructive">
+                  하위 항목이 있습니다. 하위 항목도 함께 비활성화됩니다.
+                </span>
+              )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeleteTarget(null)}
-            >
-              취소
-            </Button>
-            <Button variant="destructive" onClick={handleDelete}>
-              삭제
-            </Button>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>취소</Button>
+            <Button variant="destructive" onClick={handleDelete}>삭제</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -491,14 +503,12 @@ export default function InternalAccountsPage() {
       <Suspense fallback={<Skeleton className="h-10 w-full border-b" />}>
         <EntityTabs />
       </Suspense>
-
       <div className="flex items-center gap-2">
-        <BookOpen className="h-6 w-6 text-muted-foreground" />
+        <FolderTree className="h-6 w-6 text-muted-foreground" />
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">
           내부 계정과목
         </h1>
       </div>
-
       <Suspense fallback={<Skeleton className="h-64 w-full" />}>
         <InternalAccountsContent />
       </Suspense>
