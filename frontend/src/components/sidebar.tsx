@@ -51,7 +51,7 @@ const sections = [
   {
     label: "관리",
     items: [
-      { label: "멤버 관리", icon: Users, href: "/settings/members", enabled: false },
+      { label: "멤버 관리", icon: Users, href: "/members", enabled: true },
       { label: "설정", icon: Settings, href: "/settings", enabled: true },
     ],
   },
