@@ -1,0 +1,170 @@
+"use client"
+
+import { useSortable } from "@dnd-kit/sortable"
+import { CSS } from "@dnd-kit/utilities"
+import { cn } from "@/lib/utils"
+import { GripVertical, Pencil, Trash2, ChevronRight, ChevronDown, Plus } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+
+export interface TreeAccount {
+  id: number
+  code: string
+  name: string
+  parent_id: number | null
+  sort_order: number
+  standard_code: string | null
+  standard_name: string | null
+  depth: number
+  children: TreeAccount[]
+  isRoot: boolean // INC or EXP — not draggable
+}
+
+interface TreeAccountItemProps {
+  account: TreeAccount
+  collapsed: Set<number>
+  onToggle: (id: number) => void
+  onEdit: (account: TreeAccount) => void
+  onDelete: (account: TreeAccount) => void
+  onAddChild: (parentId: number) => void
+}
+
+export function TreeAccountItem({
+  account,
+  collapsed,
+  onToggle,
+  onEdit,
+  onDelete,
+  onAddChild,
+}: TreeAccountItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: account.id,
+    disabled: account.isRoot,
+  })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+
+  const hasChildren = account.children.length > 0
+  const isCollapsed = collapsed.has(account.id)
+
+  return (
+    <>
+      <div
+        ref={setNodeRef}
+        style={style}
+        className={cn(
+          "flex items-center gap-2 py-1.5 px-2 rounded-md group",
+          "hover:bg-muted/40 transition-colors",
+          isDragging && "opacity-50 bg-muted/60 shadow-lg z-50",
+          account.isRoot && "bg-muted/20 font-semibold",
+        )}
+      >
+        {/* Drag handle — hidden for root nodes */}
+        {!account.isRoot ? (
+          <span
+            {...attributes}
+            {...listeners}
+            className="cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-muted-foreground"
+          >
+            <GripVertical className="h-4 w-4" />
+          </span>
+        ) : (
+          <span className="w-4" />
+        )}
+
+        {/* Indentation */}
+        <span style={{ width: `${account.depth * 20}px` }} className="shrink-0" />
+
+        {/* Expand/collapse toggle */}
+        {hasChildren ? (
+          <button
+            type="button"
+            onClick={() => onToggle(account.id)}
+            className="p-0.5 rounded hover:bg-muted/60 text-muted-foreground"
+          >
+            {isCollapsed ? (
+              <ChevronRight className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5" />
+            )}
+          </button>
+        ) : (
+          <span className="w-[18px]" />
+        )}
+
+        {/* Name */}
+        <span className={cn(
+          "flex-1 text-sm truncate",
+          account.isRoot && "text-base font-medium",
+        )}>
+          {account.name}
+        </span>
+
+        {/* Standard account badge */}
+        {account.standard_code && !account.isRoot && (
+          <Badge variant="secondary" className="font-normal text-[10px] shrink-0 opacity-60 group-hover:opacity-100">
+            {account.standard_code}
+          </Badge>
+        )}
+
+        {/* Actions — hidden until hover */}
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={() => onAddChild(account.id)}
+            title="하위 항목 추가"
+          >
+            <Plus className="h-3 w-3" />
+          </Button>
+          {!account.isRoot && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={() => onEdit(account)}
+                title="수정"
+              >
+                <Pencil className="h-3 w-3" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                onClick={() => onDelete(account)}
+                title="삭제"
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Render children recursively if not collapsed */}
+      {hasChildren && !isCollapsed && account.children.map((child) => (
+        <TreeAccountItem
+          key={child.id}
+          account={child}
+          collapsed={collapsed}
+          onToggle={onToggle}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onAddChild={onAddChild}
+        />
+      ))}
+    </>
+  )
+}
