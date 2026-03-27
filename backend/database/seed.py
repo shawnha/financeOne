@@ -23,6 +23,7 @@ if not DATABASE_URL:
 def seed():
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
+    cur.execute("SET search_path TO financeone, public")
 
     # --------------------------------------------------
     # 1. entities — 3개 법인

@@ -21,6 +21,7 @@ import {
 import { AlertCircle, RefreshCw, Upload, ChevronDown, ChevronUp, Download } from "lucide-react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
+import { MonthPicker } from "@/components/month-picker"
 
 // ── Types ──────────────────────────────────────────────
 
@@ -60,64 +61,6 @@ interface ActualData {
 }
 
 type LoadState = "loading" | "empty" | "error" | "success"
-
-// ── Month Navigation ───────────────────────────────────
-
-function MonthNav({
-  months,
-  selected,
-  onSelect,
-}: {
-  months: string[]
-  selected: string
-  onSelect: (m: string) => void
-}) {
-  const idx = months.indexOf(selected)
-  return (
-    <div className="flex items-center gap-2">
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={idx <= 0}
-        onClick={() => onSelect(months[idx - 1])}
-        className="h-8 w-8 p-0"
-        aria-label="이전 월"
-      >
-        ◀
-      </Button>
-      <div className="flex items-center gap-1.5 overflow-x-auto">
-        {months.map((m) => {
-          const label = `${parseInt(m.slice(5))}월`
-          return (
-            <button
-              key={m}
-              onClick={() => onSelect(m)}
-              className={cn(
-                "px-3 py-1 rounded-full text-xs font-medium transition-colors whitespace-nowrap",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                m === selected
-                  ? "bg-[hsl(var(--profit))] text-white"
-                  : "bg-muted/30 text-muted-foreground hover:bg-muted/50",
-              )}
-            >
-              {label}
-            </button>
-          )
-        })}
-      </div>
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={idx >= months.length - 1}
-        onClick={() => onSelect(months[idx + 1])}
-        className="h-8 w-8 p-0"
-        aria-label="다음 월"
-      >
-        ▶
-      </Button>
-    </div>
-  )
-}
 
 // ── KPI Card ───────────────────────────────────────────
 
@@ -308,7 +251,7 @@ export function ActualTab({ entityId }: { entityId: string | null }) {
     <div className="space-y-6">
       {/* Header: Month nav + Actions */}
       <div className="flex items-center justify-between flex-wrap gap-4">
-        <MonthNav months={months} selected={selectedMonth} onSelect={setSelectedMonth} />
+        <MonthPicker months={months} selected={selectedMonth} onSelect={setSelectedMonth} accentColor="hsl(var(--profit))" />
         <Button variant="outline" size="sm" className="gap-2">
           <Download className="h-4 w-4" /> 내보내기
         </Button>

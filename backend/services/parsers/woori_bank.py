@@ -45,6 +45,8 @@ class WooriBankParser(BaseParser):
         results: list[ParsedTransaction] = []
         first_balance: float | None = None
         last_balance: float | None = None
+        last_amount: float = 0
+        last_type: str = "out"
         last_date: date | None = None
 
         # 1-indexed: Row 4 = headers, data starts at row 5
@@ -91,7 +93,7 @@ class WooriBankParser(BaseParser):
                 else:
                     continue
 
-                # Column G (index 6): 잔액
+                # Column G (index 6): 거래 후 잔액
                 balance_raw = row[6].value if len(row) > 6 else None
                 if balance_raw is not None:
                     bal = parse_amount(str(balance_raw))
@@ -99,6 +101,8 @@ class WooriBankParser(BaseParser):
                         if first_balance is None:
                             first_balance = bal
                         last_balance = bal
+                        last_amount = amount
+                        last_type = tx_type
                         last_date = tx_date
 
                 # 적요 = '체크우리' means check card transaction
@@ -123,10 +127,20 @@ class WooriBankParser(BaseParser):
 
         wb.close()
         # 우리은행 Excel은 최신순 (첫 행=최신, 마지막 행=가장 오래된 거래)
-        # 따라서 first_balance = 기말잔고, last_balance = 기초잔고
+        # first_balance = 기말잔고 (첫 행 = 가장 최신 거래 후 잔액)
+        # last_balance = 가장 오래된 거래의 거래 후 잔액
+        # 기초잔고 = 가장 오래된 거래의 거래 전 잔액 (역산)
+        opening = last_balance
+        if opening is not None and last_type == "out":
+            opening = last_balance + last_amount  # 지급이면 잔액에 다시 더함
+        elif opening is not None and last_type == "in":
+            opening = last_balance - last_amount  # 입금이면 잔액에서 뺌
+
+        # 시간순(오래된→최신)으로 뒤집어서 반환 — DB INSERT 시 id 순서 = 시간순
+        results.reverse()
         return ParseResult(
             transactions=results,
-            opening_balance=last_balance,  # 마지막 행 = 가장 오래된 = 기초
+            opening_balance=opening,  # 가장 오래된 거래 전 잔액 = 기초잔고
             closing_balance=first_balance,  # 첫 행 = 가장 최신 = 기말
-            balance_date=results[0].date if results else None,  # 최신 거래 날짜
+            balance_date=results[-1].date if results else None,
         )

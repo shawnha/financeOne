@@ -10,6 +10,7 @@ import { formatByEntity } from "@/lib/format"
 import { AlertCircle, RefreshCw, Upload, ChevronDown, ChevronUp, Download, Settings } from "lucide-react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
+import { MonthPicker } from "@/components/month-picker"
 
 // ── Types ──────────────────────────────────────────────
 
@@ -83,42 +84,6 @@ const ACCOUNT_BADGE_COLORS: Record<string, string> = {
 
 function getAccountBadgeClass(name: string): string {
   return ACCOUNT_BADGE_COLORS[name] || "bg-gray-500/15 text-gray-400"
-}
-
-// ── Month Nav ──────────────────────────────────────────
-
-function MonthNav({
-  months,
-  selected,
-  onSelect,
-}: {
-  months: string[]
-  selected: string
-  onSelect: (m: string) => void
-}) {
-  const idx = months.indexOf(selected)
-  return (
-    <div className="flex items-center gap-2">
-      <Button variant="ghost" size="sm" disabled={idx <= 0} onClick={() => onSelect(months[idx - 1])} className="h-8 w-8 p-0">◀</Button>
-      <div className="flex items-center gap-1.5 overflow-x-auto">
-        {months.map((m) => (
-          <button
-            key={m}
-            onClick={() => onSelect(m)}
-            className={cn(
-              "px-3 py-1 rounded-full text-xs font-medium transition-colors whitespace-nowrap",
-              m === selected
-                ? "bg-[#8B5CF6] text-white"
-                : "bg-muted/30 text-muted-foreground hover:bg-muted/50",
-            )}
-          >
-            {`${parseInt(m.slice(5))}월`}
-          </button>
-        ))}
-      </div>
-      <Button variant="ghost" size="sm" disabled={idx >= months.length - 1} onClick={() => onSelect(months[idx + 1])} className="h-8 w-8 p-0">▶</Button>
-    </div>
-  )
 }
 
 // ── KPI Card ───────────────────────────────────────────
@@ -275,7 +240,7 @@ export function ExpenseTab({ entityId }: { entityId: string | null }) {
   if (state === "empty") {
     return (
       <div className="space-y-6">
-        <MonthNav months={months} selected={selectedMonth} onSelect={setSelectedMonth} />
+        <MonthPicker months={months} selected={selectedMonth} onSelect={setSelectedMonth} accentColor="#8B5CF6" />
         <Card className="p-12 flex flex-col items-center text-center gap-4">
           <Upload className="h-12 w-12 text-muted-foreground" />
           <p className="text-lg font-medium">카드 거래 데이터가 없습니다</p>
@@ -296,7 +261,7 @@ export function ExpenseTab({ entityId }: { entityId: string | null }) {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <MonthNav months={months} selected={selectedMonth} onSelect={setSelectedMonth} />
+          <MonthPicker months={months} selected={selectedMonth} onSelect={setSelectedMonth} accentColor="#8B5CF6" />
           <p className="text-xs text-muted-foreground mt-1">
             {m}월 카드 사용 → <span className="text-[hsl(var(--warning))]">{m + 1 > 12 ? 1 : m + 1}월</span> 결제 예정
           </p>

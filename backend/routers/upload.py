@@ -359,3 +359,60 @@ def upload_history(
         "per_page": per_page,
         "pages": (total + per_page - 1) // per_page if per_page else 0,
     }
+
+
+@router.delete("/file/{file_id}")
+def delete_uploaded_file(
+    file_id: int,
+    conn: PgConnection = Depends(get_db),
+):
+    """업로드 파일과 연관 거래 삭제."""
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id, entity_id, filename, row_count FROM uploaded_files WHERE id = %s", [file_id])
+        file_row = cur.fetchone()
+        if not file_row:
+            raise HTTPException(404, "업로드 파일을 찾을 수 없습니다.")
+
+        entity_id = file_row[1]
+
+        # 분개 삭제 (FK: journal_entry_lines → journal_entries → transactions)
+        cur.execute("""
+            DELETE FROM journal_entry_lines WHERE journal_entry_id IN (
+                SELECT je.id FROM journal_entries je
+                JOIN transactions t ON je.transaction_id = t.id
+                WHERE t.file_id = %s
+            )
+        """, [file_id])
+
+        cur.execute("""
+            DELETE FROM journal_entries WHERE transaction_id IN (
+                SELECT id FROM transactions WHERE file_id = %s
+            )
+        """, [file_id])
+
+        # 거래 삭제
+        cur.execute("DELETE FROM transactions WHERE file_id = %s", [file_id])
+        tx_deleted = cur.rowcount
+
+        # 잔고 스냅샷 삭제 (해당 파일 업로드 시 생성된 것)
+        cur.execute(
+            "DELETE FROM balance_snapshots WHERE entity_id = %s AND source = 'excel_parsed'",
+            [entity_id],
+        )
+
+        # 업로드 이력 삭제
+        cur.execute("DELETE FROM uploaded_files WHERE id = %s", [file_id])
+
+        conn.commit()
+        cur.close()
+        return {
+            "id": file_id,
+            "status": "deleted",
+            "transactions_deleted": tx_deleted,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(500, f"삭제 실패: {e}")

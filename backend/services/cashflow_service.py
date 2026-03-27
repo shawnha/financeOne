@@ -219,7 +219,7 @@ def get_opening_balance(conn: PgConnection, entity_id: int, year: int, month: in
             SELECT entity_id, MAX(date), account_name
             FROM balance_snapshots
             WHERE entity_id = %s
-              AND date < make_date(%s, %s, 1)
+              AND date <= make_date(%s, %s, 1)
             GROUP BY entity_id, account_name
         )
         """,

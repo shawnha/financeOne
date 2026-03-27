@@ -27,6 +27,7 @@ import {
   ChevronUp,
   X,
   RefreshCw,
+  Trash2,
 } from "lucide-react"
 
 // ── Types ──────────────────────────────────────────────
@@ -51,7 +52,7 @@ interface UploadHistoryItem {
   row_count: number
   duplicate_count: number
   status: string
-  created_at: string
+  uploaded_at: string
 }
 
 interface UploadHistoryResponse {
@@ -537,6 +538,22 @@ function HistorySkeleton() {
   )
 }
 
+function groupByMonth(items: UploadHistoryItem[]): { month: string; label: string; items: UploadHistoryItem[] }[] {
+  const groups = new Map<string, UploadHistoryItem[]>()
+  for (const item of items) {
+    const d = new Date(item.uploaded_at)
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(item)
+  }
+  return Array.from(groups.entries())
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([key, items]) => {
+      const [y, m] = key.split("-").map(Number)
+      return { month: key, label: `${y}년 ${m}월`, items }
+    })
+}
+
 function UploadHistory({ entityId }: { entityId: string }) {
   const [history, setHistory] = useState<UploadHistoryItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -596,49 +613,82 @@ function UploadHistory({ entityId }: { entityId: string }) {
     )
   }
 
+  const monthGroups = groupByMonth(history)
+
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-[120px]">업로드일</TableHead>
-          <TableHead>파일명</TableHead>
-          <TableHead className="w-[90px]">출처</TableHead>
-          <TableHead className="w-[100px]">법인</TableHead>
-          <TableHead className="w-[80px] text-right">건수</TableHead>
-          <TableHead className="w-[80px] text-right">중복</TableHead>
-          <TableHead className="w-[100px]">상태</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {history.map((item) => (
-          <TableRow key={item.id}>
-            <TableCell className="text-xs text-muted-foreground">
-              {new Date(item.created_at).toLocaleDateString("ko-KR")}
-            </TableCell>
-            <TableCell className="text-sm font-medium truncate max-w-[200px]">
-              {item.filename}
-            </TableCell>
-            <TableCell>
-              <SourceBadge source={item.source_type} />
-            </TableCell>
-            <TableCell className="text-sm">{item.entity_name}</TableCell>
-            <TableCell className="text-right font-mono text-sm">
-              {item.row_count.toLocaleString()}
-            </TableCell>
-            <TableCell
-              className={`text-right font-mono text-sm ${
-                item.duplicate_count > 0 ? "text-[hsl(var(--warning))]" : ""
-              }`}
-            >
-              {item.duplicate_count > 0 ? item.duplicate_count.toLocaleString() : "-"}
-            </TableCell>
-            <TableCell>
-              <StatusBadge status={item.status} />
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+    <div className="space-y-0">
+      {monthGroups.map((group) => (
+        <div key={group.month}>
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/20 border-b border-border">
+            <span className="text-xs font-semibold text-muted-foreground">{group.label}</span>
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-muted/30 text-muted-foreground border-0">
+              {group.items.length}건
+            </Badge>
+          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[120px]">업로드일</TableHead>
+                <TableHead>파일명</TableHead>
+                <TableHead className="w-[90px]">출처</TableHead>
+                <TableHead className="w-[100px]">법인</TableHead>
+                <TableHead className="w-[80px] text-right">건수</TableHead>
+                <TableHead className="w-[80px] text-right">중복</TableHead>
+                <TableHead className="w-[100px]">상태</TableHead>
+                <TableHead className="w-[50px]"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {group.items.map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {new Date(item.uploaded_at).toLocaleDateString("ko-KR")}
+                  </TableCell>
+                  <TableCell className="text-sm font-medium truncate max-w-[200px]">
+                    {item.filename}
+                  </TableCell>
+                  <TableCell>
+                    <SourceBadge source={item.source_type} />
+                  </TableCell>
+                  <TableCell className="text-sm">{item.entity_name}</TableCell>
+                  <TableCell className="text-right font-mono text-sm">
+                    {item.row_count.toLocaleString()}
+                  </TableCell>
+                  <TableCell
+                    className={`text-right font-mono text-sm ${
+                      item.duplicate_count > 0 ? "text-[hsl(var(--warning))]" : ""
+                    }`}
+                  >
+                    {item.duplicate_count > 0 ? item.duplicate_count.toLocaleString() : "-"}
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge status={item.status} />
+                  </TableCell>
+                  <TableCell>
+                    <button
+                      onClick={async () => {
+                        if (!confirm(`"${item.filename}" 파일과 ${item.row_count}건 거래를 삭제하시겠습니까?`)) return
+                        try {
+                          await fetchAPI(`/upload/file/${item.id}`, { method: "DELETE" })
+                          fetchHistory()
+                          window.dispatchEvent(new Event("upload-history-refresh"))
+                        } catch (err) {
+                          alert(err instanceof Error ? err.message : "삭제 실패")
+                        }
+                      }}
+                      className="text-muted-foreground hover:text-[hsl(var(--loss))] transition-colors"
+                      title="삭제"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      ))}
+    </div>
   )
 }
 

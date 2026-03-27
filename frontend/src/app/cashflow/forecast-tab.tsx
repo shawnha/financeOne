@@ -37,6 +37,7 @@ import {
 } from "recharts"
 import { AlertCircle, RefreshCw, Plus, Download, ChevronDown, ChevronUp } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { MonthPicker } from "@/components/month-picker"
 
 // ── Types ──────────────────────────────────────────────
 
@@ -90,45 +91,6 @@ type LoadState = "loading" | "empty" | "error" | "success"
 
 const CATEGORIES_IN = ["매출", "수수료환급", "이자", "기타입금"]
 const CATEGORIES_OUT = ["SaaS", "수수료", "임차료", "교통비", "접대비", "복리후생", "카드사용", "기타"]
-
-// ── Month Nav (reused pattern) ─────────────────────────
-
-function MonthNav({
-  months,
-  selected,
-  onSelect,
-  color,
-}: {
-  months: string[]
-  selected: string
-  onSelect: (m: string) => void
-  color: string
-}) {
-  const idx = months.indexOf(selected)
-  return (
-    <div className="flex items-center gap-2">
-      <Button variant="ghost" size="sm" disabled={idx <= 0} onClick={() => onSelect(months[idx - 1])} className="h-8 w-8 p-0">◀</Button>
-      <div className="flex items-center gap-1.5 overflow-x-auto">
-        {months.map((m) => (
-          <button
-            key={m}
-            onClick={() => onSelect(m)}
-            className={cn(
-              "px-3 py-1 rounded-full text-xs font-medium transition-colors whitespace-nowrap",
-              m === selected
-                ? "text-white"
-                : "bg-muted/30 text-muted-foreground hover:bg-muted/50",
-            )}
-            style={m === selected ? { backgroundColor: color } : undefined}
-          >
-            {`${parseInt(m.slice(5))}월`}
-          </button>
-        ))}
-      </div>
-      <Button variant="ghost" size="sm" disabled={idx >= months.length - 1} onClick={() => onSelect(months[idx + 1])} className="h-8 w-8 p-0">▶</Button>
-    </div>
-  )
-}
 
 // ── KPI Card ───────────────────────────────────────────
 
@@ -312,7 +274,23 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
   useEffect(() => { fetchSummary() }, [fetchSummary])
   useEffect(() => { fetchForecast() }, [fetchForecast])
 
-  const months = summary?.available_months ?? []
+  // 예상 탭: available_months + 마지막 완료월 기준 미래 2개월
+  const baseMonths = summary?.available_months ?? []
+  const months = (() => {
+    const set = new Set(baseMonths)
+    // 마지막 완료월 기준으로 +2개월 추가
+    const now = new Date()
+    // 월말 기준: 현재월은 아직 진행중이므로 전월까지가 "완료"
+    const lastComplete = new Date(now.getFullYear(), now.getMonth(), 0) // 전월 말일
+    const base = baseMonths.length > 0
+      ? (() => { const [y, m] = baseMonths[baseMonths.length - 1].split("-").map(Number); return new Date(y, m - 1, 1) })()
+      : new Date(lastComplete.getFullYear(), lastComplete.getMonth(), 1)
+    for (let i = 1; i <= 2; i++) {
+      const d = new Date(base.getFullYear(), base.getMonth() + i, 1)
+      set.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`)
+    }
+    return Array.from(set).sort()
+  })()
 
   // ── LOADING ──
   if (state === "loading" || !selectedMonth) {
@@ -352,7 +330,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
-        <MonthNav months={months} selected={selectedMonth} onSelect={setSelectedMonth} color="hsl(var(--warning))" />
+        <MonthPicker months={months} selected={selectedMonth} onSelect={setSelectedMonth} accentColor="hsl(var(--warning))" allowFuture />
         <div className="flex gap-2">
           <ForecastModal entityId={entityId!} year={y} month={m} onSaved={fetchForecast} />
           <Button variant="outline" size="sm" className="gap-2">
