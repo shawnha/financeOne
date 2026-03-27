@@ -49,12 +49,34 @@ class MemberUpdate(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("/standard")
-def list_standard_accounts(conn: PgConnection = Depends(get_db)):
+def list_standard_accounts(
+    entity_id: Optional[int] = None,
+    conn: PgConnection = Depends(get_db),
+):
     cur = conn.cursor()
-    cur.execute(
-        "SELECT id, code, name, category, subcategory, normal_side, sort_order "
-        "FROM standard_accounts WHERE is_active = true ORDER BY sort_order, code"
-    )
+    if entity_id is not None:
+        cur.execute(
+            """
+            SELECT sa.id, sa.code, sa.name, sa.category, sa.subcategory,
+                   sa.normal_side, sa.sort_order,
+                   ia.id AS mapped_internal_id,
+                   ia.name AS mapped_internal_name,
+                   ia.code AS mapped_internal_code
+            FROM standard_accounts sa
+            LEFT JOIN internal_accounts ia
+              ON ia.standard_account_id = sa.id
+              AND ia.entity_id = %s
+              AND ia.is_active = true
+            WHERE sa.is_active = true
+            ORDER BY sa.sort_order, sa.code
+            """,
+            [entity_id],
+        )
+    else:
+        cur.execute(
+            "SELECT id, code, name, category, subcategory, normal_side, sort_order "
+            "FROM standard_accounts WHERE is_active = true ORDER BY sort_order, code"
+        )
     rows = fetch_all(cur)
     cur.close()
     return rows
@@ -137,6 +159,42 @@ def create_internal_account(
                 detail=f"Account code '{body.code}' already exists for entity {body.entity_id}",
             )
         raise HTTPException(status_code=400, detail=error_msg)
+    finally:
+        cur.close()
+
+
+class SortOrderItem(BaseModel):
+    id: int
+    sort_order: int
+    parent_id: Optional[int] = None
+
+
+class BulkSortOrderUpdate(BaseModel):
+    items: list[SortOrderItem]
+
+
+@router.put("/internal/sort-order")
+def bulk_update_sort_order(
+    body: BulkSortOrderUpdate,
+    conn: PgConnection = Depends(get_db),
+):
+    """드래그앤드롭 후 전체 순서 + 부모 일괄 업데이트"""
+    cur = conn.cursor()
+    try:
+        for item in body.items:
+            cur.execute(
+                """
+                UPDATE internal_accounts
+                SET sort_order = %s, parent_id = %s
+                WHERE id = %s
+                """,
+                [item.sort_order, item.parent_id, item.id],
+            )
+        conn.commit()
+        return {"updated": len(body.items)}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
     finally:
         cur.close()
 
