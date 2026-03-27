@@ -90,7 +90,7 @@ def list_transactions(
                t.description, t.counterparty, t.source_type,
                t.mapping_confidence, t.mapping_source, t.is_confirmed,
                t.is_duplicate, t.note, t.member_id,
-               t.internal_account_id, t.standard_account_id, t.is_cancel,
+               t.internal_account_id, t.standard_account_id, t.is_cancel, t.card_number,
                m.name AS member_name,
                ia.code AS internal_account_code, ia.name AS internal_account_name,
                sa.code AS standard_account_code, sa.name AS standard_account_name

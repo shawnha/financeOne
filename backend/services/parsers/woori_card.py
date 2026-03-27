@@ -126,7 +126,7 @@ class WooriCardParser(BaseParser):
                     amount=abs(amount),
                     currency="KRW",
                     type="in" if is_cancel else "out",
-                    description=f"우리카드 {counterparty}" + (" (취소)" if is_cancel else ""),
+                    description=counterparty + (" (취소)" if is_cancel else ""),
                     counterparty=counterparty,
                     source_type="woori_card",
                     is_check_card=is_check_card,

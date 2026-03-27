@@ -16,6 +16,7 @@ class ParsedTransaction:
     counterparty: str
     source_type: str
     member_name: Optional[str] = None
+    card_number: Optional[str] = None  # 카드번호 (마스킹)
     is_check_card: bool = False  # for dedup marking
     is_cancel: bool = False  # 취소 건 (환불로 INSERT)
 

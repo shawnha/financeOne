@@ -135,13 +135,13 @@ async def upload_transactions(
                 INSERT INTO transactions
                     (entity_id, file_id, date, amount, currency, type,
                      description, counterparty, source_type, member_id,
-                     is_duplicate, duplicate_of_id, is_cancel, parsed_member_name)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, NULL, %s, %s)
+                     is_duplicate, duplicate_of_id, is_cancel, parsed_member_name, card_number)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, NULL, %s, %s, %s)
                 """,
                 [
                     entity_id, file_id, tx.date, tx.amount, tx.currency, tx.type,
                     tx.description, tx.counterparty, tx.source_type, member_id,
-                    tx.is_cancel, tx.member_name,
+                    tx.is_cancel, tx.member_name, tx.card_number,
                 ],
             )
             inserted_count += 1

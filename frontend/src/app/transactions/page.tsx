@@ -46,6 +46,7 @@ interface Transaction {
   is_confirmed: boolean
   is_duplicate: boolean
   is_cancel: boolean
+  card_number: string | null
   note: string | null
   member_id: number | null
   member_name: string | null
@@ -751,6 +752,23 @@ export default function TransactionsPage() {
                     {detailTx.type === "in" ? "+" : "-"}{formatByEntity(detailTx.amount, String(entityId ?? 1))}
                   </p>
                 </div>
+                {detailTx.member_name && (
+                  <div>
+                    <span className="text-muted-foreground">회원</span>
+                    <p className="font-medium">{detailTx.member_name}</p>
+                  </div>
+                )}
+                {detailTx.card_number && (
+                  <div>
+                    <span className="text-muted-foreground">카드번호</span>
+                    <p className="font-medium font-mono text-xs">{detailTx.card_number}</p>
+                  </div>
+                )}
+                {detailTx.is_cancel && (
+                  <div className="col-span-2">
+                    <Badge variant="outline" className="bg-amber-500/15 text-amber-400 border-amber-500/30">취소 건</Badge>
+                  </div>
+                )}
               </div>
 
               {/* Editable fields */}

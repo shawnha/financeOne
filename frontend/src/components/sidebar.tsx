@@ -44,8 +44,8 @@ const sections = [
   {
     label: "계정",
     items: [
-      { label: "내부 계정", icon: BookOpen, href: "/accounts/internal", enabled: false },
-      { label: "표준 계정", icon: BookOpen, href: "/accounts/standard", enabled: false },
+      { label: "내부 계정", icon: BookOpen, href: "/accounts/internal", enabled: true },
+      { label: "표준 계정", icon: BookOpen, href: "/accounts/standard", enabled: true },
     ],
   },
   {
