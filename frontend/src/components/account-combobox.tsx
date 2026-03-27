@@ -85,6 +85,27 @@ export function AccountCombobox({
     )
   }, [options, search])
 
+  // Compute depth for each option based on parent_id
+  const depthMap = useMemo(() => {
+    const map = new Map<number, number>()
+    const roots = options.filter((o) => !o.parent_id)
+    roots.forEach((r) => map.set(r.id, 0))
+
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const opt of options) {
+        if (opt.parent_id && map.has(opt.parent_id) && !map.has(opt.id)) {
+          map.set(opt.id, (map.get(opt.parent_id) || 0) + 1)
+          changed = true
+        }
+      }
+    }
+    return map
+  }, [options])
+
+  const ROOT_CODES = ["INC", "EXP"]
+
   // Selected display
   const selected = options.find((o) => String(o.id) === value)
 
@@ -146,9 +167,49 @@ export function AccountCombobox({
               </div>
             ) : (
               filtered.map((opt) => {
-                const isChild = !!opt.parent_id
+                const depth = depthMap.get(opt.id) ?? 0
+                const isGroupHeader = ROOT_CODES.includes(opt.code)
+                const isCategory = depth === 1 && options.some((o) => o.parent_id === opt.id)
                 const isSelected = String(opt.id) === value
 
+                // Group header (수입/비용) — not selectable
+                if (isGroupHeader) {
+                  return (
+                    <div
+                      key={opt.id}
+                      className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider border-t first:border-t-0 mt-1 first:mt-0"
+                    >
+                      {opt.name}
+                    </div>
+                  )
+                }
+
+                // Category header (인건비, IT/SaaS 등) — selectable but styled differently
+                if (isCategory) {
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => {
+                        onChange(String(opt.id))
+                        setOpen(false)
+                        setSearch("")
+                      }}
+                      className={cn(
+                        "w-full text-left px-3 py-1.5 text-xs font-medium transition-colors",
+                        "hover:bg-muted/40",
+                        isSelected && "bg-accent/20 text-accent-foreground",
+                      )}
+                    >
+                      {opt.name}
+                      {showCode && (
+                        <span className="text-muted-foreground/50 text-[10px] ml-2">{opt.code}</span>
+                      )}
+                    </button>
+                  )
+                }
+
+                // Leaf item — fully selectable
                 return (
                   <button
                     key={opt.id}
@@ -162,10 +223,10 @@ export function AccountCombobox({
                       "w-full text-left px-3 py-1.5 text-xs transition-colors",
                       "hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none",
                       isSelected && "bg-accent/20 text-accent-foreground font-medium",
-                      isChild && "pl-6",
+                      "pl-6",
                     )}
                   >
-                    {isChild && <span className="text-muted-foreground/40 mr-1">└</span>}
+                    <span className="text-muted-foreground/40 mr-1">└</span>
                     {opt.name}
                     {showCode && (
                       <span className="text-muted-foreground/50 text-[10px] ml-2">{opt.code}</span>
