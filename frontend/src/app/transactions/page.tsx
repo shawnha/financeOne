@@ -194,6 +194,9 @@ export default function TransactionsPage() {
   }>({ internal_account_id: "", standard_account_id: "", note: "" })
   const [saving, setSaving] = useState(false)
   const [bulkConfirming, setBulkConfirming] = useState(false)
+  const [bulkMapping, setBulkMapping] = useState(false)
+  const [bulkMapOpen, setBulkMapOpen] = useState(false)
+  const [bulkMapAccountId, setBulkMapAccountId] = useState("")
 
   // Debounce search
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -317,6 +320,30 @@ export default function TransactionsPage() {
       setBulkConfirming(false)
     }
   }, [selectedIds, fetchTransactions])
+
+  // Bulk map
+  const handleBulkMap = useCallback(async () => {
+    if (selectedIds.size === 0 || !bulkMapAccountId) return
+    setBulkMapping(true)
+    try {
+      const result = await fetchAPI<{ mapped: number; rules_learned: number }>("/transactions/bulk-map", {
+        method: "POST",
+        body: JSON.stringify({
+          ids: Array.from(selectedIds),
+          internal_account_id: Number(bulkMapAccountId),
+        }),
+      })
+      toast.success(`${result.mapped}건 매핑 완료 (${result.rules_learned}개 규칙 학습)`)
+      setSelectedIds(new Set())
+      setBulkMapOpen(false)
+      setBulkMapAccountId("")
+      fetchTransactions()
+    } catch {
+      toast.error("일괄 매핑에 실패했습니다")
+    } finally {
+      setBulkMapping(false)
+    }
+  }, [selectedIds, bulkMapAccountId, fetchTransactions])
 
   // Inline cell edit
   const handleInlineEdit = useCallback(async (txId: number, field: "internal_account_id" | "standard_account_id", value: string) => {
@@ -734,13 +761,35 @@ export default function TransactionsPage() {
         {someSelected && (
           <div className="sticky bottom-0 flex items-center gap-3 px-4 py-3 rounded-md border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
             <span className="text-sm font-medium">{selectedIds.size}건 선택됨</span>
-            <Button
-              size="sm"
-              onClick={handleBulkConfirm}
-              disabled={bulkConfirming}
-            >
-              {bulkConfirming ? "처리 중..." : "일괄 확정"}
-            </Button>
+            {bulkMapOpen ? (
+              <div className="flex items-center gap-2">
+                <AccountCombobox
+                  options={internalAccounts}
+                  value={bulkMapAccountId}
+                  onChange={setBulkMapAccountId}
+                  placeholder="내부계정 선택..."
+                />
+                <Button size="sm" onClick={handleBulkMap} disabled={bulkMapping || !bulkMapAccountId}>
+                  {bulkMapping ? "매핑 중..." : "적용"}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => { setBulkMapOpen(false); setBulkMapAccountId("") }}>
+                  취소
+                </Button>
+              </div>
+            ) : (
+              <>
+                <Button size="sm" variant="outline" onClick={() => setBulkMapOpen(true)}>
+                  일괄 매핑
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleBulkConfirm}
+                  disabled={bulkConfirming}
+                >
+                  {bulkConfirming ? "처리 중..." : "일괄 확정"}
+                </Button>
+              </>
+            )}
           </div>
         )}
       </div>

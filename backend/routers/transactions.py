@@ -254,6 +254,60 @@ def auto_map_unmapped(
         raise
 
 
+class BulkMap(BaseModel):
+    ids: list[int]
+    internal_account_id: int
+
+
+@router.post("/bulk-map")
+def bulk_map(body: BulkMap, conn: PgConnection = Depends(get_db)):
+    """선택한 거래들에 내부계정 일괄 매핑 + 매핑 규칙 학습"""
+    if not body.ids:
+        raise HTTPException(400, "No IDs provided")
+    cur = conn.cursor()
+    try:
+        # 내부계정의 standard_account_id 조회
+        cur.execute(
+            "SELECT standard_account_id FROM internal_accounts WHERE id = %s",
+            [body.internal_account_id],
+        )
+        std_row = cur.fetchone()
+        std_id = std_row[0] if std_row else None
+
+        # 일괄 업데이트
+        placeholders = ",".join(["%s"] * len(body.ids))
+        cur.execute(
+            f"""
+            UPDATE transactions
+            SET internal_account_id = %s, standard_account_id = %s,
+                mapping_source = 'manual', updated_at = NOW()
+            WHERE id IN ({placeholders})
+            RETURNING id, counterparty, entity_id
+            """,
+            [body.internal_account_id, std_id] + body.ids,
+        )
+        updated = cur.fetchall()
+
+        # 매핑 규칙 학습 (고유 거래처별)
+        learned = set()
+        for tx_id, counterparty, entity_id in updated:
+            if counterparty and counterparty not in learned:
+                learn_mapping_rule(
+                    cur,
+                    entity_id=entity_id,
+                    counterparty=counterparty,
+                    internal_account_id=body.internal_account_id,
+                )
+                learned.add(counterparty)
+
+        conn.commit()
+        cur.close()
+        return {"mapped": len(updated), "rules_learned": len(learned)}
+    except Exception:
+        conn.rollback()
+        raise
+
+
 @router.post("/bulk-confirm")
 def bulk_confirm(body: BulkConfirm, conn: PgConnection = Depends(get_db)):
     if not body.ids:
