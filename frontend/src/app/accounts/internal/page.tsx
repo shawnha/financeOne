@@ -296,7 +296,7 @@ function InternalAccountsContent() {
 
   const handleBudgetClick = (account: TreeAccount) => {
     setBudgetTarget(account)
-    setBudgetInput(budgets[account.id] != null ? String(budgets[account.id]) : "")
+    setBudgetInput(budgets[account.id] != null ? Number(budgets[account.id]).toLocaleString() : "")
     setBudgetRecurring(account.is_recurring)
   }
 
@@ -666,7 +666,10 @@ function InternalAccountsContent() {
               <Input
                 placeholder="0"
                 value={budgetInput}
-                onChange={(e) => setBudgetInput(e.target.value)}
+                onChange={(e) => {
+                  const raw = e.target.value.replace(/[^\d]/g, "")
+                  setBudgetInput(raw ? Number(raw).toLocaleString() : "")
+                }}
                 onKeyDown={(e) => e.key === "Enter" && handleSaveBudget()}
               />
             </div>
