@@ -92,7 +92,25 @@ export function MonthPicker({
     : "월 선택"
 
   return (
-    <div ref={ref} className="relative inline-block">
+    <div ref={ref} className="relative inline-flex items-center gap-1">
+      {/* Previous month arrow */}
+      <button
+        onClick={() => {
+          const m = selectedMonthNum - 1
+          if (m < 1) {
+            const key = `${selectedYear - 1}-12`
+            if (allowFuture || monthSet.has(key)) onSelect(key)
+          } else {
+            const key = `${selectedYear}-${String(m).padStart(2, "0")}`
+            if (allowFuture || monthSet.has(key)) onSelect(key)
+          }
+        }}
+        className="p-1 rounded-md hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+        aria-label="이전 월"
+      >
+        <ChevronLeft className="h-4 w-4" />
+      </button>
+
       {/* Pill trigger */}
       <button
         onClick={() => setOpen(!open)}
@@ -106,7 +124,24 @@ export function MonthPicker({
         aria-expanded={open}
       >
         {pillLabel}
-        <ChevronRight className={cn("h-3 w-3 transition-transform", open && "rotate-90")} />
+      </button>
+
+      {/* Next month arrow */}
+      <button
+        onClick={() => {
+          const m = selectedMonthNum + 1
+          if (m > 12) {
+            const key = `${selectedYear + 1}-01`
+            if (allowFuture || monthSet.has(key)) onSelect(key)
+          } else {
+            const key = `${selectedYear}-${String(m).padStart(2, "0")}`
+            if (allowFuture || monthSet.has(key)) onSelect(key)
+          }
+        }}
+        className="p-1 rounded-md hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+        aria-label="다음 월"
+      >
+        <ChevronRight className="h-4 w-4" />
       </button>
 
       {/* Dropdown */}
