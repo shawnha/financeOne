@@ -398,15 +398,33 @@ def get_forecast_cashflow(
     # 2. Forecast 항목 조회
     cur.execute(
         """
-        SELECT id, category, subcategory, type, forecast_amount, actual_amount,
-               is_recurring, note
-        FROM forecasts
-        WHERE entity_id = %s AND year = %s AND month = %s
-        ORDER BY type, category
+        SELECT f.id, f.category, f.subcategory, f.type, f.forecast_amount, f.actual_amount,
+               f.is_recurring, f.note, f.internal_account_id
+        FROM forecasts f
+        WHERE f.entity_id = %s AND f.year = %s AND f.month = %s
+        ORDER BY f.type, f.category
         """,
         [entity_id, year, month],
     )
     items = fetch_all(cur)
+
+    # 2-bis. 내부계정별 실제 거래 합계
+    cur.execute(
+        """
+        SELECT internal_account_id, type, SUM(amount) AS total
+        FROM transactions
+        WHERE entity_id = %s
+          AND date >= make_date(%s, %s, 1)
+          AND date < make_date(%s, %s, 1) + INTERVAL '1 month'
+          AND is_duplicate = false
+          AND internal_account_id IS NOT NULL
+        GROUP BY internal_account_id, type
+        """,
+        [entity_id, year, month, year, month],
+    )
+    actual_by_account = {}
+    for row in cur.fetchall():
+        actual_by_account[(row[0], row[1])] = float(row[2])
 
     # 3. Forecast 합산 (카드 카테고리 제외한 일반 입출금)
     forecast_income = Decimal("0")
@@ -464,6 +482,21 @@ def get_forecast_cashflow(
 
     diff = actual_closing - forecast_closing
 
+    # 예산 초과 항목 (실제 >= 예상 * 1.1)
+    over_budget = []
+    for i in items:
+        if i.get("internal_account_id") and i["type"] == "out":
+            forecast = float(i["forecast_amount"])
+            actual = actual_by_account.get((i["internal_account_id"], "out"), 0.0)
+            if forecast > 0 and actual >= forecast * 1.1:
+                over_budget.append({
+                    "category": i["category"],
+                    "internal_account_id": i["internal_account_id"],
+                    "forecast": forecast,
+                    "actual": actual,
+                    "diff_pct": round((actual / forecast - 1) * 100, 1),
+                })
+
     cur.close()
 
     return {
@@ -485,6 +518,7 @@ def get_forecast_cashflow(
         "actual_expense": float(actual_expense),
         "actual_closing": float(actual_closing),
         "diff": float(diff),
+        "over_budget": over_budget,
         "items": [
             {
                 "id": i["id"],
@@ -495,6 +529,10 @@ def get_forecast_cashflow(
                 "actual_amount": float(i["actual_amount"]) if i["actual_amount"] else None,
                 "is_recurring": i["is_recurring"],
                 "note": i["note"],
+                "internal_account_id": i.get("internal_account_id"),
+                "actual_from_transactions": actual_by_account.get(
+                    (i.get("internal_account_id"), i["type"]), 0.0
+                ) if i.get("internal_account_id") else None,
             }
             for i in items
         ],
