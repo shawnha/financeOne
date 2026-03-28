@@ -9,7 +9,7 @@ from psycopg2.extensions import connection as PgConnection
 from backend.database.connection import get_db
 from backend.utils.db import fetch_all
 from backend.services.bookkeeping_engine import create_journal_from_transaction
-from backend.services.mapping_service import learn_mapping_rule
+from backend.services.mapping_service import learn_mapping_rule, auto_map_transaction
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
@@ -190,6 +190,65 @@ def update_transaction(
         return {"id": tx_id_out, "updated": True, "journal_entry_id": journal_entry_id, "journal_error": journal_error}
     except HTTPException:
         raise
+    except Exception:
+        conn.rollback()
+        raise
+
+
+@router.post("/auto-map")
+def auto_map_unmapped(
+    entity_id: int = Query(...),
+    conn: PgConnection = Depends(get_db),
+):
+    """미분류 거래에 mapping_rules 기반 자동 매핑 일괄 적용"""
+    cur = conn.cursor()
+    try:
+        # 미분류 거래 조회 (internal_account_id가 NULL이고 counterparty가 있는 거래)
+        cur.execute(
+            """
+            SELECT id, counterparty
+            FROM transactions
+            WHERE entity_id = %s
+              AND internal_account_id IS NULL
+              AND counterparty IS NOT NULL
+              AND counterparty != ''
+            """,
+            [entity_id],
+        )
+        unmapped = cur.fetchall()
+
+        mapped_count = 0
+        mapped_ids = []
+        for tx_id, counterparty in unmapped:
+            mapping = auto_map_transaction(cur, entity_id=entity_id, counterparty=counterparty)
+            if mapping:
+                cur.execute(
+                    """
+                    UPDATE transactions
+                    SET internal_account_id = %s,
+                        standard_account_id = %s,
+                        mapping_confidence = %s,
+                        mapping_source = 'rule',
+                        updated_at = NOW()
+                    WHERE id = %s
+                    """,
+                    [
+                        mapping["internal_account_id"],
+                        mapping["standard_account_id"],
+                        mapping["confidence"],
+                        tx_id,
+                    ],
+                )
+                mapped_count += 1
+                mapped_ids.append(tx_id)
+
+        conn.commit()
+        cur.close()
+        return {
+            "total_unmapped": len(unmapped),
+            "mapped": mapped_count,
+            "mapped_ids": mapped_ids,
+        }
     except Exception:
         conn.rollback()
         raise

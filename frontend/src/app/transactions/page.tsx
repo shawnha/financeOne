@@ -24,7 +24,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
 import {
-  Search, Download, ChevronLeft, ChevronRight, X, AlertTriangle, Upload, RotateCw,
+  Search, Download, ChevronLeft, ChevronRight, X, AlertTriangle, Upload, RotateCw, Wand2,
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -394,6 +394,26 @@ export default function TransactionsPage() {
     toast.info("CSV 다운로드는 Phase 2에서 제공됩니다.")
   }, [])
 
+  // 자동 매핑
+  const [autoMapping, setAutoMapping] = useState(false)
+  const handleAutoMap = useCallback(async () => {
+    if (!entityId) return
+    setAutoMapping(true)
+    try {
+      const result = await fetchAPI(`/transactions/auto-map?entity_id=${entityId}`, { method: "POST" })
+      if (result.mapped > 0) {
+        toast.success(`${result.mapped}건 자동 매핑 완료 (미분류 ${result.total_unmapped}건 중)`)
+        fetchTransactions()
+      } else {
+        toast.info(`자동 매핑할 거래가 없습니다. 매핑 규칙을 먼저 만들어주세요.`)
+      }
+    } catch {
+      toast.error("자동 매핑에 실패했습니다")
+    } finally {
+      setAutoMapping(false)
+    }
+  }, [entityId, fetchTransactions])
+
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -412,10 +432,16 @@ export default function TransactionsPage() {
               <span className="text-sm text-muted-foreground">{data.total.toLocaleString()}건</span>
             )}
           </div>
-          <Button variant="outline" size="sm" onClick={handleCSVDownload}>
-            <Download className="h-4 w-4 mr-1.5" />
-            CSV 다운로드
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={handleAutoMap} disabled={autoMapping}>
+              <Wand2 className="h-4 w-4 mr-1.5" />
+              {autoMapping ? "매핑 중..." : "자동 매핑"}
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleCSVDownload}>
+              <Download className="h-4 w-4 mr-1.5" />
+              CSV 다운로드
+            </Button>
+          </div>
         </div>
 
         {/* Filter Bar */}
