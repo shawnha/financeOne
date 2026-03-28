@@ -23,6 +23,7 @@ class ForecastCreate(BaseModel):
     type: str  # 'in' or 'out'
     forecast_amount: float
     is_recurring: bool = False
+    internal_account_id: Optional[int] = None
     note: Optional[str] = None
 
 
@@ -45,24 +46,28 @@ def list_forecasts(
     if month is not None:
         cur.execute(
             """
-            SELECT id, entity_id, year, month, category, subcategory, type,
-                   forecast_amount, actual_amount, is_recurring, note,
-                   created_at, updated_at
-            FROM forecasts
-            WHERE entity_id = %s AND year = %s AND month = %s
-            ORDER BY type, category, subcategory
+            SELECT f.id, f.entity_id, f.year, f.month, f.category, f.subcategory, f.type,
+                   f.forecast_amount, f.actual_amount, f.is_recurring,
+                   f.internal_account_id, ia.name AS internal_account_name,
+                   f.note, f.created_at, f.updated_at
+            FROM forecasts f
+            LEFT JOIN internal_accounts ia ON f.internal_account_id = ia.id
+            WHERE f.entity_id = %s AND f.year = %s AND f.month = %s
+            ORDER BY f.type, f.category, f.subcategory
             """,
             [entity_id, year, month],
         )
     else:
         cur.execute(
             """
-            SELECT id, entity_id, year, month, category, subcategory, type,
-                   forecast_amount, actual_amount, is_recurring, note,
-                   created_at, updated_at
-            FROM forecasts
-            WHERE entity_id = %s AND year = %s
-            ORDER BY month, type, category, subcategory
+            SELECT f.id, f.entity_id, f.year, f.month, f.category, f.subcategory, f.type,
+                   f.forecast_amount, f.actual_amount, f.is_recurring,
+                   f.internal_account_id, ia.name AS internal_account_name,
+                   f.note, f.created_at, f.updated_at
+            FROM forecasts f
+            LEFT JOIN internal_accounts ia ON f.internal_account_id = ia.id
+            WHERE f.entity_id = %s AND f.year = %s
+            ORDER BY f.month, f.type, f.category, f.subcategory
             """,
             [entity_id, year],
         )
@@ -85,18 +90,21 @@ def create_forecast(
     cur.execute(
         """
         INSERT INTO forecasts
-            (entity_id, year, month, category, subcategory, type, forecast_amount, is_recurring, note)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (entity_id, year, month, category, subcategory, type)
+            (entity_id, year, month, category, subcategory, type,
+             forecast_amount, is_recurring, internal_account_id, note)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (entity_id, year, month, internal_account_id, type)
+          WHERE internal_account_id IS NOT NULL
         DO UPDATE SET forecast_amount = EXCLUDED.forecast_amount,
                       is_recurring = EXCLUDED.is_recurring,
+                      category = EXCLUDED.category,
                       note = EXCLUDED.note,
                       updated_at = NOW()
         RETURNING id
         """,
         [body.entity_id, body.year, body.month, body.category,
          body.subcategory, body.type, body.forecast_amount,
-         body.is_recurring, body.note],
+         body.is_recurring, body.internal_account_id, body.note],
     )
     forecast_id = cur.fetchone()[0]
     conn.commit()
@@ -168,3 +176,80 @@ def delete_forecast(
     cur.close()
 
     return {"id": forecast_id, "status": "deleted"}
+
+
+@router.post("/copy-recurring", status_code=201)
+def copy_recurring_forecasts(
+    entity_id: int = Query(...),
+    source_year: int = Query(...),
+    source_month: int = Query(...),
+    target_year: int = Query(...),
+    target_month: int = Query(...),
+    conn: PgConnection = Depends(get_db),
+):
+    """is_recurring=true인 항목을 source → target 월로 복사."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            INSERT INTO forecasts
+                (entity_id, year, month, category, subcategory, type,
+                 forecast_amount, is_recurring, internal_account_id, note)
+            SELECT entity_id, %s, %s, category, subcategory, type,
+                   forecast_amount, is_recurring, internal_account_id, note
+            FROM forecasts
+            WHERE entity_id = %s AND year = %s AND month = %s AND is_recurring = true
+            ON CONFLICT DO NOTHING
+            RETURNING id
+            """,
+            [target_year, target_month, entity_id, source_year, source_month],
+        )
+        copied = len(cur.fetchall())
+        conn.commit()
+        cur.close()
+        return {"copied": copied, "target": f"{target_year}-{target_month:02d}"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/suggest-from-actuals")
+def suggest_forecasts_from_actuals(
+    entity_id: int = Query(...),
+    year: int = Query(...),
+    month: int = Query(...),
+    conn: PgConnection = Depends(get_db),
+):
+    """전월 내부계정별 실제 지출을 예상 금액으로 제안."""
+    prev_year = year if month > 1 else year - 1
+    prev_month = month - 1 if month > 1 else 12
+
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT t.internal_account_id,
+               ia.name AS account_name,
+               ia.code AS account_code,
+               ia.is_recurring,
+               t.type,
+               SUM(t.amount) AS total
+        FROM transactions t
+        JOIN internal_accounts ia ON t.internal_account_id = ia.id
+        WHERE t.entity_id = %s
+          AND t.date >= make_date(%s, %s, 1)
+          AND t.date < make_date(%s, %s, 1) + INTERVAL '1 month'
+          AND t.is_duplicate = false
+          AND t.internal_account_id IS NOT NULL
+        GROUP BY t.internal_account_id, ia.name, ia.code, ia.is_recurring, t.type
+        ORDER BY ia.is_recurring DESC, total DESC
+        """,
+        [entity_id, prev_year, prev_month, prev_year, prev_month],
+    )
+    rows = fetch_all(cur)
+    cur.close()
+
+    return {
+        "source_year": prev_year,
+        "source_month": prev_month,
+        "suggestions": rows,
+    }
