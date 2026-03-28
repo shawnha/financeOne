@@ -44,6 +44,10 @@ class MemberUpdate(BaseModel):
     role: Optional[str] = None
 
 
+class MappingRuleUpdate(BaseModel):
+    internal_account_id: Optional[int] = None
+
+
 # ---------------------------------------------------------------------------
 # Standard accounts (read-only)
 # ---------------------------------------------------------------------------
@@ -434,3 +438,101 @@ def delete_member(
         raise HTTPException(status_code=400, detail=str(e))
     finally:
         cur.close()
+
+
+# ---------------------------------------------------------------------------
+# Mapping rules — CRUD
+# ---------------------------------------------------------------------------
+
+@router.get("/mapping-rules")
+def list_mapping_rules(
+    entity_id: int,
+    search: Optional[str] = None,
+    page: int = 1,
+    per_page: int = 50,
+    conn: PgConnection = Depends(get_db),
+):
+    cur = conn.cursor()
+    cur.execute("SET search_path TO financeone, public")
+
+    where = ["mr.entity_id = %s"]
+    params: list = [entity_id]
+
+    if search:
+        where.append("mr.counterparty_pattern ILIKE %s")
+        params.append(f"%{search}%")
+
+    where_clause = " AND ".join(where)
+    offset = (page - 1) * per_page
+
+    cur.execute(f"SELECT COUNT(*) FROM mapping_rules mr WHERE {where_clause}", params)
+    total = cur.fetchone()[0]
+
+    cur.execute(
+        f"""
+        SELECT mr.id, mr.counterparty_pattern,
+               mr.internal_account_id, ia.name AS internal_account_name, ia.code AS internal_account_code,
+               mr.standard_account_id, sa.name AS standard_account_name, sa.code AS standard_account_code,
+               mr.confidence, mr.hit_count, mr.updated_at
+        FROM mapping_rules mr
+        LEFT JOIN internal_accounts ia ON mr.internal_account_id = ia.id
+        LEFT JOIN standard_accounts sa ON mr.standard_account_id = sa.id
+        WHERE {where_clause}
+        ORDER BY mr.hit_count DESC, mr.updated_at DESC
+        LIMIT %s OFFSET %s
+        """,
+        params + [per_page, offset],
+    )
+    cols = [d[0] for d in cur.description]
+    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    cur.close()
+
+    return {"items": rows, "total": total, "page": page, "per_page": per_page}
+
+
+@router.patch("/mapping-rules/{rule_id}")
+def update_mapping_rule(
+    rule_id: int,
+    body: MappingRuleUpdate,
+    conn: PgConnection = Depends(get_db),
+):
+    cur = conn.cursor()
+    cur.execute("SET search_path TO financeone, public")
+
+    if body.internal_account_id is not None:
+        cur.execute("SELECT standard_account_id FROM internal_accounts WHERE id = %s", [body.internal_account_id])
+        std_row = cur.fetchone()
+        std_id = std_row[0] if std_row else None
+
+        cur.execute(
+            """
+            UPDATE mapping_rules
+            SET internal_account_id = %s, standard_account_id = %s, updated_at = NOW()
+            WHERE id = %s RETURNING id
+            """,
+            [body.internal_account_id, std_id, rule_id],
+        )
+    else:
+        raise HTTPException(400, "No fields to update")
+
+    if not cur.fetchone():
+        raise HTTPException(404, "Mapping rule not found")
+
+    conn.commit()
+    cur.close()
+    return {"id": rule_id, "updated": True}
+
+
+@router.delete("/mapping-rules/{rule_id}")
+def delete_mapping_rule(
+    rule_id: int,
+    conn: PgConnection = Depends(get_db),
+):
+    cur = conn.cursor()
+    cur.execute("SET search_path TO financeone, public")
+    cur.execute("DELETE FROM mapping_rules WHERE id = %s RETURNING id", [rule_id])
+    if not cur.fetchone():
+        raise HTTPException(404, "Mapping rule not found")
+    conn.commit()
+    cur.close()
+    return {"id": rule_id, "deleted": True}
