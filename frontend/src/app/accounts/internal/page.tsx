@@ -196,6 +196,7 @@ function InternalAccountsContent() {
     }
     setBudgetSaving(true)
     try {
+      const isIncome = budgetTarget.code.startsWith("INC")
       await fetchAPI("/forecasts", {
         method: "POST",
         body: JSON.stringify({
@@ -203,7 +204,10 @@ function InternalAccountsContent() {
           internal_account_id: budgetTarget.id,
           year: budgetYear,
           month: budgetMonth,
+          category: budgetTarget.name,
+          type: isIncome ? "in" : "out",
           forecast_amount: amount,
+          is_recurring: budgetRecurring,
         }),
       })
       // Toggle recurring if changed
