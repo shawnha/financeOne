@@ -33,7 +33,9 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
-import { AlertTriangle, FolderTree, Plus } from "lucide-react"
+import { AlertTriangle, Copy, FolderTree, Plus } from "lucide-react"
+import { MonthPicker } from "@/components/month-picker"
+import { Checkbox } from "@/components/ui/checkbox"
 import { TreeAccountItem, flattenTree, type TreeAccount } from "@/components/tree-account-item"
 
 // ---------------------------------------------------------------------------
@@ -49,6 +51,7 @@ interface RawAccount {
   standard_name: string | null
   sort_order: number
   parent_id: number | null
+  is_recurring: boolean
 }
 
 interface StandardAccount {
@@ -93,6 +96,7 @@ function buildTree(accounts: RawAccount[]): TreeAccount[] {
         ...a,
         depth,
         isRoot: ROOT_CODES.includes(a.code),
+        is_recurring: a.is_recurring ?? false,
         children: walk(a.id, depth + 1),
       }))
   }
@@ -118,6 +122,16 @@ function InternalAccountsContent() {
   const [form, setForm] = useState<FormData>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<RawAccount | null>(null)
+
+  // Budget state
+  const now = new Date()
+  const [budgetYear, setBudgetYear] = useState(now.getFullYear())
+  const [budgetMonth, setBudgetMonth] = useState(now.getMonth() + 1)
+  const [budgets, setBudgets] = useState<Record<number, number>>({})
+  const [budgetTarget, setBudgetTarget] = useState<TreeAccount | null>(null)
+  const [budgetInput, setBudgetInput] = useState("")
+  const [budgetSaving, setBudgetSaving] = useState(false)
+  const [budgetRecurring, setBudgetRecurring] = useState(false)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -146,6 +160,141 @@ function InternalAccountsContent() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // Budget loading
+  const budgetMonthStr = useMemo(
+    () => `${budgetYear}-${String(budgetMonth).padStart(2, "0")}`,
+    [budgetYear, budgetMonth],
+  )
+
+  const loadBudgets = useCallback(async () => {
+    if (!entityId) return
+    try {
+      const data = await fetchAPI<{ forecasts: Array<{ internal_account_id: number | null; forecast_amount: number }> }>(
+        `/forecasts?entity_id=${entityId}&year=${budgetYear}&month=${budgetMonth}`,
+      )
+      const map: Record<number, number> = {}
+      for (const f of data.forecasts) {
+        if (f.internal_account_id) {
+          map[f.internal_account_id] = (map[f.internal_account_id] || 0) + f.forecast_amount
+        }
+      }
+      setBudgets(map)
+    } catch {
+      // silently ignore — budgets are optional
+    }
+  }, [entityId, budgetYear, budgetMonth])
+
+  useEffect(() => { loadBudgets() }, [loadBudgets])
+
+  const handleSaveBudget = async () => {
+    if (!budgetTarget || !entityId) return
+    const amount = Number(budgetInput.replace(/,/g, ""))
+    if (isNaN(amount)) {
+      toast.error("올바른 금액을 입력해주세요")
+      return
+    }
+    setBudgetSaving(true)
+    try {
+      await fetchAPI("/forecasts", {
+        method: "POST",
+        body: JSON.stringify({
+          entity_id: Number(entityId),
+          internal_account_id: budgetTarget.id,
+          year: budgetYear,
+          month: budgetMonth,
+          forecast_amount: amount,
+        }),
+      })
+      // Toggle recurring if changed
+      const rawAccount = accounts.find((a) => a.id === budgetTarget.id)
+      if (rawAccount && rawAccount.is_recurring !== budgetRecurring) {
+        await fetchAPI(`/accounts/internal/${budgetTarget.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            entity_id: Number(entityId),
+            is_recurring: budgetRecurring,
+          }),
+        })
+      }
+      toast.success("예산이 저장되었습니다")
+      setBudgetTarget(null)
+      loadBudgets()
+      load()
+    } catch {
+      toast.error("예산 저장에 실패했습니다")
+    } finally {
+      setBudgetSaving(false)
+    }
+  }
+
+  const handleToggleRecurring = async (account: TreeAccount) => {
+    if (!entityId) return
+    try {
+      await fetchAPI(`/accounts/internal/${account.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          entity_id: Number(entityId),
+          is_recurring: !account.is_recurring,
+        }),
+      })
+      load()
+    } catch {
+      toast.error("고정비 설정에 실패했습니다")
+    }
+  }
+
+  const handleCopyRecurring = async () => {
+    if (!entityId) return
+    const recurringAccounts = accounts.filter((a) => a.is_recurring)
+    if (recurringAccounts.length === 0) {
+      toast.error("고정비 항목이 없습니다")
+      return
+    }
+    // Get previous month
+    let prevYear = budgetYear
+    let prevMonth = budgetMonth - 1
+    if (prevMonth < 1) {
+      prevMonth = 12
+      prevYear -= 1
+    }
+    try {
+      const prevData = await fetchAPI<{ forecasts: Array<{ internal_account_id: number | null; forecast_amount: number }> }>(
+        `/forecasts?entity_id=${entityId}&year=${prevYear}&month=${prevMonth}`,
+      )
+      let copied = 0
+      for (const ra of recurringAccounts) {
+        const prev = prevData.forecasts.find((f) => f.internal_account_id === ra.id)
+        if (prev) {
+          await fetchAPI("/forecasts", {
+            method: "POST",
+            body: JSON.stringify({
+              entity_id: Number(entityId),
+              internal_account_id: ra.id,
+              year: budgetYear,
+              month: budgetMonth,
+              forecast_amount: prev.forecast_amount,
+            }),
+          })
+          copied++
+        }
+      }
+      if (copied > 0) {
+        toast.success(`고정비 ${copied}건이 복사되었습니다`)
+        loadBudgets()
+      } else {
+        toast.error("이전 달 고정비 데이터가 없습니다")
+      }
+    } catch {
+      toast.error("고정비 복사에 실패했습니다")
+    }
+  }
+
+  const handleBudgetClick = (account: TreeAccount) => {
+    setBudgetTarget(account)
+    setBudgetInput(budgets[account.id] != null ? String(budgets[account.id]) : "")
+    setBudgetRecurring(account.is_recurring)
+  }
 
   const tree = useMemo(() => buildTree(accounts), [accounts])
   const visibleItems = useMemo(() => flattenTree(tree, collapsed), [tree, collapsed])
@@ -333,18 +482,34 @@ function InternalAccountsContent() {
   return (
     <>
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
+        <CardHeader className="flex flex-row items-center justify-between gap-4 flex-wrap">
           <CardTitle className="text-base font-medium">
             내부 계정과목 ({accounts.length}건)
           </CardTitle>
-          <Button size="sm" onClick={() => {
-            setEditingId(null)
-            setForm(EMPTY_FORM)
-            setDialogOpen(true)
-          }}>
-            <Plus className="mr-1.5 h-4 w-4" />
-            계정 추가
-          </Button>
+          <div className="flex items-center gap-2">
+            <MonthPicker
+              months={[]}
+              selected={budgetMonthStr}
+              onSelect={(m) => {
+                const [y, mo] = m.split("-").map(Number)
+                setBudgetYear(y)
+                setBudgetMonth(mo)
+              }}
+              allowFuture
+            />
+            <Button size="sm" variant="outline" onClick={handleCopyRecurring} title="이전 달 고정비를 현재 달에 복사">
+              <Copy className="mr-1.5 h-3.5 w-3.5" />
+              고정비 복사
+            </Button>
+            <Button size="sm" onClick={() => {
+              setEditingId(null)
+              setForm(EMPTY_FORM)
+              setDialogOpen(true)
+            }}>
+              <Plus className="mr-1.5 h-4 w-4" />
+              계정 추가
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {accounts.length === 0 ? (
@@ -371,6 +536,8 @@ function InternalAccountsContent() {
                       onEdit={handleEdit}
                       onDelete={(a) => setDeleteTarget(a as unknown as RawAccount)}
                       onAddChild={handleAddChild}
+                      budgetAmount={budgets[node.id] ?? null}
+                      onBudgetClick={handleBudgetClick}
                     />
                   ))}
                 </div>
@@ -476,6 +643,46 @@ function InternalAccountsContent() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteTarget(null)}>취소</Button>
             <Button variant="destructive" onClick={handleDelete}>삭제</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Budget Input Dialog */}
+      <Dialog open={!!budgetTarget} onOpenChange={(open) => !open && setBudgetTarget(null)}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>예산 입력</DialogTitle>
+            <DialogDescription>
+              {budgetTarget?.name} — {budgetYear}년 {budgetMonth}월
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">예산 금액 (원)</label>
+              <Input
+                placeholder="0"
+                value={budgetInput}
+                onChange={(e) => setBudgetInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSaveBudget()}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="budget-recurring"
+                checked={budgetRecurring}
+                onCheckedChange={(checked) => setBudgetRecurring(checked === true)}
+              />
+              <label htmlFor="budget-recurring" className="text-sm cursor-pointer">
+                고정비 (매월 반복)
+              </label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBudgetTarget(null)} disabled={budgetSaving}>
+              취소
+            </Button>
+            <Button onClick={handleSaveBudget} disabled={budgetSaving}>
+              {budgetSaving ? "저장 중..." : "저장"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

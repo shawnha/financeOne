@@ -18,6 +18,7 @@ export interface TreeAccount {
   depth: number
   children: TreeAccount[]
   isRoot: boolean // INC or EXP — not draggable
+  is_recurring: boolean
 }
 
 interface TreeAccountItemProps {
@@ -27,6 +28,8 @@ interface TreeAccountItemProps {
   onEdit: (account: TreeAccount) => void
   onDelete: (account: TreeAccount) => void
   onAddChild: (parentId: number) => void
+  budgetAmount?: number | null
+  onBudgetClick?: (account: TreeAccount) => void
 }
 
 export function TreeAccountItem({
@@ -36,6 +39,8 @@ export function TreeAccountItem({
   onEdit,
   onDelete,
   onAddChild,
+  budgetAmount,
+  onBudgetClick,
 }: TreeAccountItemProps) {
   const {
     attributes,
@@ -108,6 +113,31 @@ export function TreeAccountItem({
       )}>
         {account.name}
       </span>
+
+      {/* Recurring badge */}
+      {account.is_recurring && !account.isRoot && (
+        <Badge variant="outline" className="text-[10px] shrink-0 border-blue-500/30 text-blue-400">
+          고정
+        </Badge>
+      )}
+
+      {/* Budget amount */}
+      {budgetAmount !== undefined && budgetAmount !== null && !account.isRoot && (
+        <span
+          className="text-xs font-mono text-muted-foreground cursor-pointer hover:text-foreground shrink-0"
+          onClick={(e) => { e.stopPropagation(); onBudgetClick?.(account) }}
+        >
+          ₩{budgetAmount.toLocaleString()}
+        </span>
+      )}
+      {budgetAmount === null && !account.isRoot && !account.children?.length && onBudgetClick && (
+        <span
+          className="text-xs text-muted-foreground/40 cursor-pointer hover:text-muted-foreground shrink-0"
+          onClick={(e) => { e.stopPropagation(); onBudgetClick?.(account) }}
+        >
+          + 예산
+        </span>
+      )}
 
       {/* Standard account badge */}
       {account.standard_code && !account.isRoot && (
