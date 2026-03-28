@@ -242,7 +242,9 @@ function InternalAccountsContent() {
           is_recurring: !account.is_recurring,
         }),
       })
-      load()
+      setAccounts((prev) =>
+        prev.map((a) => a.id === account.id ? { ...a, is_recurring: !account.is_recurring } : a)
+      )
     } catch {
       toast.error("고정비 설정에 실패했습니다")
     }
