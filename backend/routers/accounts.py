@@ -22,6 +22,7 @@ class InternalAccountCreate(BaseModel):
     standard_account_id: Optional[int] = None
     parent_id: Optional[int] = None
     sort_order: Optional[int] = 0
+    is_recurring: Optional[bool] = False
 
 
 class InternalAccountUpdate(BaseModel):
@@ -31,6 +32,7 @@ class InternalAccountUpdate(BaseModel):
     parent_id: Optional[int] = None
     sort_order: Optional[int] = None
     is_active: Optional[bool] = None
+    is_recurring: Optional[bool] = None
 
 
 class MemberCreate(BaseModel):
@@ -101,7 +103,7 @@ def list_internal_accounts(
             """
             SELECT ia.id, ia.entity_id, ia.code, ia.name,
                    sa.code AS standard_code, sa.name AS standard_name,
-                   ia.sort_order, ia.parent_id
+                   ia.sort_order, ia.parent_id, ia.is_recurring
             FROM internal_accounts ia
             LEFT JOIN standard_accounts sa ON ia.standard_account_id = sa.id
             WHERE ia.entity_id = %s AND ia.is_active = true
@@ -114,7 +116,7 @@ def list_internal_accounts(
             """
             SELECT ia.id, ia.entity_id, ia.code, ia.name,
                    sa.code AS standard_code, sa.name AS standard_name,
-                   ia.sort_order, ia.parent_id
+                   ia.sort_order, ia.parent_id, ia.is_recurring
             FROM internal_accounts ia
             LEFT JOIN standard_accounts sa ON ia.standard_account_id = sa.id
             WHERE ia.is_active = true
@@ -136,10 +138,10 @@ def create_internal_account(
         cur.execute(
             """
             INSERT INTO internal_accounts
-                (entity_id, code, name, standard_account_id, parent_id, sort_order)
-            VALUES (%s, %s, %s, %s, %s, %s)
+                (entity_id, code, name, standard_account_id, parent_id, sort_order, is_recurring)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             RETURNING id, entity_id, code, name, standard_account_id,
-                      parent_id, sort_order, is_active
+                      parent_id, sort_order, is_active, is_recurring
             """,
             [
                 body.entity_id,
@@ -148,6 +150,7 @@ def create_internal_account(
                 body.standard_account_id,
                 body.parent_id,
                 body.sort_order,
+                body.is_recurring,
             ],
         )
         cols = [d[0] for d in cur.description]
@@ -229,7 +232,7 @@ def update_internal_account(
             SET {', '.join(set_clauses)}
             WHERE id = %s
             RETURNING id, entity_id, code, name, standard_account_id,
-                      parent_id, sort_order, is_active
+                      parent_id, sort_order, is_active, is_recurring
             """,
             params,
         )
