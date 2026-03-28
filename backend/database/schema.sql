@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS internal_accounts (
   parent_id           INTEGER REFERENCES internal_accounts(id),
   sort_order          INTEGER NOT NULL DEFAULT 0,
   is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+  is_recurring        BOOLEAN NOT NULL DEFAULT FALSE,
   UNIQUE(entity_id, code)
 );
 
@@ -143,12 +144,18 @@ CREATE TABLE IF NOT EXISTS forecasts (
   type             TEXT NOT NULL,
   forecast_amount  NUMERIC(18,2) NOT NULL DEFAULT 0,
   actual_amount    NUMERIC(18,2),
-  is_recurring     BOOLEAN NOT NULL DEFAULT FALSE,
-  note             TEXT,
-  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE NULLS NOT DISTINCT (entity_id, year, month, category, subcategory, type)
+  is_recurring        BOOLEAN NOT NULL DEFAULT FALSE,
+  internal_account_id INTEGER REFERENCES internal_accounts(id),
+  note                TEXT,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_forecasts_account
+  ON forecasts (entity_id, year, month, internal_account_id, type)
+  WHERE internal_account_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_forecasts_category
+  ON forecasts (entity_id, year, month, category, subcategory, type)
+  WHERE internal_account_id IS NULL;
 
 -- 9. exchange_rates — 환율
 CREATE TABLE IF NOT EXISTS exchange_rates (
