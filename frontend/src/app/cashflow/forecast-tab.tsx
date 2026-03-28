@@ -1,8 +1,20 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useMemo } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import {
+  ComposedChart,
+  Area,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  ReferenceLine,
+  Label,
+} from "recharts"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -102,6 +114,172 @@ function KPICard({
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
       <p className={cn("text-[17px] font-semibold font-mono tabular-nums mt-1", colorClass)}>{value}</p>
       {subtext && <p className={cn("text-[11px] mt-0.5", subtextColor || "text-muted-foreground")}>{subtext}</p>}
+    </Card>
+  )
+}
+
+// ── Forecast Balance Chart ────────────────────────────
+
+function ForecastBalanceChart({
+  data,
+  entityId,
+  year,
+  month,
+}: {
+  data: ForecastData
+  entityId: string | null
+  year: number
+  month: number
+}) {
+  const chartData = useMemo(() => {
+    const daysInMonth = new Date(year, month, 0).getDate()
+    const today = new Date()
+    const currentDay = today.getFullYear() === year && today.getMonth() + 1 === month
+      ? today.getDate() : (month < today.getMonth() + 1 || year < today.getFullYear() ? daysInMonth : 0)
+
+    const totalExpense = data.forecast_expense + data.forecast_card_usage
+    const totalIncome = data.forecast_income
+    const points: Array<{
+      day: string
+      estimated: number
+      actual: number | null
+    }> = []
+
+    // Simple daily projection: income spread evenly, expenses weighted toward card payment dates (15th, 25th)
+    let estBalance = data.opening_balance
+    let actBalance = data.opening_balance
+    const dailyIncome = totalIncome / daysInMonth
+    const dailyExpense = totalExpense / daysInMonth
+
+    // Actual daily change rate (rough estimate from total actuals)
+    const actualDailyChange = currentDay > 0
+      ? (data.actual_closing - data.opening_balance) / currentDay
+      : 0
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      // Estimated: smooth with card payment dips
+      let dayExpense = dailyExpense
+      if (d === 15 || d === 25) dayExpense = dailyExpense * 4 // Card payment days spike
+      estBalance = estBalance + dailyIncome - dayExpense
+
+      // Actual: only up to current day
+      if (d <= currentDay) {
+        actBalance = data.opening_balance + actualDailyChange * d
+      }
+
+      points.push({
+        day: `${month}/${d}`,
+        estimated: Math.round(estBalance),
+        actual: d <= currentDay ? Math.round(actBalance) : null,
+      })
+    }
+
+    return { points, currentDay, daysInMonth }
+  }, [data, year, month])
+
+  const fmt = (v: number) => {
+    if (Math.abs(v) >= 1_000_000) return `₩${(v / 1_000_000).toFixed(0)}M`
+    if (Math.abs(v) >= 1_000) return `₩${(v / 1_000).toFixed(0)}K`
+    return `₩${v}`
+  }
+
+  // Card payment reference lines
+  const cardPaymentDays = [`${month}/15`, `${month}/25`]
+
+  return (
+    <Card className="bg-secondary rounded-2xl p-6">
+      <ResponsiveContainer width="100%" height={220}>
+        <ComposedChart data={chartData.points} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
+          <defs>
+            <linearGradient id="forecastEstGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#F59E0B" stopOpacity={0.15} />
+              <stop offset="100%" stopColor="#F59E0B" stopOpacity={0} />
+            </linearGradient>
+            <linearGradient id="forecastActGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#22C55E" stopOpacity={0.15} />
+              <stop offset="100%" stopColor="#22C55E" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="4 4" stroke="rgba(255,255,255,0.03)" vertical={false} />
+          <XAxis
+            dataKey="day"
+            tick={{ fontSize: 10, fill: "#64748b" }}
+            tickLine={false}
+            axisLine={{ stroke: "rgba(255,255,255,0.06)" }}
+            interval={Math.floor(chartData.daysInMonth / 5)}
+          />
+          <YAxis
+            tick={{ fontSize: 10, fill: "#64748b" }}
+            tickLine={false}
+            axisLine={false}
+            tickFormatter={fmt}
+            width={60}
+          />
+          <Tooltip
+            contentStyle={{ background: "#161b22", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }}
+            labelStyle={{ color: "#94a3b8" }}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            formatter={((value: any, name: any) => [
+              `₩${Number(value).toLocaleString()}`,
+              name === "estimated" ? "예상 잔고" : "실제 잔고",
+            ]) as any}
+          />
+          {/* Card payment day markers */}
+          {cardPaymentDays.map((day, i) => (
+            <ReferenceLine
+              key={day}
+              x={day}
+              stroke="rgba(139,92,246,0.3)"
+              strokeDasharray="3 3"
+              strokeWidth={1}
+            >
+              <Label
+                value={i === 0 ? "롯데 결제일" : "우리 결제일"}
+                position="top"
+                fill="#8B5CF6"
+                fontSize={9}
+                fontWeight={500}
+              />
+            </ReferenceLine>
+          ))}
+          {/* Estimated balance (amber dashed + area) */}
+          <Area
+            type="monotone"
+            dataKey="estimated"
+            fill="url(#forecastEstGrad)"
+            stroke="#F59E0B"
+            strokeWidth={2}
+            strokeDasharray="8 4"
+            dot={false}
+            activeDot={{ r: 4, fill: "#F59E0B", stroke: "#050508", strokeWidth: 2 }}
+          />
+          {/* Actual balance (green solid + area, only up to current day) */}
+          <Area
+            type="monotone"
+            dataKey="actual"
+            fill="url(#forecastActGrad)"
+            stroke="#22C55E"
+            strokeWidth={2.5}
+            dot={false}
+            activeDot={{ r: 4, fill: "#22C55E", stroke: "#050508", strokeWidth: 2 }}
+            connectNulls={false}
+          />
+        </ComposedChart>
+      </ResponsiveContainer>
+      <div className="flex gap-5 mt-2 text-[11px] text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-2 h-2 rounded-full bg-[#F59E0B]" />
+          예상 잔고 (시차보정 포함)
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-2 h-2 rounded-full bg-[#22C55E]" style={{ boxShadow: "0 0 6px #22C55E" }} />
+          실제 잔고 (업로드마다 업데이트)
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-2 h-2 rounded-full bg-[#8B5CF6]" />
+          카드 결제일
+        </span>
+      </div>
     </Card>
   )
 }
@@ -358,6 +536,9 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
         <strong className="block mb-1">{y}년 {m}월 예상 현금흐름</strong>
         카드/은행 데이터 업로드마다 &quot;실제 진행&quot; 컬럼이 업데이트됩니다. 월말에 예상과 실제를 비교합니다.
       </div>
+
+      {/* Forecast vs Actual balance chart */}
+      <ForecastBalanceChart data={data} entityId={entityId} year={y} month={m} />
 
       {/* KPI */}
       <div className="grid grid-cols-4 gap-3 max-md:grid-cols-2">
