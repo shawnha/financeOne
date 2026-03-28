@@ -141,13 +141,19 @@ export function TreeAccountItem({
       {/* Budget amount */}
       {budgetAmount !== undefined && budgetAmount !== null && !account.isRoot && (
         <span
-          className="text-xs font-mono text-muted-foreground cursor-pointer hover:text-foreground shrink-0"
-          onClick={(e) => { e.stopPropagation(); onBudgetClick?.(account) }}
+          className={cn(
+            "text-xs font-mono shrink-0",
+            hasChildren
+              ? "text-muted-foreground/60"
+              : "text-muted-foreground cursor-pointer hover:text-foreground",
+          )}
+          onClick={(e) => { if (!hasChildren) { e.stopPropagation(); onBudgetClick?.(account) } }}
         >
+          {hasChildren && <span className="text-[10px] mr-0.5">Σ</span>}
           ₩{budgetAmount.toLocaleString()}
         </span>
       )}
-      {budgetAmount === null && !account.isRoot && !account.children?.length && onBudgetClick && (
+      {budgetAmount === null && !account.isRoot && !hasChildren && onBudgetClick && (
         <span
           className="text-xs text-muted-foreground/40 cursor-pointer hover:text-muted-foreground shrink-0"
           onClick={(e) => { e.stopPropagation(); onBudgetClick?.(account) }}

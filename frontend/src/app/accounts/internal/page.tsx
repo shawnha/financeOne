@@ -304,6 +304,19 @@ function InternalAccountsContent() {
   const visibleItems = useMemo(() => flattenTree(tree, collapsed), [tree, collapsed])
   const sortableIds = useMemo(() => visibleItems.map((n) => n.id), [visibleItems])
 
+  // Compute aggregated budgets: parent = sum of children budgets
+  const aggregatedBudgets = useMemo(() => {
+    const result: Record<number, number> = { ...budgets }
+    const sumChildren = (node: TreeAccount): number => {
+      if (node.children.length === 0) return result[node.id] ?? 0
+      const total = node.children.reduce((sum, child) => sum + sumChildren(child), 0)
+      if (total > 0) result[node.id] = total
+      return total
+    }
+    tree.forEach(sumChildren)
+    return result
+  }, [tree, budgets])
+
   const handleToggle = (id: number) => {
     setCollapsed((prev) => {
       const next = new Set(prev)
@@ -540,7 +553,7 @@ function InternalAccountsContent() {
                       onEdit={handleEdit}
                       onDelete={(a) => setDeleteTarget(a as unknown as RawAccount)}
                       onAddChild={handleAddChild}
-                      budgetAmount={budgets[node.id] ?? null}
+                      budgetAmount={aggregatedBudgets[node.id] ?? null}
                       onBudgetClick={handleBudgetClick}
                       onToggleRecurring={handleToggleRecurring}
                     />
