@@ -16,18 +16,6 @@ import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { fetchAPI } from "@/lib/api"
 import { formatByEntity } from "@/lib/format"
-import {
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip as RechartsTooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-  Legend,
-  Line,
-  ComposedChart,
-  ReferenceLine,
-} from "recharts"
 import { AlertCircle, RefreshCw, Plus, Download } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MonthPicker } from "@/components/month-picker"
@@ -101,17 +89,19 @@ function KPICard({
   value,
   subtext,
   colorClass,
+  subtextColor,
 }: {
   label: string
   value: string
   subtext?: string
   colorClass?: string
+  subtextColor?: string
 }) {
   return (
     <Card className="bg-secondary rounded-xl p-4">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={cn("text-2xl font-bold font-mono tabular-nums mt-1", colorClass)}>{value}</p>
-      {subtext && <p className="text-xs text-muted-foreground mt-0.5">{subtext}</p>}
+      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className={cn("text-[17px] font-semibold font-mono tabular-nums mt-1", colorClass)}>{value}</p>
+      {subtext && <p className={cn("text-[11px] mt-0.5", subtextColor || "text-muted-foreground")}>{subtext}</p>}
     </Card>
   )
 }
@@ -263,7 +253,6 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
   const [error, setError] = useState("")
   const [selectedMonth, setSelectedMonth] = useState("")
   const [showComparison, setShowComparison] = useState(false)
-  const [showFormula, setShowFormula] = useState(false)
 
   // Fetch summary for month navigation
   const fetchSummary = useCallback(async () => {
@@ -306,10 +295,8 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
   const baseMonths = summary?.available_months ?? []
   const months = (() => {
     const set = new Set(baseMonths)
-    // 마지막 완료월 기준으로 +2개월 추가
     const now = new Date()
-    // 월말 기준: 현재월은 아직 진행중이므로 전월까지가 "완료"
-    const lastComplete = new Date(now.getFullYear(), now.getMonth(), 0) // 전월 말일
+    const lastComplete = new Date(now.getFullYear(), now.getMonth(), 0)
     const base = baseMonths.length > 0
       ? (() => { const [y, m] = baseMonths[baseMonths.length - 1].split("-").map(Number); return new Date(y, m - 1, 1) })()
       : new Date(lastComplete.getFullYear(), lastComplete.getMonth(), 1)
@@ -327,7 +314,6 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
         <div className="grid grid-cols-4 gap-3">
           {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-xl" />)}
         </div>
-        <Skeleton className="h-[300px] rounded-xl" />
         <Skeleton className="h-[200px] rounded-xl" />
       </div>
     )
@@ -367,6 +353,12 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
         </div>
       </div>
 
+      {/* Note box (mockup style) */}
+      <div className="bg-amber-500/[0.06] border border-amber-500/15 rounded-lg px-4 py-3 text-xs text-[hsl(var(--warning))]">
+        <strong className="block mb-1">{y}년 {m}월 예상 현금흐름</strong>
+        카드/은행 데이터 업로드마다 &quot;실제 진행&quot; 컬럼이 업데이트됩니다. 월말에 예상과 실제를 비교합니다.
+      </div>
+
       {/* KPI */}
       <div className="grid grid-cols-4 gap-3 max-md:grid-cols-2">
         <KPICard label={`기초 (${m - 1 || 12}월 확정)`} value={formatByEntity(data.opening_balance, entityId)} />
@@ -395,50 +387,46 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
           <div className="space-y-1">
             {data.over_budget.map((item, i) => (
               <p key={i} className="text-xs text-red-300">
-                {item.category}: 예상 {formatByEntity(item.forecast, entityId)} → 실제 {formatByEntity(item.actual, entityId)} (+{item.diff_pct}%)
+                {item.category}: 예상 {formatByEntity(item.forecast, entityId)} &rarr; 실제 {formatByEntity(item.actual, entityId)} (+{item.diff_pct}%)
               </p>
             ))}
           </div>
         </Card>
       )}
 
-      {/* Forecast items list */}
-      <Card className="overflow-hidden">
+      {/* Forecast items list (no chart -- table only per mockup) */}
+      <Card className="overflow-hidden rounded-2xl">
         <div className="px-4 py-3 flex items-center justify-between border-b border-border">
           <h3 className="text-sm font-semibold">{m}월 예상 항목</h3>
           <button
             onClick={() => setShowComparison(!showComparison)}
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors bg-muted/30 border border-border px-3 py-1.5 rounded-lg"
           >
-            {showComparison ? "실제 비교 접기 ◂" : "실제 비교 펼치기 ▸"}
+            {showComparison ? "실제 비교 접기 \u25C2" : "실제 비교 펼치기 \u25B8"}
           </button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-muted/30 text-xs text-muted-foreground">
+              <tr className="bg-muted/30 text-[10px] text-muted-foreground uppercase tracking-wider">
                 <th className="text-left px-4 py-2">유형</th>
                 <th className="text-left px-4 py-2">항목</th>
                 <th className="text-right px-4 py-2">예상 금액</th>
-                <th className="text-right px-4 py-2">실제</th>
-                <th className="text-right px-4 py-2">차이</th>
-                {showComparison && <th className="text-right px-4 py-2">예상 잔고</th>}
-                {showComparison && <th className="text-right px-4 py-2">실제 잔고</th>}
+                {showComparison && <th className="text-right px-4 py-2 text-[hsl(var(--profit))]">실제 진행</th>}
+                <th className="text-right px-4 py-2 text-[hsl(var(--warning))]">예상 잔고</th>
+                {showComparison && <th className="text-right px-4 py-2 text-[hsl(var(--profit))]">실제 잔고</th>}
               </tr>
             </thead>
             <tbody>
               {/* Opening row */}
-              <tr className="border-t border-border bg-green-500/3">
+              <tr className="border-t border-border bg-green-500/[0.03]">
                 <td className="px-4 py-2.5"></td>
                 <td className="px-4 py-2.5 font-medium">시작 잔고</td>
-                <td className="px-4 py-2.5 text-right font-mono tabular-nums">—</td>
-                <td className="px-4 py-2.5 text-right font-mono tabular-nums">—</td>
-                <td className="px-4 py-2.5 text-right font-mono tabular-nums">—</td>
-                {showComparison && (
-                  <td className="px-4 py-2.5 text-right font-mono tabular-nums">
-                    {formatByEntity(data.opening_balance, entityId)}
-                  </td>
-                )}
+                <td className="px-4 py-2.5 text-right font-mono tabular-nums">--</td>
+                {showComparison && <td className="px-4 py-2.5 text-right font-mono tabular-nums">--</td>}
+                <td className="px-4 py-2.5 text-right font-mono tabular-nums">
+                  {formatByEntity(data.opening_balance, entityId)}
+                </td>
                 {showComparison && (
                   <td className="px-4 py-2.5 text-right font-mono tabular-nums text-[hsl(var(--profit))]">
                     {formatByEntity(data.opening_balance, entityId)}
@@ -453,17 +441,12 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                 const diffRatio = item.forecast_amount !== 0 && actual != null
                   ? (actual / item.forecast_amount) * 100
                   : null
-                const diffColor = diff == null
-                  ? ""
-                  : diffRatio != null && diffRatio > 110
-                    ? "text-[hsl(var(--loss))]"
-                    : "text-[hsl(var(--profit))]"
 
                 return (
-                  <tr key={item.id} className="border-t border-border hover:bg-muted/10">
+                  <tr key={item.id} className="border-t border-border hover:bg-white/[0.02] transition-colors">
                     <td className="px-4 py-2.5">
                       <Badge variant="outline" className={cn(
-                        "text-xs px-2 py-0.5",
+                        "text-[10px] font-semibold px-2 py-0.5",
                         item.type === "in" ? "bg-green-500/12 text-green-400" : "bg-red-500/12 text-red-400",
                       )}>
                         {item.type === "in" ? "입금" : "출금"}
@@ -472,68 +455,59 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                     <td className="px-4 py-2.5">
                       {item.internal_account_name ?? item.category}
                       {item.subcategory && <span className="text-muted-foreground ml-1">({item.subcategory})</span>}
-                      {item.is_recurring && <span className="text-xs text-muted-foreground ml-2">🔄</span>}
+                      {item.is_recurring && <span className="text-xs text-muted-foreground ml-2">반복</span>}
                     </td>
                     <td className={cn(
-                      "px-4 py-2.5 text-right font-mono tabular-nums",
+                      "px-4 py-2.5 text-right font-mono tabular-nums text-xs",
                       item.type === "in" ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]",
                     )}>
                       {item.type === "in" ? "+" : "-"}{formatByEntity(item.forecast_amount, entityId)}
                     </td>
-                    <td className="px-4 py-2.5 text-right font-mono tabular-nums">
-                      {actual != null
-                        ? <span className={item.type === "in" ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]"}>
-                            {item.type === "in" ? "+" : "-"}{formatByEntity(actual, entityId)}
-                          </span>
-                        : <span className="text-muted-foreground">—</span>}
-                    </td>
-                    <td className={cn("px-4 py-2.5 text-right font-mono tabular-nums", diffColor)}>
-                      {diff != null
-                        ? <>{diff >= 0 ? "+" : ""}{formatByEntity(diff, entityId)}</>
-                        : <span className="text-muted-foreground">—</span>}
-                    </td>
                     {showComparison && (
-                      <td className="px-4 py-2.5 text-right font-mono tabular-nums text-[hsl(var(--warning))]">—</td>
+                      <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs">
+                        {actual != null
+                          ? <span className={item.type === "in" ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]"}>
+                              {item.type === "in" ? "+" : "-"}{formatByEntity(actual, entityId)}
+                            </span>
+                          : <span className="text-muted-foreground">--</span>}
+                      </td>
                     )}
-                    {showComparison && <td className="px-4 py-2.5"></td>}
+                    <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-[hsl(var(--warning))]">--</td>
+                    {showComparison && <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs"></td>}
                   </tr>
                 )
               })}
 
               {/* Timing adjustment row */}
               {data.card_timing.adjustment !== 0 && (
-                <tr className="border-t border-border bg-purple-500/3">
+                <tr className="border-t border-border bg-purple-500/[0.03]">
                   <td className="px-4 py-2.5">
-                    <Badge variant="outline" className="text-xs px-2 py-0.5 bg-amber-500/12 text-amber-400">시차보정</Badge>
+                    <Badge variant="outline" className="text-[10px] font-semibold px-2 py-0.5 bg-amber-500/12 text-amber-400">시차보정</Badge>
                   </td>
                   <td className="px-4 py-2.5">카드 시차 보정</td>
                   <td className={cn(
-                    "px-4 py-2.5 text-right font-mono tabular-nums",
+                    "px-4 py-2.5 text-right font-mono tabular-nums text-xs",
                     data.card_timing.adjustment >= 0 ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]",
                   )}>
                     {data.card_timing.adjustment >= 0 ? "+" : ""}{formatByEntity(data.card_timing.adjustment, entityId)}
                   </td>
-                  <td className="px-4 py-2.5"></td>
-                  <td className="px-4 py-2.5"></td>
-                  {showComparison && <td className="px-4 py-2.5"></td>}
-                  {showComparison && <td className="px-4 py-2.5"></td>}
+                  {showComparison && <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-muted-foreground">--</td>}
+                  <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-[hsl(var(--warning))]">--</td>
+                  {showComparison && <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-muted-foreground">--</td>}
                 </tr>
               )}
 
               {/* Closing row */}
-              <tr className="border-t-2 border-t-[hsl(var(--warning))] bg-amber-500/3">
-                <td className="px-4 py-2.5"></td>
-                <td className="px-4 py-2.5 font-medium">기말 잔고</td>
-                <td className="px-4 py-2.5 text-right font-mono tabular-nums">—</td>
-                <td className="px-4 py-2.5 text-right font-mono tabular-nums">—</td>
-                <td className="px-4 py-2.5 text-right font-mono tabular-nums">—</td>
+              <tr className="border-t-2 border-t-amber-500/15 bg-amber-500/[0.03]">
+                <td className="px-4 py-3"></td>
+                <td className="px-4 py-3 font-bold">기말 잔고</td>
+                <td className="px-4 py-3 text-right font-mono tabular-nums text-xs">--</td>
+                {showComparison && <td className="px-4 py-3 text-right font-mono tabular-nums text-xs">--</td>}
+                <td className="px-4 py-3 text-right font-mono tabular-nums text-xs text-[hsl(var(--warning))]">
+                  {formatByEntity(data.forecast_closing, entityId)}
+                </td>
                 {showComparison && (
-                  <td className="px-4 py-2.5 text-right font-mono tabular-nums text-[hsl(var(--warning))]">
-                    {formatByEntity(data.forecast_closing, entityId)}
-                  </td>
-                )}
-                {showComparison && (
-                  <td className="px-4 py-2.5 text-right font-mono tabular-nums text-[hsl(var(--profit))]">
+                  <td className="px-4 py-3 text-right font-mono tabular-nums text-xs text-[hsl(var(--profit))]">
                     {formatByEntity(data.actual_closing, entityId)}
                   </td>
                 )}
@@ -541,7 +515,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
 
               {data.items.length === 0 && (
                 <tr>
-                  <td colSpan={showComparison ? 7 : 5} className="px-4 py-8 text-center text-muted-foreground">
+                  <td colSpan={showComparison ? 6 : 4} className="px-4 py-8 text-center text-muted-foreground">
                     예상 항목을 추가해보세요
                   </td>
                 </tr>
@@ -552,18 +526,13 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
       </Card>
 
       {/* Formula (collapsible) */}
-      <details>
-        <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
-          계산 방법 ▸
-        </summary>
-        <Card className="mt-2 p-4 bg-muted/30 font-mono text-xs leading-relaxed text-cyan-400">
-          <p>{m}월 예상 기말 = {m - 1 || 12}월 확정 기말</p>
-          <p className="ml-4">+ {m}월 예상 입금</p>
-          <p className="ml-4">- {m}월 예상 출금</p>
-          <p className="ml-4">- {m}월 예상 카드 사용액</p>
-          <p className="ml-4 text-amber-400">+ ({m - 1 || 12}월 카드 사용액 - {m}월 예상 카드 사용액) ← 시차 보정</p>
-        </Card>
-      </details>
+      <Card className="p-4 bg-muted/30 font-mono text-xs leading-relaxed text-cyan-400 rounded-lg">
+        <p>{m}월 예상 기말 = {m - 1 || 12}월 확정 기말</p>
+        <p className="ml-4">+ {m}월 예상 입금</p>
+        <p className="ml-4">- {m}월 예상 출금</p>
+        <p className="ml-4">- {m}월 예상 카드 사용액</p>
+        <p className="ml-4 text-amber-400">+ ({m - 1 || 12}월 카드 사용액 - {m}월 예상 카드 사용액) &larr; 시차 보정</p>
+      </Card>
 
       {/* Comparison boxes */}
       <div className="grid grid-cols-2 gap-4 max-sm:grid-cols-1">

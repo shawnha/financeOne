@@ -2,6 +2,15 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [0.6.1] - 2026-03-28 — 현금흐름 UI 재설계 (mockup 반영)
+
+### Changed
+- **탭 1 (실제 현금흐름) 차트**: Bar+Line -> Bar+Area 복합 차트, 선택 월 강조 (opacity 1 vs 0.35), 순현금흐름 Area fill (amber gradient)
+- **탭 1 거래 리스트**: 5컬럼 그리드 (날짜/유형/항목/금액/잔고) + mockup 스타일 시작/기말 잔고 행
+- **탭 2 (예상 현금흐름)**: 차트 제거, 안내 note box 추가, 테이블 전용 레이아웃
+- **KPI 카드**: mockup 스타일 (10px uppercase label, 17px mono value)
+- **전반적**: rounded-2xl 카드, 10px uppercase 헤더, mockup 색상/간격 반영
+
 ## [0.6.0] - 2026-03-26 — Supabase 마이그레이션 + 백엔드 리팩토링
 
 ### Changed
