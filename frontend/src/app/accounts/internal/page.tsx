@@ -542,6 +542,7 @@ function InternalAccountsContent() {
                       onAddChild={handleAddChild}
                       budgetAmount={budgets[node.id] ?? null}
                       onBudgetClick={handleBudgetClick}
+                      onToggleRecurring={handleToggleRecurring}
                     />
                   ))}
                 </div>

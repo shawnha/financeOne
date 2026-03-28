@@ -30,6 +30,7 @@ interface TreeAccountItemProps {
   onAddChild: (parentId: number) => void
   budgetAmount?: number | null
   onBudgetClick?: (account: TreeAccount) => void
+  onToggleRecurring?: (account: TreeAccount) => void
 }
 
 export function TreeAccountItem({
@@ -41,6 +42,7 @@ export function TreeAccountItem({
   onAddChild,
   budgetAmount,
   onBudgetClick,
+  onToggleRecurring,
 }: TreeAccountItemProps) {
   const {
     attributes,
@@ -114,11 +116,26 @@ export function TreeAccountItem({
         {account.name}
       </span>
 
-      {/* Recurring badge */}
-      {account.is_recurring && !account.isRoot && (
-        <Badge variant="outline" className="text-[10px] shrink-0 border-blue-500/30 text-blue-400">
-          고정
-        </Badge>
+      {/* Recurring toggle */}
+      {!account.isRoot && !account.children?.length && onToggleRecurring && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onToggleRecurring(account) }}
+          title={account.is_recurring ? "고정 해제" : "고정으로 설정"}
+          className="shrink-0"
+        >
+          <Badge
+            variant="outline"
+            className={cn(
+              "text-[10px] cursor-pointer transition-colors",
+              account.is_recurring
+                ? "border-blue-500/50 text-blue-400 bg-blue-500/10 hover:bg-blue-500/20"
+                : "border-muted-foreground/20 text-muted-foreground/40 hover:border-muted-foreground/40 hover:text-muted-foreground/60",
+            )}
+          >
+            고정
+          </Badge>
+        </button>
       )}
 
       {/* Budget amount */}
