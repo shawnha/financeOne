@@ -10,6 +10,7 @@ from backend.utils.db import fetch_all
 from backend.services.parsers import detect_parser
 from backend.services.parsers.woori_bank import WooriBankParser
 from backend.services.dedup_service import build_file_key_counts, is_file_duplicate
+from backend.services.mapping_service import auto_map_transaction
 
 router = APIRouter(prefix="/api/upload", tags=["upload"])
 
@@ -77,6 +78,7 @@ async def upload_transactions(
         inserted_count = 0
         duplicate_count = 0
         cancel_count = 0
+        auto_mapped_count = 0
 
         cumulative = build_file_key_counts(parsed)
 
@@ -145,6 +147,30 @@ async def upload_transactions(
                 ],
             )
             inserted_count += 1
+
+            # 자동 매핑: mapping_rules에서 counterparty 조회
+            mapping = auto_map_transaction(cur, entity_id=entity_id, counterparty=tx.counterparty)
+            if mapping:
+                cur.execute(
+                    """
+                    UPDATE transactions
+                    SET internal_account_id = %s, standard_account_id = %s,
+                        mapping_source = 'rule', mapping_confidence = %s
+                    WHERE id = (
+                        SELECT id FROM transactions
+                        WHERE entity_id = %s AND file_id = %s AND date = %s
+                          AND amount = %s AND counterparty = %s AND description = %s
+                        ORDER BY id DESC LIMIT 1
+                    )
+                    """,
+                    [
+                        mapping["internal_account_id"],
+                        mapping["standard_account_id"],
+                        mapping["confidence"],
+                        entity_id, file_id, tx.date, tx.amount, tx.counterparty, tx.description,
+                    ],
+                )
+                auto_mapped_count += 1
 
         # Update uploaded_files
         cur.execute(
@@ -216,6 +242,7 @@ async def upload_transactions(
                 "inserted": inserted_count,
                 "duplicates_skipped": duplicate_count,
                 "cancellations": cancel_count,
+                "auto_mapped": auto_mapped_count,
             },
             "verification": verification,
         }
@@ -465,7 +492,7 @@ def rematch_file_transactions(
                 if cur.rowcount > 0:
                     member_matched += 1
 
-        # 2. 계정 재매칭: mapping_rules 테이블 기반 (counterparty 패턴 매칭)
+        # 2. 계정 재매칭: mapping_service 사용
         cur.execute(
             """
             SELECT t.id, t.counterparty
@@ -478,36 +505,18 @@ def rematch_file_transactions(
 
         account_matched = 0
         for tx_id, counterparty in unmapped_rows:
-            cur.execute(
-                """
-                SELECT internal_account_id, standard_account_id, confidence
-                FROM mapping_rules
-                WHERE entity_id = %s AND counterparty_pattern = %s AND confidence >= 0.8
-                ORDER BY confidence DESC, hit_count DESC
-                LIMIT 1
-                """,
-                [entity_id, counterparty],
-            )
-            rule = cur.fetchone()
-            if rule:
-                sets = []
-                params_u: list = []
-                if rule[0]:
-                    sets.append("internal_account_id = %s")
-                    params_u.append(rule[0])
-                if rule[1]:
-                    sets.append("standard_account_id = %s")
-                    params_u.append(rule[1])
-                if sets:
-                    sets.append("mapping_source = 'rule'")
-                    sets.append("mapping_confidence = %s")
-                    params_u.append(float(rule[2]))
-                    params_u.append(tx_id)
-                    cur.execute(
-                        f"UPDATE transactions SET {', '.join(sets)} WHERE id = %s",
-                        params_u,
-                    )
-                    account_matched += 1
+            mapping = auto_map_transaction(cur, entity_id=entity_id, counterparty=counterparty)
+            if mapping:
+                cur.execute(
+                    """
+                    UPDATE transactions
+                    SET internal_account_id = %s, standard_account_id = %s,
+                        mapping_source = 'rule', mapping_confidence = %s
+                    WHERE id = %s
+                    """,
+                    [mapping["internal_account_id"], mapping["standard_account_id"], mapping["confidence"], tx_id],
+                )
+                account_matched += 1
 
         conn.commit()
         cur.close()
