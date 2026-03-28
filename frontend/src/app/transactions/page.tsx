@@ -544,9 +544,9 @@ export default function TransactionsPage() {
                   일부 데이터만 표시됩니다.
                 </div>
               )}
-              <Table>
+              <Table className="min-w-[1100px]">
                 <TableHeader className="sticky top-0 z-10 bg-primary">
-                  <TableRow className="hover:bg-primary border-b-0">
+                  <TableRow className="hover:bg-primary border-b-0 whitespace-nowrap">
                     <TableHead className="w-[40px] text-center">
                       <Checkbox
                         checked={allSelected}
@@ -554,16 +554,16 @@ export default function TransactionsPage() {
                         aria-label="전체 선택"
                       />
                     </TableHead>
-                    <TableHead className="w-[100px]">날짜</TableHead>
-                    <TableHead className="w-[90px]">출처</TableHead>
-                    <TableHead className="w-[80px]">회원</TableHead>
+                    <TableHead className="min-w-[100px]">날짜</TableHead>
+                    <TableHead className="min-w-[80px]">출처</TableHead>
+                    <TableHead className="min-w-[60px]">회원</TableHead>
                     <TableHead className="min-w-[160px]">내역</TableHead>
-                    <TableHead className="w-[140px]">거래처</TableHead>
-                    <TableHead className="w-[120px] text-right">수입</TableHead>
-                    <TableHead className="w-[120px] text-right">지출</TableHead>
-                    <TableHead className="w-[120px]">내부 계정</TableHead>
-                    <TableHead className="w-[120px]">표준 계정</TableHead>
-                    <TableHead className="w-[60px] text-center">신뢰</TableHead>
+                    <TableHead className="min-w-[120px]">거래처</TableHead>
+                    <TableHead className="min-w-[100px] text-right">수입</TableHead>
+                    <TableHead className="min-w-[100px] text-right">지출</TableHead>
+                    <TableHead className="min-w-[100px]">내부 계정</TableHead>
+                    <TableHead className="min-w-[100px]">표준 계정</TableHead>
+                    <TableHead className="min-w-[50px] text-center">신뢰</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -597,7 +597,7 @@ export default function TransactionsPage() {
                       <TableCell className="p-2 text-sm whitespace-nowrap">{tx.date}</TableCell>
 
                       {/* Source */}
-                      <TableCell className="p-2">{sourceLabel(tx.source_type)}</TableCell>
+                      <TableCell className="p-2 whitespace-nowrap">{sourceLabel(tx.source_type)}</TableCell>
 
                       {/* Member */}
                       <TableCell className="p-2 text-sm truncate max-w-[80px]">
