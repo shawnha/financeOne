@@ -58,113 +58,110 @@ export function TreeAccountItem({
   const isCollapsed = collapsed.has(account.id)
 
   return (
-    <>
-      <div
-        ref={setNodeRef}
-        style={style}
-        className={cn(
-          "flex items-center gap-2 py-1.5 px-2 rounded-md group",
-          "hover:bg-muted/40 transition-colors",
-          isDragging && "opacity-50 bg-muted/60 shadow-lg z-50",
-          account.isRoot && "bg-muted/20 font-semibold",
-        )}
-      >
-        {/* Drag handle — hidden for root nodes */}
-        {!account.isRoot ? (
-          <span
-            {...attributes}
-            {...listeners}
-            className="cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-muted-foreground"
-          >
-            <GripVertical className="h-4 w-4" />
-          </span>
-        ) : (
-          <span className="w-4" />
-        )}
-
-        {/* Indentation */}
-        <span style={{ width: `${account.depth * 20}px` }} className="shrink-0" />
-
-        {/* Expand/collapse toggle */}
-        {hasChildren ? (
-          <button
-            type="button"
-            onClick={() => onToggle(account.id)}
-            className="p-0.5 rounded hover:bg-muted/60 text-muted-foreground"
-          >
-            {isCollapsed ? (
-              <ChevronRight className="h-3.5 w-3.5" />
-            ) : (
-              <ChevronDown className="h-3.5 w-3.5" />
-            )}
-          </button>
-        ) : (
-          <span className="w-[18px]" />
-        )}
-
-        {/* Name */}
-        <span className={cn(
-          "flex-1 text-sm truncate",
-          account.isRoot && "text-base font-medium",
-        )}>
-          {account.name}
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "flex items-center gap-2 py-1.5 px-2 rounded-md group",
+        "hover:bg-muted/40 transition-colors",
+        isDragging && "opacity-50 bg-muted/60 shadow-lg z-50",
+        account.isRoot && "bg-muted/20 font-semibold",
+      )}
+    >
+      {/* Drag handle — hidden for root nodes */}
+      {!account.isRoot ? (
+        <span
+          {...attributes}
+          {...listeners}
+          className="cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-muted-foreground"
+        >
+          <GripVertical className="h-4 w-4" />
         </span>
+      ) : (
+        <span className="w-4" />
+      )}
 
-        {/* Standard account badge */}
-        {account.standard_code && !account.isRoot && (
-          <Badge variant="secondary" className="font-normal text-[10px] shrink-0 opacity-60 group-hover:opacity-100">
-            {account.standard_code}
-          </Badge>
-        )}
+      {/* Indentation */}
+      <span style={{ width: `${account.depth * 20}px` }} className="shrink-0" />
 
-        {/* Actions — hidden until hover */}
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            onClick={() => onAddChild(account.id)}
-            title="하위 항목 추가"
-          >
-            <Plus className="h-3 w-3" />
-          </Button>
-          {!account.isRoot && (
-            <>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                onClick={() => onEdit(account)}
-                title="수정"
-              >
-                <Pencil className="h-3 w-3" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                onClick={() => onDelete(account)}
-                title="삭제"
-              >
-                <Trash2 className="h-3 w-3" />
-              </Button>
-            </>
+      {/* Expand/collapse toggle */}
+      {hasChildren ? (
+        <button
+          type="button"
+          onClick={() => onToggle(account.id)}
+          className="p-0.5 rounded hover:bg-muted/60 text-muted-foreground"
+        >
+          {isCollapsed ? (
+            <ChevronRight className="h-3.5 w-3.5" />
+          ) : (
+            <ChevronDown className="h-3.5 w-3.5" />
           )}
-        </div>
-      </div>
+        </button>
+      ) : (
+        <span className="w-[18px]" />
+      )}
 
-      {/* Render children recursively if not collapsed */}
-      {hasChildren && !isCollapsed && account.children.map((child) => (
-        <TreeAccountItem
-          key={child.id}
-          account={child}
-          collapsed={collapsed}
-          onToggle={onToggle}
-          onEdit={onEdit}
-          onDelete={onDelete}
-          onAddChild={onAddChild}
-        />
-      ))}
-    </>
+      {/* Name */}
+      <span className={cn(
+        "flex-1 text-sm truncate",
+        account.isRoot && "text-base font-medium",
+      )}>
+        {account.name}
+      </span>
+
+      {/* Standard account badge */}
+      {account.standard_code && !account.isRoot && (
+        <Badge variant="secondary" className="font-normal text-[10px] shrink-0 opacity-60 group-hover:opacity-100">
+          {account.standard_code}
+        </Badge>
+      )}
+
+      {/* Actions — hidden until hover */}
+      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6"
+          onClick={() => onAddChild(account.id)}
+          title="하위 항목 추가"
+        >
+          <Plus className="h-3 w-3" />
+        </Button>
+        {!account.isRoot && (
+          <>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={() => onEdit(account)}
+              title="수정"
+            >
+              <Pencil className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 text-muted-foreground hover:text-destructive"
+              onClick={() => onDelete(account)}
+              title="삭제"
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
   )
+}
+
+/** Flatten tree to visible items list (respecting collapsed state) */
+export function flattenTree(nodes: TreeAccount[], collapsed: Set<number>): TreeAccount[] {
+  const result: TreeAccount[] = []
+  for (const node of nodes) {
+    result.push(node)
+    if (node.children.length > 0 && !collapsed.has(node.id)) {
+      result.push(...flattenTree(node.children, collapsed))
+    }
+  }
+  return result
 }

@@ -10,6 +10,7 @@ import {
   DndContext,
   closestCenter,
   PointerSensor,
+  KeyboardSensor,
   useSensor,
   useSensors,
   DragEndEvent,
@@ -17,7 +18,10 @@ import {
 import {
   SortableContext,
   verticalListSortingStrategy,
+  arrayMove,
+  sortableKeyboardCoordinates,
 } from "@dnd-kit/sortable"
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -30,7 +34,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { AlertTriangle, FolderTree, Plus } from "lucide-react"
-import { TreeAccountItem, type TreeAccount } from "@/components/tree-account-item"
+import { TreeAccountItem, flattenTree, type TreeAccount } from "@/components/tree-account-item"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -95,17 +99,6 @@ function buildTree(accounts: RawAccount[]): TreeAccount[] {
   return walk(null, 0)
 }
 
-function flattenIds(nodes: TreeAccount[], collapsed: Set<number>): number[] {
-  const ids: number[] = []
-  for (const node of nodes) {
-    ids.push(node.id)
-    if (!collapsed.has(node.id)) {
-      ids.push(...flattenIds(node.children, collapsed))
-    }
-  }
-  return ids
-}
-
 // ---------------------------------------------------------------------------
 // Content Component
 // ---------------------------------------------------------------------------
@@ -127,7 +120,8 @@ function InternalAccountsContent() {
   const [deleteTarget, setDeleteTarget] = useState<RawAccount | null>(null)
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
   const load = useCallback(async () => {
@@ -154,7 +148,8 @@ function InternalAccountsContent() {
   useEffect(() => { load() }, [load])
 
   const tree = useMemo(() => buildTree(accounts), [accounts])
-  const sortableIds = useMemo(() => flattenIds(tree, collapsed), [tree, collapsed])
+  const visibleItems = useMemo(() => flattenTree(tree, collapsed), [tree, collapsed])
+  const sortableIds = useMemo(() => visibleItems.map((n) => n.id), [visibleItems])
 
   const handleToggle = (id: number) => {
     setCollapsed((prev) => {
@@ -169,31 +164,24 @@ function InternalAccountsContent() {
     const { active, over } = event
     if (!over || active.id === over.id) return
 
-    const activeId = active.id as number
-    const overId = over.id as number
+    const dragId = active.id as number
+    const dropId = over.id as number
 
-    const activeItem = accounts.find((a) => a.id === activeId)
-    const overItem = accounts.find((a) => a.id === overId)
-    if (!activeItem || !overItem) return
-
-    if (activeItem.parent_id !== overItem.parent_id) {
-      toast.error("같은 그룹 내에서만 순서를 변경할 수 있습니다")
-      return
-    }
-
-    if (ROOT_CODES.includes(activeItem.code)) return
+    const dragItem = accounts.find((a) => a.id === dragId)
+    const dropItem = accounts.find((a) => a.id === dropId)
+    if (!dragItem || !dropItem) return
+    if (dragItem.parent_id !== dropItem.parent_id) return
+    if (ROOT_CODES.includes(dragItem.code)) return
 
     const siblings = accounts
-      .filter((a) => a.parent_id === activeItem.parent_id)
+      .filter((a) => a.parent_id === dragItem.parent_id)
       .sort((a, b) => a.sort_order - b.sort_order)
 
-    const oldIndex = siblings.findIndex((s) => s.id === activeId)
-    const newIndex = siblings.findIndex((s) => s.id === overId)
+    const oldIndex = siblings.findIndex((s) => s.id === dragId)
+    const newIndex = siblings.findIndex((s) => s.id === dropId)
     if (oldIndex === -1 || newIndex === -1) return
 
-    const reordered = [...siblings]
-    const [moved] = reordered.splice(oldIndex, 1)
-    reordered.splice(newIndex, 0, moved)
+    const reordered = arrayMove(siblings, oldIndex, newIndex)
 
     const items = reordered.map((item, idx) => ({
       id: item.id,
@@ -201,6 +189,7 @@ function InternalAccountsContent() {
       parent_id: item.parent_id,
     }))
 
+    // Optimistic update
     const updatedAccounts = accounts.map((a) => {
       const updated = items.find((i) => i.id === a.id)
       return updated ? { ...a, sort_order: updated.sort_order } : a
@@ -369,10 +358,11 @@ function InternalAccountsContent() {
               sensors={sensors}
               collisionDetection={closestCenter}
               onDragEnd={handleDragEnd}
+              modifiers={[restrictToVerticalAxis]}
             >
               <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
                 <div className="space-y-0.5">
-                  {tree.map((node) => (
+                  {visibleItems.map((node) => (
                     <TreeAccountItem
                       key={node.id}
                       account={node}
