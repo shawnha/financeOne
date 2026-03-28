@@ -757,42 +757,54 @@ export default function TransactionsPage() {
           </div>
         )}
 
-        {/* Bulk Actions Bar */}
-        {someSelected && (
-          <div className="sticky bottom-0 flex items-center gap-3 px-4 py-3 rounded-md border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-            <span className="text-sm font-medium">{selectedIds.size}건 선택됨</span>
-            {bulkMapOpen ? (
-              <div className="flex items-center gap-2">
+      </div>
+
+      {/* Bulk Actions Bar — fixed bottom outside overflow container */}
+      {someSelected && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 rounded-xl border border-border bg-background/95 backdrop-blur-lg shadow-2xl supports-[backdrop-filter]:bg-background/80 animate-in slide-in-from-bottom-4 fade-in-0 duration-200">
+          <div className="flex items-center gap-2 pr-3 border-r border-border">
+            <div className="flex items-center justify-center h-6 min-w-[24px] rounded-md bg-primary text-primary-foreground text-xs font-bold px-1.5">
+              {selectedIds.size}
+            </div>
+            <span className="text-sm font-medium whitespace-nowrap">건 선택됨</span>
+          </div>
+          {bulkMapOpen ? (
+            <div className="flex items-center gap-2">
+              <div className="w-[220px]">
                 <AccountCombobox
                   options={internalAccounts}
                   value={bulkMapAccountId}
                   onChange={setBulkMapAccountId}
                   placeholder="내부계정 선택..."
+                  dropUp
                 />
-                <Button size="sm" onClick={handleBulkMap} disabled={bulkMapping || !bulkMapAccountId}>
-                  {bulkMapping ? "매핑 중..." : "적용"}
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => { setBulkMapOpen(false); setBulkMapAccountId("") }}>
-                  취소
-                </Button>
               </div>
-            ) : (
-              <>
-                <Button size="sm" variant="outline" onClick={() => setBulkMapOpen(true)}>
-                  일괄 매핑
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={handleBulkConfirm}
-                  disabled={bulkConfirming}
-                >
-                  {bulkConfirming ? "처리 중..." : "일괄 확정"}
-                </Button>
-              </>
-            )}
-          </div>
-        )}
-      </div>
+              <Button size="sm" onClick={handleBulkMap} disabled={bulkMapping || !bulkMapAccountId}>
+                {bulkMapping ? "매핑 중..." : "적용"}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { setBulkMapOpen(false); setBulkMapAccountId("") }}>
+                취소
+              </Button>
+            </div>
+          ) : (
+            <>
+              <Button size="sm" variant="outline" onClick={() => setBulkMapOpen(true)}>
+                일괄 매핑
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleBulkConfirm}
+                disabled={bulkConfirming}
+              >
+                {bulkConfirming ? "처리 중..." : "일괄 확정"}
+              </Button>
+            </>
+          )}
+          <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => setSelectedIds(new Set())}>
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
 
       {/* Detail Dialog */}
       <Dialog open={!!detailTx} onOpenChange={open => { if (!open) setDetailTx(null) }}>

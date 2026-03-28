@@ -22,6 +22,8 @@ interface AccountComboboxProps {
   compact?: boolean
   /** Open dropdown automatically on mount */
   autoOpen?: boolean
+  /** Open dropdown upward (for bottom bars) */
+  dropUp?: boolean
 }
 
 export function AccountCombobox({
@@ -32,6 +34,7 @@ export function AccountCombobox({
   showCode = false,
   compact = false,
   autoOpen = false,
+  dropUp = false,
 }: AccountComboboxProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
@@ -146,7 +149,10 @@ export function AccountCombobox({
 
       {/* Dropdown — fixed min-width so it doesn't get squished in table cells */}
       {open && (
-        <div className="absolute top-full left-0 mt-1 z-50 min-w-[260px] rounded-lg border border-border bg-popover shadow-xl animate-in fade-in-0 zoom-in-95 duration-150">
+        <div className={cn(
+          "absolute left-0 z-50 min-w-[260px] rounded-lg border border-border bg-popover shadow-xl animate-in fade-in-0 zoom-in-95 duration-150",
+          dropUp ? "bottom-full mb-1" : "top-full mt-1",
+        )}>
           {/* Search input */}
           <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
             <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
