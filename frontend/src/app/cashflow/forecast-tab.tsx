@@ -13,13 +13,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { fetchAPI } from "@/lib/api"
 import { formatByEntity } from "@/lib/format"
@@ -35,9 +28,10 @@ import {
   ComposedChart,
   ReferenceLine,
 } from "recharts"
-import { AlertCircle, RefreshCw, Plus, Download, ChevronDown, ChevronUp } from "lucide-react"
+import { AlertCircle, RefreshCw, Plus, Download } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MonthPicker } from "@/components/month-picker"
+import { AccountCombobox } from "@/components/account-combobox"
 
 // ── Types ──────────────────────────────────────────────
 
@@ -50,6 +44,9 @@ interface ForecastItem {
   actual_amount: number | null
   is_recurring: boolean
   note: string | null
+  internal_account_id: number | null
+  internal_account_name: string | null
+  actual_from_transactions: number | null
 }
 
 interface CardTiming {
@@ -74,6 +71,13 @@ interface ForecastData {
   actual_closing: number
   diff: number
   items: ForecastItem[]
+  over_budget: Array<{
+    category: string
+    internal_account_id: number
+    forecast: number
+    actual: number
+    diff_pct: number
+  }>
 }
 
 interface SummaryMonth {
@@ -89,8 +93,6 @@ interface SummaryData {
 
 type LoadState = "loading" | "empty" | "error" | "success"
 
-const CATEGORIES_IN = ["매출", "수수료환급", "이자", "기타입금"]
-const CATEGORIES_OUT = ["SaaS", "수수료", "임차료", "교통비", "접대비", "복리후생", "카드사용", "기타"]
 
 // ── KPI Card ───────────────────────────────────────────
 
@@ -116,6 +118,13 @@ function KPICard({
 
 // ── Forecast Input Modal ───────────────────────────────
 
+interface InternalAccount {
+  id: number
+  code: string
+  name: string
+  parent_id: number | null
+}
+
 function ForecastModal({
   entityId,
   year,
@@ -130,14 +139,25 @@ function ForecastModal({
   const [open, setOpen] = useState(false)
   const [type, setType] = useState<"in" | "out">("in")
   const [category, setCategory] = useState("")
+  const [selectedAccountId, setSelectedAccountId] = useState("")
+  const [internalAccounts, setInternalAccounts] = useState<InternalAccount[]>([])
   const [amount, setAmount] = useState("")
   const [recurring, setRecurring] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  const categories = type === "in" ? CATEGORIES_IN : CATEGORIES_OUT
+  // Fetch internal accounts on mount
+  useEffect(() => {
+    if (!entityId) return
+    fetchAPI<InternalAccount[]>(
+      `/internal-accounts?entity_id=${entityId}`,
+      { cache: "no-store" },
+    ).then(setInternalAccounts).catch(() => {})
+  }, [entityId])
+
+  const selectedAccount = internalAccounts.find((a) => String(a.id) === selectedAccountId)
 
   const handleSave = async () => {
-    if (!category || !amount) return
+    if ((!category && !selectedAccountId) || !amount) return
     setSaving(true)
     try {
       await fetchAPI("/forecasts", {
@@ -146,14 +166,16 @@ function ForecastModal({
           entity_id: Number(entityId),
           year,
           month,
-          category,
+          category: selectedAccount?.name ?? category,
           type,
           forecast_amount: parseFloat(amount),
           is_recurring: recurring,
+          internal_account_id: selectedAccountId ? Number(selectedAccountId) : null,
         }),
       })
       setOpen(false)
       setCategory("")
+      setSelectedAccountId("")
       setAmount("")
       setRecurring(false)
       onSaved()
@@ -182,23 +204,29 @@ function ForecastModal({
             <label className="text-xs text-muted-foreground">유형</label>
             <div className="flex gap-4 mt-1">
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="radio" checked={type === "in"} onChange={() => { setType("in"); setCategory("") }} className="accent-[hsl(var(--profit))]" />
+                <input type="radio" checked={type === "in"} onChange={() => { setType("in"); setCategory(""); setSelectedAccountId("") }} className="accent-[hsl(var(--profit))]" />
                 <span className="text-sm">입금</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="radio" checked={type === "out"} onChange={() => { setType("out"); setCategory("") }} className="accent-[hsl(var(--loss))]" />
+                <input type="radio" checked={type === "out"} onChange={() => { setType("out"); setCategory(""); setSelectedAccountId("") }} className="accent-[hsl(var(--loss))]" />
                 <span className="text-sm">출금</span>
               </label>
             </div>
           </div>
           <div>
-            <label className="text-xs text-muted-foreground">카테고리</label>
-            <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder="선택" /></SelectTrigger>
-              <SelectContent>
-                {categories.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <label className="text-xs text-muted-foreground">내부계정</label>
+            <div className="mt-1">
+              <AccountCombobox
+                options={internalAccounts}
+                value={selectedAccountId}
+                onChange={(v) => {
+                  setSelectedAccountId(v)
+                  if (v) setCategory("")
+                }}
+                placeholder="계정 선택"
+                showCode
+              />
+            </div>
           </div>
           <div>
             <label className="text-xs text-muted-foreground">금액</label>
@@ -216,7 +244,7 @@ function ForecastModal({
           </label>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="ghost" onClick={() => setOpen(false)}>취소</Button>
-            <Button onClick={handleSave} disabled={saving || !category || !amount}>
+            <Button onClick={handleSave} disabled={saving || (!category && !selectedAccountId) || !amount}>
               {saving ? "저장 중..." : "저장"}
             </Button>
           </div>
@@ -357,6 +385,23 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
         />
       </div>
 
+      {/* Over-budget warning */}
+      {data.over_budget && data.over_budget.length > 0 && (
+        <Card className="bg-red-500/10 border-red-500/30 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertCircle className="h-4 w-4 text-red-400" />
+            <span className="text-sm font-medium text-red-400">예산 초과 항목</span>
+          </div>
+          <div className="space-y-1">
+            {data.over_budget.map((item, i) => (
+              <p key={i} className="text-xs text-red-300">
+                {item.category}: 예상 {formatByEntity(item.forecast, entityId)} → 실제 {formatByEntity(item.actual, entityId)} (+{item.diff_pct}%)
+              </p>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {/* Forecast items list */}
       <Card className="overflow-hidden">
         <div className="px-4 py-3 flex items-center justify-between border-b border-border">
@@ -375,8 +420,9 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                 <th className="text-left px-4 py-2">유형</th>
                 <th className="text-left px-4 py-2">항목</th>
                 <th className="text-right px-4 py-2">예상 금액</th>
-                {showComparison && <th className="text-right px-4 py-2">실제 진행</th>}
-                <th className="text-right px-4 py-2">예상 잔고</th>
+                <th className="text-right px-4 py-2">실제</th>
+                <th className="text-right px-4 py-2">차이</th>
+                {showComparison && <th className="text-right px-4 py-2">예상 잔고</th>}
                 {showComparison && <th className="text-right px-4 py-2">실제 잔고</th>}
               </tr>
             </thead>
@@ -386,10 +432,13 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                 <td className="px-4 py-2.5"></td>
                 <td className="px-4 py-2.5 font-medium">시작 잔고</td>
                 <td className="px-4 py-2.5 text-right font-mono tabular-nums">—</td>
-                {showComparison && <td className="px-4 py-2.5"></td>}
-                <td className="px-4 py-2.5 text-right font-mono tabular-nums">
-                  {formatByEntity(data.opening_balance, entityId)}
-                </td>
+                <td className="px-4 py-2.5 text-right font-mono tabular-nums">—</td>
+                <td className="px-4 py-2.5 text-right font-mono tabular-nums">—</td>
+                {showComparison && (
+                  <td className="px-4 py-2.5 text-right font-mono tabular-nums">
+                    {formatByEntity(data.opening_balance, entityId)}
+                  </td>
+                )}
                 {showComparison && (
                   <td className="px-4 py-2.5 text-right font-mono tabular-nums text-[hsl(var(--profit))]">
                     {formatByEntity(data.opening_balance, entityId)}
@@ -398,36 +447,58 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
               </tr>
 
               {/* Forecast items */}
-              {data.items.map((item) => (
-                <tr key={item.id} className="border-t border-border hover:bg-muted/10">
-                  <td className="px-4 py-2.5">
-                    <Badge variant="outline" className={cn(
-                      "text-xs px-2 py-0.5",
-                      item.type === "in" ? "bg-green-500/12 text-green-400" : "bg-red-500/12 text-red-400",
-                    )}>
-                      {item.type === "in" ? "입금" : "출금"}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    {item.category}
-                    {item.subcategory && <span className="text-muted-foreground ml-1">({item.subcategory})</span>}
-                    {item.is_recurring && <span className="text-xs text-muted-foreground ml-2">🔄</span>}
-                  </td>
-                  <td className={cn(
-                    "px-4 py-2.5 text-right font-mono tabular-nums",
-                    item.type === "in" ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]",
-                  )}>
-                    {item.type === "in" ? "+" : "-"}{formatByEntity(item.forecast_amount, entityId)}
-                  </td>
-                  {showComparison && (
-                    <td className="px-4 py-2.5 text-right font-mono tabular-nums text-[hsl(var(--profit))]">
-                      {item.actual_amount != null ? formatByEntity(item.actual_amount, entityId) : "—"}
+              {data.items.map((item) => {
+                const actual = item.actual_from_transactions
+                const diff = actual != null ? actual - item.forecast_amount : null
+                const diffRatio = item.forecast_amount !== 0 && actual != null
+                  ? (actual / item.forecast_amount) * 100
+                  : null
+                const diffColor = diff == null
+                  ? ""
+                  : diffRatio != null && diffRatio > 110
+                    ? "text-[hsl(var(--loss))]"
+                    : "text-[hsl(var(--profit))]"
+
+                return (
+                  <tr key={item.id} className="border-t border-border hover:bg-muted/10">
+                    <td className="px-4 py-2.5">
+                      <Badge variant="outline" className={cn(
+                        "text-xs px-2 py-0.5",
+                        item.type === "in" ? "bg-green-500/12 text-green-400" : "bg-red-500/12 text-red-400",
+                      )}>
+                        {item.type === "in" ? "입금" : "출금"}
+                      </Badge>
                     </td>
-                  )}
-                  <td className="px-4 py-2.5 text-right font-mono tabular-nums text-[hsl(var(--warning))]">—</td>
-                  {showComparison && <td className="px-4 py-2.5"></td>}
-                </tr>
-              ))}
+                    <td className="px-4 py-2.5">
+                      {item.internal_account_name ?? item.category}
+                      {item.subcategory && <span className="text-muted-foreground ml-1">({item.subcategory})</span>}
+                      {item.is_recurring && <span className="text-xs text-muted-foreground ml-2">🔄</span>}
+                    </td>
+                    <td className={cn(
+                      "px-4 py-2.5 text-right font-mono tabular-nums",
+                      item.type === "in" ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]",
+                    )}>
+                      {item.type === "in" ? "+" : "-"}{formatByEntity(item.forecast_amount, entityId)}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-mono tabular-nums">
+                      {actual != null
+                        ? <span className={item.type === "in" ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]"}>
+                            {item.type === "in" ? "+" : "-"}{formatByEntity(actual, entityId)}
+                          </span>
+                        : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className={cn("px-4 py-2.5 text-right font-mono tabular-nums", diffColor)}>
+                      {diff != null
+                        ? <>{diff >= 0 ? "+" : ""}{formatByEntity(diff, entityId)}</>
+                        : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    {showComparison && (
+                      <td className="px-4 py-2.5 text-right font-mono tabular-nums text-[hsl(var(--warning))]">—</td>
+                    )}
+                    {showComparison && <td className="px-4 py-2.5"></td>}
+                  </tr>
+                )
+              })}
 
               {/* Timing adjustment row */}
               {data.card_timing.adjustment !== 0 && (
@@ -442,8 +513,9 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                   )}>
                     {data.card_timing.adjustment >= 0 ? "+" : ""}{formatByEntity(data.card_timing.adjustment, entityId)}
                   </td>
-                  {showComparison && <td className="px-4 py-2.5"></td>}
                   <td className="px-4 py-2.5"></td>
+                  <td className="px-4 py-2.5"></td>
+                  {showComparison && <td className="px-4 py-2.5"></td>}
                   {showComparison && <td className="px-4 py-2.5"></td>}
                 </tr>
               )}
@@ -453,10 +525,13 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                 <td className="px-4 py-2.5"></td>
                 <td className="px-4 py-2.5 font-medium">기말 잔고</td>
                 <td className="px-4 py-2.5 text-right font-mono tabular-nums">—</td>
-                {showComparison && <td className="px-4 py-2.5"></td>}
-                <td className="px-4 py-2.5 text-right font-mono tabular-nums text-[hsl(var(--warning))]">
-                  {formatByEntity(data.forecast_closing, entityId)}
-                </td>
+                <td className="px-4 py-2.5 text-right font-mono tabular-nums">—</td>
+                <td className="px-4 py-2.5 text-right font-mono tabular-nums">—</td>
+                {showComparison && (
+                  <td className="px-4 py-2.5 text-right font-mono tabular-nums text-[hsl(var(--warning))]">
+                    {formatByEntity(data.forecast_closing, entityId)}
+                  </td>
+                )}
                 {showComparison && (
                   <td className="px-4 py-2.5 text-right font-mono tabular-nums text-[hsl(var(--profit))]">
                     {formatByEntity(data.actual_closing, entityId)}
@@ -466,7 +541,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
 
               {data.items.length === 0 && (
                 <tr>
-                  <td colSpan={showComparison ? 6 : 4} className="px-4 py-8 text-center text-muted-foreground">
+                  <td colSpan={showComparison ? 7 : 5} className="px-4 py-8 text-center text-muted-foreground">
                     예상 항목을 추가해보세요
                   </td>
                 </tr>
