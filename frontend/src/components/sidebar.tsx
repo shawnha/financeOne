@@ -19,6 +19,7 @@ import {
   X,
   ArrowLeftRight,
   DollarSign,
+  Link2,
 } from "lucide-react"
 
 const sections = [
@@ -46,6 +47,7 @@ const sections = [
     items: [
       { label: "내부 계정", icon: BookOpen, href: "/accounts/internal", enabled: true },
       { label: "표준 계정", icon: BookOpen, href: "/accounts/standard", enabled: true },
+      { label: "매핑 규칙", icon: Link2, href: "/accounts/mapping-rules", enabled: true },
     ],
   },
   {
