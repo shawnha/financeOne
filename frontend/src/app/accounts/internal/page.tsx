@@ -167,19 +167,25 @@ function InternalAccountsContent() {
     [budgetYear, budgetMonth],
   )
 
+  // Track which accounts are recurring in the current month's forecasts
+  const [recurringMap, setRecurringMap] = useState<Record<number, boolean>>({})
+
   const loadBudgets = useCallback(async () => {
     if (!entityId) return
     try {
-      const data = await fetchAPI<{ forecasts: Array<{ internal_account_id: number | null; forecast_amount: number }> }>(
+      const data = await fetchAPI<{ forecasts: Array<{ internal_account_id: number | null; forecast_amount: number; is_recurring: boolean }> }>(
         `/forecasts?entity_id=${entityId}&year=${budgetYear}&month=${budgetMonth}`,
       )
-      const map: Record<number, number> = {}
+      const budgetMap: Record<number, number> = {}
+      const recMap: Record<number, boolean> = {}
       for (const f of data.forecasts) {
         if (f.internal_account_id) {
-          map[f.internal_account_id] = (map[f.internal_account_id] || 0) + f.forecast_amount
+          budgetMap[f.internal_account_id] = (budgetMap[f.internal_account_id] || 0) + f.forecast_amount
+          if (f.is_recurring) recMap[f.internal_account_id] = true
         }
       }
-      setBudgets(map)
+      setBudgets(budgetMap)
+      setRecurringMap(recMap)
     } catch {
       // silently ignore — budgets are optional
     }
@@ -210,21 +216,9 @@ function InternalAccountsContent() {
           is_recurring: budgetRecurring,
         }),
       })
-      // Toggle recurring if changed
-      const rawAccount = accounts.find((a) => a.id === budgetTarget.id)
-      if (rawAccount && rawAccount.is_recurring !== budgetRecurring) {
-        await fetchAPI(`/accounts/internal/${budgetTarget.id}`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            entity_id: Number(entityId),
-            is_recurring: budgetRecurring,
-          }),
-        })
-      }
       toast.success("예산이 저장되었습니다")
       setBudgetTarget(null)
       loadBudgets()
-      load()
     } catch {
       toast.error("예산 저장에 실패했습니다")
     } finally {
@@ -234,19 +228,29 @@ function InternalAccountsContent() {
 
   const handleToggleRecurring = async (account: TreeAccount) => {
     if (!entityId) return
+    const currentlyRecurring = recurringMap[account.id] ?? false
+    const newRecurring = !currentlyRecurring
     try {
-      await fetchAPI(`/accounts/internal/${account.id}`, {
-        method: "PATCH",
+      const isIncome = account.code.startsWith("INC")
+      const currentAmount = budgets[account.id] ?? 0
+      // Upsert forecast with toggled is_recurring for this specific month
+      await fetchAPI("/forecasts", {
+        method: "POST",
         body: JSON.stringify({
           entity_id: Number(entityId),
-          is_recurring: !account.is_recurring,
+          internal_account_id: account.id,
+          year: budgetYear,
+          month: budgetMonth,
+          category: account.name,
+          type: isIncome ? "in" : "out",
+          forecast_amount: currentAmount,
+          is_recurring: newRecurring,
         }),
       })
-      setAccounts((prev) =>
-        prev.map((a) => a.id === account.id ? { ...a, is_recurring: !account.is_recurring } : a)
-      )
+      setRecurringMap((prev) => ({ ...prev, [account.id]: newRecurring }))
+      toast.success(newRecurring ? "고정 설정됨" : "고정 해제됨")
     } catch {
-      toast.error("고정비 설정에 실패했습니다")
+      toast.error("고정 설정에 실패했습니다")
     }
   }
 
@@ -299,7 +303,7 @@ function InternalAccountsContent() {
   const handleBudgetClick = (account: TreeAccount) => {
     setBudgetTarget(account)
     setBudgetInput(budgets[account.id] != null ? Number(budgets[account.id]).toLocaleString() : "")
-    setBudgetRecurring(account.is_recurring)
+    setBudgetRecurring(recurringMap[account.id] ?? false)
   }
 
   const tree = useMemo(() => buildTree(accounts), [accounts])
@@ -558,6 +562,7 @@ function InternalAccountsContent() {
                       budgetAmount={aggregatedBudgets[node.id] ?? null}
                       onBudgetClick={handleBudgetClick}
                       onToggleRecurring={handleToggleRecurring}
+                      isRecurringOverride={recurringMap[node.id] ?? false}
                     />
                   ))}
                 </div>

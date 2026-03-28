@@ -31,6 +31,8 @@ interface TreeAccountItemProps {
   budgetAmount?: number | null
   onBudgetClick?: (account: TreeAccount) => void
   onToggleRecurring?: (account: TreeAccount) => void
+  /** Override is_recurring from forecast data (month-specific) */
+  isRecurringOverride?: boolean
 }
 
 export function TreeAccountItem({
@@ -43,6 +45,7 @@ export function TreeAccountItem({
   budgetAmount,
   onBudgetClick,
   onToggleRecurring,
+  isRecurringOverride,
 }: TreeAccountItemProps) {
   const {
     attributes,
@@ -63,6 +66,7 @@ export function TreeAccountItem({
 
   const hasChildren = account.children.length > 0
   const isCollapsed = collapsed.has(account.id)
+  const isRecurring = isRecurringOverride ?? account.is_recurring
 
   return (
     <div
@@ -121,14 +125,14 @@ export function TreeAccountItem({
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onToggleRecurring(account) }}
-          title={account.is_recurring ? "고정 해제" : "고정으로 설정"}
+          title={isRecurring ? "고정 해제" : "고정으로 설정"}
           className="shrink-0"
         >
           <Badge
             variant="outline"
             className={cn(
               "text-[10px] cursor-pointer transition-colors",
-              account.is_recurring
+              isRecurring
                 ? "border-blue-500/50 text-blue-400 bg-blue-500/10 hover:bg-blue-500/20"
                 : "border-muted-foreground/20 text-muted-foreground/40 hover:border-muted-foreground/40 hover:text-muted-foreground/60",
             )}
