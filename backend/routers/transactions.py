@@ -9,6 +9,7 @@ from psycopg2.extensions import connection as PgConnection
 from backend.database.connection import get_db
 from backend.utils.db import fetch_all
 from backend.services.bookkeeping_engine import create_journal_from_transaction
+from backend.services.mapping_service import learn_mapping_rule
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
@@ -148,6 +149,33 @@ def update_transaction(
         tx_id_out, is_confirmed, std_account_id = row[0], row[1], row[2]
         journal_entry_id = None
         journal_error = None
+
+        # 매핑 학습: internal_account_id 변경 시 mapping_rules UPSERT
+        if body.internal_account_id is not None:
+            # 거래의 counterparty + entity_id 조회
+            cur.execute("SELECT counterparty, entity_id FROM transactions WHERE id = %s", [tx_id])
+            tx_info = cur.fetchone()
+            if tx_info and tx_info[0]:
+                learn_mapping_rule(
+                    cur,
+                    entity_id=tx_info[1],
+                    counterparty=tx_info[0],
+                    internal_account_id=body.internal_account_id,
+                )
+
+            # 내부계정의 표준계정도 자동 설정
+            if body.standard_account_id is None:
+                cur.execute(
+                    "SELECT standard_account_id FROM internal_accounts WHERE id = %s",
+                    [body.internal_account_id],
+                )
+                std_row = cur.fetchone()
+                if std_row and std_row[0]:
+                    cur.execute(
+                        "UPDATE transactions SET standard_account_id = %s WHERE id = %s",
+                        [std_row[0], tx_id],
+                    )
+                    std_account_id = std_row[0]
 
         # 확정 + 매핑 완료 → 자동 분개 생성 (원자성)
         if is_confirmed and std_account_id:
