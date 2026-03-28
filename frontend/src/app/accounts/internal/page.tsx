@@ -597,16 +597,38 @@ function InternalAccountsContent() {
                   <SelectValue placeholder="카테고리 선택" />
                 </SelectTrigger>
                 <SelectContent>
-                  {accounts
-                    .filter((a) => a.id !== editingId)
-                    .map((a) => {
-                      const depth = accounts.find((p) => p.id === a.parent_id) ? 1 : 0
-                      return (
-                        <SelectItem key={a.id} value={String(a.id)}>
-                          {depth > 0 && "  └ "}{a.name}
-                        </SelectItem>
-                      )
-                    })}
+                  {(() => {
+                    // Build depth map for tree display
+                    const depthMap = new Map<number, number>()
+                    const getDepth = (id: number): number => {
+                      if (depthMap.has(id)) return depthMap.get(id)!
+                      const item = accounts.find((a) => a.id === id)
+                      if (!item || !item.parent_id) { depthMap.set(id, 0); return 0 }
+                      const d = getDepth(item.parent_id) + 1
+                      depthMap.set(id, d)
+                      return d
+                    }
+                    accounts.forEach((a) => getDepth(a.id))
+                    // Flatten tree in order
+                    const ordered: typeof accounts = []
+                    const addChildren = (parentId: number | null) => {
+                      accounts
+                        .filter((a) => (parentId === null ? !a.parent_id : a.parent_id === parentId))
+                        .forEach((a) => { ordered.push(a); addChildren(a.id) })
+                    }
+                    addChildren(null)
+                    return ordered
+                      .filter((a) => a.id !== editingId)
+                      .map((a) => {
+                        const depth = depthMap.get(a.id) ?? 0
+                        const prefix = depth === 0 ? "" : "│ ".repeat(depth - 1) + "└ "
+                        return (
+                          <SelectItem key={a.id} value={String(a.id)}>
+                            <span className="font-mono text-muted-foreground/40">{prefix}</span>{a.name}
+                          </SelectItem>
+                        )
+                      })
+                  })()}
                 </SelectContent>
               </Select>
             </div>
