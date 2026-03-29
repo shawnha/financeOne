@@ -1,0 +1,1115 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cashflow Redesign — Plan & Status</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a26;
+    --border: #2a2a3a;
+    --text: #e8e8f0;
+    --text-muted: #8888a0;
+    --green: #22c55e;
+    --green-dim: rgba(34,197,94,0.15);
+    --amber: #f59e0b;
+    --amber-dim: rgba(245,158,11,0.12);
+    --purple: #a855f7;
+    --purple-dim: rgba(168,85,247,0.12);
+    --red: #ef4444;
+    --blue: #3b82f6;
+    --blue-dim: rgba(59,130,246,0.12);
+    --indigo: #6366f1;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    line-height: 1.6;
+    padding: 40px 20px;
+  }
+
+  .container { max-width: 1200px; margin: 0 auto; }
+
+  /* Header */
+  .header {
+    text-align: center;
+    margin-bottom: 48px;
+    padding: 48px 32px;
+    background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+  .header::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle at 30% 50%, rgba(34,197,94,0.06) 0%, transparent 50%),
+                radial-gradient(circle at 70% 50%, rgba(168,85,247,0.06) 0%, transparent 50%);
+    pointer-events: none;
+  }
+  .header h1 {
+    font-size: 36px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #fff 0%, #aaa 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .header .subtitle {
+    color: var(--text-muted);
+    font-size: 16px;
+    font-weight: 400;
+  }
+  .header .date {
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  /* Progress Bar */
+  .progress-section {
+    margin-bottom: 40px;
+    background: var(--surface);
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    padding: 32px;
+  }
+  .progress-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  .progress-header h2 { font-size: 20px; font-weight: 700; }
+  .progress-pct {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--amber);
+  }
+  .progress-bar-track {
+    height: 12px;
+    background: var(--surface2);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    border-radius: 6px;
+    background: linear-gradient(90deg, var(--green), var(--amber));
+    transition: width 1s ease;
+  }
+  .progress-stats {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .progress-stat {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot-done { background: var(--green); }
+  .dot-partial { background: var(--amber); }
+  .dot-todo { background: var(--border); }
+
+  /* Phase History */
+  .phase-history {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 16px;
+    margin-bottom: 40px;
+  }
+  .phase-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+    position: relative;
+  }
+  .phase-card.completed {
+    border-color: rgba(34,197,94,0.3);
+  }
+  .phase-card.current {
+    border-color: rgba(245,158,11,0.5);
+    box-shadow: 0 0 20px rgba(245,158,11,0.08);
+  }
+  .phase-card.upcoming {
+    opacity: 0.5;
+  }
+  .phase-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    margin-bottom: 12px;
+  }
+  .badge-done { background: var(--green-dim); color: var(--green); }
+  .badge-active { background: var(--amber-dim); color: var(--amber); }
+  .badge-next { background: var(--surface2); color: var(--text-muted); }
+  .phase-card h3 { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+  .phase-card p { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
+  .phase-metrics {
+    margin-top: 12px;
+    display: flex;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .phase-metric {
+    background: var(--surface2);
+    padding: 4px 10px;
+    border-radius: 8px;
+  }
+
+  /* Task Section */
+  .section-title {
+    font-size: 24px;
+    font-weight: 800;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .section-title .line {
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* Task Grid */
+  .task-timeline {
+    position: relative;
+    margin-bottom: 48px;
+  }
+
+  .task-group-label {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+    margin-top: 32px;
+    padding-left: 4px;
+  }
+  .task-group-label:first-child { margin-top: 0; }
+
+  .task-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+    margin-bottom: 12px;
+    display: grid;
+    grid-template-columns: 56px 1fr auto;
+    gap: 20px;
+    align-items: start;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .task-card:hover {
+    border-color: var(--border);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  }
+  .task-card.done { border-left: 3px solid var(--green); }
+  .task-card.partial { border-left: 3px solid var(--amber); }
+  .task-card.todo { border-left: 3px solid var(--border); }
+
+  .task-num {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 18px;
+  }
+  .task-card.done .task-num { background: var(--green-dim); color: var(--green); }
+  .task-card.partial .task-num { background: var(--amber-dim); color: var(--amber); }
+  .task-card.todo .task-num { background: var(--surface2); color: var(--text-muted); }
+
+  .task-body h4 {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .task-body .desc {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+    line-height: 1.5;
+  }
+  .task-files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .file-tag {
+    font-size: 11px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: var(--surface2);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+  .file-tag.new { border-color: rgba(34,197,94,0.3); color: var(--green); }
+  .file-tag.modify { border-color: rgba(245,158,11,0.3); color: var(--amber); }
+  .file-tag.exists { border-color: rgba(59,130,246,0.3); color: var(--blue); }
+
+  .task-status {
+    text-align: right;
+    min-width: 100px;
+  }
+  .status-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .status-done { background: var(--green-dim); color: var(--green); }
+  .status-partial { background: var(--amber-dim); color: var(--amber); }
+  .status-todo { background: var(--surface2); color: var(--text-muted); }
+
+  .task-substeps {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .substep {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-muted);
+    padding: 3px 0;
+  }
+  .substep .check {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  .check-done { background: var(--green-dim); color: var(--green); }
+  .check-todo { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+
+  /* Parallel indicator */
+  .parallel-group {
+    background: var(--surface);
+    border: 2px dashed rgba(168,85,247,0.3);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 12px;
+  }
+  .parallel-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--purple);
+    margin-bottom: 16px;
+    padding: 4px 12px;
+    background: var(--purple-dim);
+    border-radius: 20px;
+  }
+
+  /* Review Section */
+  .review-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin-bottom: 40px;
+  }
+  .review-card {
+    background: var(--surface);
+    border: 1px solid rgba(34,197,94,0.2);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+  }
+  .review-card .icon { font-size: 28px; margin-bottom: 8px; }
+  .review-card h4 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .review-card .result { font-size: 13px; color: var(--green); font-weight: 600; }
+  .review-card .detail { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+  /* Key Decisions */
+  .decisions {
+    margin-bottom: 40px;
+  }
+  .decision-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .decision-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: var(--green-dim);
+    color: var(--green);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .decision-text {
+    font-size: 14px;
+    flex: 1;
+  }
+  .decision-text strong { color: var(--text); font-weight: 600; }
+  .decision-text span { color: var(--text-muted); }
+
+  /* API Table */
+  .api-section { margin-bottom: 40px; }
+  .api-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .api-table th {
+    text-align: left;
+    padding: 12px 16px;
+    background: var(--surface2);
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+  }
+  .api-table th:first-child { border-radius: 10px 0 0 0; }
+  .api-table th:last-child { border-radius: 0 10px 0 0; }
+  .api-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .api-table tr:last-child td { border-bottom: none; }
+  .api-table tbody {
+    background: var(--surface);
+  }
+  .method {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: monospace;
+  }
+  .method-get { background: var(--green-dim); color: var(--green); }
+  .method-post { background: var(--blue-dim); color: var(--blue); }
+  .method-put { background: var(--amber-dim); color: var(--amber); }
+  .method-delete { background: rgba(239,68,68,0.15); color: var(--red); }
+  .endpoint {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    color: var(--text);
+  }
+
+  /* Architecture Diagram */
+  .arch-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    margin-bottom: 40px;
+    overflow-x: auto;
+  }
+  .arch-section h3 {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 24px;
+  }
+  .arch-diagram {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    align-items: center;
+  }
+  .arch-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .arch-box {
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+    min-width: 140px;
+    border: 1px solid;
+  }
+  .arch-fe { background: var(--blue-dim); border-color: rgba(59,130,246,0.3); color: var(--blue); }
+  .arch-be { background: var(--green-dim); border-color: rgba(34,197,94,0.3); color: var(--green); }
+  .arch-db { background: var(--purple-dim); border-color: rgba(168,85,247,0.3); color: var(--purple); }
+  .arch-arrow {
+    font-size: 20px;
+    color: var(--text-muted);
+    text-align: center;
+  }
+
+  /* Formula Box */
+  .formula-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+    margin-bottom: 40px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 14px;
+    line-height: 2;
+  }
+  .formula-box .title {
+    font-family: 'Inter', sans-serif;
+    font-weight: 700;
+    font-size: 16px;
+    margin-bottom: 16px;
+    color: var(--amber);
+  }
+  .formula-line { color: var(--text-muted); }
+  .formula-line .highlight { color: var(--text); font-weight: 600; }
+  .formula-line .green { color: var(--green); }
+  .formula-line .red { color: var(--red); }
+  .formula-line .amber { color: var(--amber); }
+  .formula-line .purple { color: var(--purple); }
+
+  /* Footer */
+  .footer {
+    text-align: center;
+    padding: 32px;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .task-card { grid-template-columns: 1fr; }
+    .task-num { width: 36px; height: 36px; font-size: 14px; }
+    .task-status { text-align: left; }
+    .phase-history { grid-template-columns: 1fr; }
+    .header h1 { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <h1>Cashflow Redesign Plan</h1>
+    <div class="subtitle">FinanceOne v2 &mdash; 현금흐름 페이지 3탭 재설계</div>
+    <div class="date">Last updated: 2026-03-26 &middot; Branch: deploy-production</div>
+  </div>
+
+  <!-- Overall Project Progress -->
+  <div class="section-title">
+    <span>Project Phases</span>
+    <div class="line"></div>
+  </div>
+
+  <div class="phase-history">
+    <div class="phase-card completed">
+      <span class="phase-badge badge-done">Completed</span>
+      <h3>Phase 1 &mdash; Foundation</h3>
+      <p>대시보드, 거래내역, 업로드, 현금흐름, Slack 매칭, Excel 파서</p>
+      <div class="phase-metrics">
+        <span class="phase-metric">52 files</span>
+        <span class="phase-metric">+8,186 lines</span>
+        <span class="phase-metric">v0.1.0</span>
+      </div>
+    </div>
+    <div class="phase-card completed">
+      <span class="phase-badge badge-done">Completed</span>
+      <h3>Phase 2 &mdash; Bookkeeping</h3>
+      <p>복식부기 엔진, 재무제표 5종, Mercury API, Codef 샌드박스</p>
+      <div class="phase-metrics">
+        <span class="phase-metric">17 files</span>
+        <span class="phase-metric">+3,445 lines</span>
+        <span class="phase-metric">v0.2.0</span>
+      </div>
+    </div>
+    <div class="phase-card completed">
+      <span class="phase-badge badge-done">Completed</span>
+      <h3>Phase 3 &mdash; Consolidation</h3>
+      <p>환율 서비스, GAAP 변환, CTA 엔진, 연결재무제표</p>
+      <div class="phase-metrics">
+        <span class="phase-metric">17 files</span>
+        <span class="phase-metric">+1,440 lines</span>
+        <span class="phase-metric">v0.3.0</span>
+      </div>
+    </div>
+    <div class="phase-card current">
+      <span class="phase-badge badge-active">In Progress</span>
+      <h3>Cashflow Redesign</h3>
+      <p>현금흐름 3탭 재설계 (실제/예상/비용), 기초잔고 역산, 시차 보정</p>
+      <div class="phase-metrics">
+        <span class="phase-metric">8 Tasks</span>
+        <span class="phase-metric">BE 40% done</span>
+      </div>
+    </div>
+    <div class="phase-card upcoming">
+      <span class="phase-badge badge-next">Next</span>
+      <h3>Phase 4 &mdash; Automation</h3>
+      <p>Obsidian + NotebookLM, 월별 브리핑, 인증 미들웨어</p>
+      <div class="phase-metrics">
+        <span class="phase-metric">Planned</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Review Status -->
+  <div class="section-title">
+    <span>Design Reviews &mdash; All Cleared</span>
+    <div class="line"></div>
+  </div>
+
+  <div class="review-grid">
+    <div class="review-card">
+      <div class="icon">&#x1F3AF;</div>
+      <h4>CEO Review</h4>
+      <div class="result">CLEAR</div>
+      <div class="detail">1 round &middot; 2026-03-24</div>
+    </div>
+    <div class="review-card">
+      <div class="icon">&#x2699;&#xFE0F;</div>
+      <h4>Eng Review</h4>
+      <div class="result">CLEAR (3 rounds)</div>
+      <div class="detail">2026-03-26 &middot; commit 40688ff</div>
+    </div>
+    <div class="review-card">
+      <div class="icon">&#x1F3A8;</div>
+      <h4>Design Review</h4>
+      <div class="result">5/10 &rarr; 9/10</div>
+      <div class="detail">8 decisions confirmed</div>
+    </div>
+    <div class="review-card">
+      <div class="icon">&#x1F50D;</div>
+      <h4>Outside Voices</h4>
+      <div class="result">CLEAR</div>
+      <div class="detail">Codex + Claude subagent</div>
+    </div>
+  </div>
+
+  <!-- Key Decisions -->
+  <div class="section-title">
+    <span>Key Decisions from Review</span>
+    <div class="line"></div>
+  </div>
+
+  <div class="decisions">
+    <div class="decision-item">
+      <div class="decision-num">1</div>
+      <div class="decision-text"><strong>Font:</strong> <span>Geist/Geist Mono (IBM Plex 에서 전환, MASTER.md + Tailwind 업데이트 완료)</span></div>
+    </div>
+    <div class="decision-item">
+      <div class="decision-num">2</div>
+      <div class="decision-text"><strong>Month Navigation:</strong> <span>스크롤 가능한 필 스트립, 데이터 있는 월만 표시, /summary API에서 추출</span></div>
+    </div>
+    <div class="decision-item">
+      <div class="decision-num">3</div>
+      <div class="decision-text"><strong>card_settings:</strong> <span>별도 Task 2.5로 분리 (DB 테이블 + CRUD API + cost tab 슬라이드오버)</span></div>
+    </div>
+    <div class="decision-item">
+      <div class="decision-num">4</div>
+      <div class="decision-text"><strong>Forecast Input:</strong> <span>Forecast 탭 내 모달 (month/type/category/amount/recurring)</span></div>
+    </div>
+    <div class="decision-item">
+      <div class="decision-num">5</div>
+      <div class="decision-text"><strong>Interaction States:</strong> <span>모든 탭별 LOADING/EMPTY/ERROR/SUCCESS/PARTIAL 정의 완료</span></div>
+    </div>
+    <div class="decision-item">
+      <div class="decision-num">6</div>
+      <div class="decision-text"><strong>Responsive:</strong> <span>3 breakpoints (lg 1024+ / md 768 / sm 375)</span></div>
+    </div>
+    <div class="decision-item">
+      <div class="decision-num">7</div>
+      <div class="decision-text"><strong>Formula Display:</strong> <span>접을 수 있는 "계산 방법" 섹션 (기본: 접힘)</span></div>
+    </div>
+    <div class="decision-item">
+      <div class="decision-num">8</div>
+      <div class="decision-text"><strong>Table Sort:</strong> <span>시간순 고정 (running balance 때문에 정렬 불가)</span></div>
+    </div>
+  </div>
+
+  <!-- Formula -->
+  <div class="formula-box">
+    <div class="title">Forecast Closing Balance Formula</div>
+    <div class="formula-line">
+      <span class="highlight">예상 기말 잔고</span> =
+    </div>
+    <div class="formula-line">
+      &nbsp;&nbsp;<span class="green">전월 확정 기말</span>
+    </div>
+    <div class="formula-line">
+      &nbsp;&nbsp;+ <span class="green">예상 입금</span> <span style="color:var(--text-muted)">(forecasts type='in')</span>
+    </div>
+    <div class="formula-line">
+      &nbsp;&nbsp;- <span class="red">예상 출금</span> <span style="color:var(--text-muted)">(forecasts type='out')</span>
+    </div>
+    <div class="formula-line">
+      &nbsp;&nbsp;- <span class="purple">예상 카드 사용</span> <span style="color:var(--text-muted)">(forecasts type='card', fallback: 전월 실적)</span>
+    </div>
+    <div class="formula-line">
+      &nbsp;&nbsp;+ <span class="amber">시차 보정</span> <span style="color:var(--text-muted)">(전월 카드 사용 확정 - 당월 카드 사용 예상)</span>
+    </div>
+  </div>
+
+  <!-- Architecture -->
+  <div class="arch-section">
+    <h3>Architecture Overview</h3>
+    <div class="arch-diagram">
+      <div class="arch-row">
+        <div class="arch-box arch-fe">page.tsx<br><small>3-Tab Layout</small></div>
+      </div>
+      <div class="arch-arrow">&darr;</div>
+      <div class="arch-row">
+        <div class="arch-box arch-fe">actual-tab.tsx</div>
+        <div class="arch-box arch-fe">forecast-tab.tsx</div>
+        <div class="arch-box arch-fe">expense-tab.tsx</div>
+      </div>
+      <div class="arch-arrow">&darr; API Calls</div>
+      <div class="arch-row">
+        <div class="arch-box arch-be">cashflow.py<br><small>Router (3 endpoints)</small></div>
+        <div class="arch-box arch-be">forecasts.py<br><small>CRUD Router</small></div>
+        <div class="arch-box arch-be">card_settings.py<br><small>Settings Router</small></div>
+      </div>
+      <div class="arch-arrow">&darr;</div>
+      <div class="arch-row">
+        <div class="arch-box arch-be">cashflow_service.py<br><small>Business Logic</small></div>
+      </div>
+      <div class="arch-arrow">&darr;</div>
+      <div class="arch-row">
+        <div class="arch-box arch-db">transactions</div>
+        <div class="arch-box arch-db">balance_snapshots</div>
+        <div class="arch-box arch-db">forecasts</div>
+        <div class="arch-box arch-db">card_settings</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cashflow Redesign Progress -->
+  <div class="section-title">
+    <span>Implementation Progress</span>
+    <div class="line"></div>
+  </div>
+
+  <div class="progress-section">
+    <div class="progress-header">
+      <h2>Cashflow Redesign Tasks</h2>
+      <div class="progress-pct">37.5%</div>
+    </div>
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" style="width: 37.5%"></div>
+    </div>
+    <div class="progress-stats">
+      <div class="progress-stat"><div class="dot dot-done"></div>Completed: 3 tasks (T1, T2, T2.5)</div>
+      <div class="progress-stat"><div class="dot dot-partial"></div>Partial: 0 tasks</div>
+      <div class="progress-stat"><div class="dot dot-todo"></div>Remaining: 5 tasks (T3~T8)</div>
+    </div>
+  </div>
+
+  <!-- Task List -->
+  <div class="task-timeline">
+
+    <div class="task-group-label">Backend Tasks</div>
+
+    <!-- Task 1 -->
+    <div class="task-card done">
+      <div class="task-num">1</div>
+      <div class="task-body">
+        <h4>기초잔고 역산 + 실제 현금흐름 API + 카드비용 API</h4>
+        <div class="desc">
+          Opening balance 역산 로직, GET /api/cashflow/actual (일별 거래 + 잔고),
+          GET /api/cashflow/summary (월별 요약, 차트용), GET /api/cashflow/card-expense (카드/회원 드릴다운).
+          card_settings CREATE TABLE + seed 포함.
+        </div>
+        <div class="task-files">
+          <span class="file-tag exists">cashflow_service.py</span>
+          <span class="file-tag exists">cashflow.py</span>
+          <span class="file-tag modify">main.py</span>
+          <span class="file-tag modify">schema.sql</span>
+          <span class="file-tag exists">test_cashflow.py</span>
+        </div>
+        <div class="task-substeps">
+          <div class="substep"><span class="check check-done">&#10003;</span> cashflow_service.py 생성 (calc_opening_balance, daily balances, monthly summary)</div>
+          <div class="substep"><span class="check check-done">&#10003;</span> cashflow.py 라우터 (3 endpoints)</div>
+          <div class="substep"><span class="check check-done">&#10003;</span> main.py 라우터 등록</div>
+          <div class="substep"><span class="check check-done">&#10003;</span> card_settings 테이블 + schema.sql</div>
+          <div class="substep"><span class="check check-done">&#10003;</span> test_cashflow.py 테스트</div>
+        </div>
+      </div>
+      <div class="task-status">
+        <span class="status-badge status-done">Done</span>
+      </div>
+    </div>
+
+    <!-- Task 2 -->
+    <div class="task-card done">
+      <div class="task-num">2</div>
+      <div class="task-body">
+        <h4>Forecasts CRUD API</h4>
+        <div class="desc">
+          GET/POST/PUT/DELETE /api/forecasts. type='in'/'out'/'card' 구분, is_recurring 지원.
+        </div>
+        <div class="task-files">
+          <span class="file-tag exists">forecasts.py</span>
+          <span class="file-tag modify">main.py</span>
+        </div>
+        <div class="task-substeps">
+          <div class="substep"><span class="check check-done">&#10003;</span> forecasts.py CRUD 라우터</div>
+          <div class="substep"><span class="check check-done">&#10003;</span> main.py 라우터 등록</div>
+        </div>
+      </div>
+      <div class="task-status">
+        <span class="status-badge status-done">Done</span>
+      </div>
+    </div>
+
+    <!-- Task 2.5 -->
+    <div class="task-card done">
+      <div class="task-num">2.5</div>
+      <div class="task-body">
+        <h4>Card Settings CRUD API</h4>
+        <div class="desc">
+          card_settings 테이블 CRUD API. 카드사명, 결제일(1-31), 활성화 토글. Cost 탭 슬라이드오버에서 사용.
+        </div>
+        <div class="task-files">
+          <span class="file-tag exists">card_settings.py</span>
+          <span class="file-tag modify">main.py</span>
+        </div>
+        <div class="task-substeps">
+          <div class="substep"><span class="check check-done">&#10003;</span> card_settings.py CRUD 라우터</div>
+          <div class="substep"><span class="check check-done">&#10003;</span> main.py 라우터 등록</div>
+        </div>
+      </div>
+      <div class="task-status">
+        <span class="status-badge status-done">Done</span>
+      </div>
+    </div>
+
+    <!-- Task 3 -->
+    <div class="task-card todo">
+      <div class="task-num">3</div>
+      <div class="task-body">
+        <h4>Forecast Cashflow API (시차 보정)</h4>
+        <div class="desc">
+          GET /api/cashflow/forecast. 예상 기말 잔고 계산, 카드 결제 시차 보정, 예상 vs 실제 비교.
+          card_settings에서 카드별 전월/당월 사용액 동적 조회.
+        </div>
+        <div class="task-files">
+          <span class="file-tag modify">cashflow_service.py</span>
+          <span class="file-tag modify">cashflow.py</span>
+          <span class="file-tag modify">test_cashflow.py</span>
+        </div>
+        <div class="task-substeps">
+          <div class="substep"><span class="check check-todo"></span> forecast closing 계산 로직 (cashflow_service.py)</div>
+          <div class="substep"><span class="check check-todo"></span> 시차 보정 카드별 분리</div>
+          <div class="substep"><span class="check check-todo"></span> /api/cashflow/forecast endpoint</div>
+          <div class="substep"><span class="check check-todo"></span> 테스트: positive/negative/zero 보정</div>
+        </div>
+      </div>
+      <div class="task-status">
+        <span class="status-badge status-todo">Todo</span>
+      </div>
+    </div>
+
+    <div class="task-group-label">Frontend Tasks (Parallel)</div>
+
+    <!-- Parallel Group -->
+    <div class="parallel-group">
+      <div class="parallel-label">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        Tasks 4-6 can run in parallel
+      </div>
+
+      <!-- Task 4 -->
+      <div class="task-card todo">
+        <div class="task-num">4</div>
+        <div class="task-body">
+          <h4>3-Tab Layout + Actual Cashflow Tab</h4>
+          <div class="desc">
+            page.tsx 교체 (3탭 레이아웃, 월 네비게이션), actual-tab.tsx (ComposedChart, 4 KPI, 거래 테이블, 3-level 드릴다운).
+          </div>
+          <div class="task-files">
+            <span class="file-tag modify">cashflow/page.tsx</span>
+            <span class="file-tag new">actual-tab.tsx</span>
+          </div>
+          <div class="task-substeps">
+            <div class="substep"><span class="check check-todo"></span> 3탭 레이아웃 + 탭 전환</div>
+            <div class="substep"><span class="check check-todo"></span> 월 네비게이션 pill strip</div>
+            <div class="substep"><span class="check check-todo"></span> ComposedChart (deposit bar + withdrawal bar + closing line)</div>
+            <div class="substep"><span class="check check-todo"></span> 4 KPI cards (opening/deposits/withdrawals/closing)</div>
+            <div class="substep"><span class="check check-todo"></span> 5-column transaction table</div>
+            <div class="substep"><span class="check check-todo"></span> 3-level card drilldown</div>
+            <div class="substep"><span class="check check-todo"></span> Interaction states (loading/empty/error/success/partial)</div>
+            <div class="substep"><span class="check check-todo"></span> Responsive 3 breakpoints</div>
+          </div>
+        </div>
+        <div class="task-status">
+          <span class="status-badge status-todo">Todo</span>
+        </div>
+      </div>
+
+      <!-- Task 5 -->
+      <div class="task-card todo">
+        <div class="task-num">5</div>
+        <div class="task-body">
+          <h4>Forecast Cashflow Tab</h4>
+          <div class="desc">
+            forecast-tab.tsx: AreaChart (amber dashed + green solid + purple markers),
+            4 KPI, 비교 토글 테이블, 계산 방법 접기, 비교 박스 2개, 예상 입력 모달.
+          </div>
+          <div class="task-files">
+            <span class="file-tag new">forecast-tab.tsx</span>
+          </div>
+          <div class="task-substeps">
+            <div class="substep"><span class="check check-todo"></span> AreaChart (forecast vs actual)</div>
+            <div class="substep"><span class="check check-todo"></span> 4 KPI cards</div>
+            <div class="substep"><span class="check check-todo"></span> "실제 비교 펼치기" 토글 (4col &rarr; 7col)</div>
+            <div class="substep"><span class="check check-todo"></span> Formula collapsible section</div>
+            <div class="substep"><span class="check check-todo"></span> 2 comparison boxes (card timing + forecast vs actual)</div>
+            <div class="substep"><span class="check check-todo"></span> Forecast input modal (month/type/category/amount/recurring)</div>
+            <div class="substep"><span class="check check-todo"></span> Interaction states + responsive</div>
+          </div>
+        </div>
+        <div class="task-status">
+          <span class="status-badge status-todo">Todo</span>
+        </div>
+      </div>
+
+      <!-- Task 6 -->
+      <div class="task-card todo">
+        <div class="task-num">6</div>
+        <div class="task-body">
+          <h4>Cost Tab + Card Settings Slide-Over</h4>
+          <div class="desc">
+            expense-tab.tsx: Stacked BarChart (카테고리별), 4 KPI, 카드 드릴다운,
+            카드 설정 슬라이드오버 (400px right sheet).
+          </div>
+          <div class="task-files">
+            <span class="file-tag new">expense-tab.tsx</span>
+          </div>
+          <div class="task-substeps">
+            <div class="substep"><span class="check check-todo"></span> Stacked BarChart by category</div>
+            <div class="substep"><span class="check check-todo"></span> 4 KPI cards (total/active cards/pre-payment/post-payment)</div>
+            <div class="substep"><span class="check check-todo"></span> Card drilldown table (3-level accordion)</div>
+            <div class="substep"><span class="check check-todo"></span> Card settings slide-over (name/payment_day/active)</div>
+            <div class="substep"><span class="check check-todo"></span> Interaction states + responsive</div>
+          </div>
+        </div>
+        <div class="task-status">
+          <span class="status-badge status-todo">Todo</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="task-group-label">Integration &amp; Verification</div>
+
+    <!-- Task 7 -->
+    <div class="task-card todo">
+      <div class="task-num">7</div>
+      <div class="task-body">
+        <h4>Dashboard Cleanup + Integration Tests</h4>
+        <div class="desc">
+          dashboard.py에서 기존 cashflow endpoint 제거, 전체 탭 통합 테스트,
+          edge case 커버리지 확인.
+        </div>
+        <div class="task-files">
+          <span class="file-tag modify">dashboard.py</span>
+          <span class="file-tag modify">test_cashflow.py</span>
+        </div>
+        <div class="task-substeps">
+          <div class="substep"><span class="check check-todo"></span> dashboard.py cashflow endpoint 정리</div>
+          <div class="substep"><span class="check check-todo"></span> 3탭 통합 API 테스트</div>
+          <div class="substep"><span class="check check-todo"></span> Edge case: 0 transaction month, duplicate exclusion, card refund</div>
+        </div>
+      </div>
+      <div class="task-status">
+        <span class="status-badge status-todo">Todo</span>
+      </div>
+    </div>
+
+    <!-- Task 8 -->
+    <div class="task-card todo">
+      <div class="task-num">8</div>
+      <div class="task-body">
+        <h4>E2E Real Data Validation</h4>
+        <div class="desc">
+          실제 거래 데이터로 전체 플로우 검증. 26개 코드 패스, 21개 갭 확인.
+          0-transaction months, duplicates, refunds, first month, forecast duplicates.
+        </div>
+        <div class="task-files">
+          <span class="file-tag modify">All tabs</span>
+          <span class="file-tag modify">All APIs</span>
+        </div>
+        <div class="task-substeps">
+          <div class="substep"><span class="check check-todo"></span> 26 code path 검증</div>
+          <div class="substep"><span class="check check-todo"></span> 실제 Excel 업로드 &rarr; 3탭 데이터 확인</div>
+          <div class="substep"><span class="check check-todo"></span> 예상 vs 실제 비교 정확도</div>
+          <div class="substep"><span class="check check-todo"></span> 시차 보정 실제 카드 데이터 검증</div>
+        </div>
+      </div>
+      <div class="task-status">
+        <span class="status-badge status-todo">Todo</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- API Endpoints -->
+  <div class="section-title">
+    <span>API Endpoints</span>
+    <div class="line"></div>
+  </div>
+
+  <div class="api-section">
+    <table class="api-table">
+      <thead>
+        <tr>
+          <th>Method</th>
+          <th>Endpoint</th>
+          <th>Description</th>
+          <th>Task</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td class="endpoint">/api/cashflow/actual</td>
+          <td>Bank transactions daily + running balance</td>
+          <td>T1</td>
+          <td><span class="status-badge status-done">Done</span></td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td class="endpoint">/api/cashflow/summary</td>
+          <td>Monthly summary (chart data)</td>
+          <td>T1</td>
+          <td><span class="status-badge status-done">Done</span></td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td class="endpoint">/api/cashflow/card-expense</td>
+          <td>Card detail (card/member drilldown)</td>
+          <td>T1</td>
+          <td><span class="status-badge status-done">Done</span></td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td class="endpoint">/api/cashflow/forecast</td>
+          <td>Forecast cashflow + timing adjustment</td>
+          <td>T3</td>
+          <td><span class="status-badge status-todo">Todo</span></td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td class="endpoint">/api/forecasts</td>
+          <td>List forecasts (entity, year, month)</td>
+          <td>T2</td>
+          <td><span class="status-badge status-done">Done</span></td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td class="endpoint">/api/forecasts</td>
+          <td>Create forecast item</td>
+          <td>T2</td>
+          <td><span class="status-badge status-done">Done</span></td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td class="endpoint">/api/forecasts/{id}</td>
+          <td>Update forecast item</td>
+          <td>T2</td>
+          <td><span class="status-badge status-done">Done</span></td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td class="endpoint">/api/forecasts/{id}</td>
+          <td>Delete forecast item</td>
+          <td>T2</td>
+          <td><span class="status-badge status-done">Done</span></td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td class="endpoint">/api/card-settings</td>
+          <td>List card settings</td>
+          <td>T2.5</td>
+          <td><span class="status-badge status-done">Done</span></td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td class="endpoint">/api/card-settings</td>
+          <td>Add card setting</td>
+          <td>T2.5</td>
+          <td><span class="status-badge status-done">Done</span></td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td class="endpoint">/api/card-settings/{id}</td>
+          <td>Update card setting</td>
+          <td>T2.5</td>
+          <td><span class="status-badge status-done">Done</span></td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td class="endpoint">/api/card-settings/{id}</td>
+          <td>Delete card setting</td>
+          <td>T2.5</td>
+          <td><span class="status-badge status-done">Done</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    FinanceOne v2 &mdash; 한아원 그룹 회계 BPO 시스템 &middot; Generated 2026-03-26
+  </div>
+
+</div>
+</body>
+</html>

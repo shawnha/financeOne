@@ -1,0 +1,44 @@
+{
+  "date": "2026-03-26",
+  "window": "7d",
+  "metrics": {
+    "commits": 34,
+    "contributors": 1,
+    "prs_merged": 4,
+    "insertions": 31210,
+    "deletions": 1048,
+    "net_loc": 30162,
+    "test_loc": 1400,
+    "test_ratio": 0.045,
+    "active_days": 2,
+    "sessions": 3,
+    "deep_sessions": 3,
+    "avg_session_minutes": 170,
+    "loc_per_session_hour": 4300,
+    "feat_pct": 0.32,
+    "fix_pct": 0.24,
+    "peak_hour": 21,
+    "ai_assisted_commits": 4
+  },
+  "authors": {
+    "shwn9556": { "commits": 30, "insertions": 24963, "deletions": 900, "test_ratio": 0.045, "top_area": "backend/" },
+    "shawnha": { "commits": 4, "insertions": 6216, "deletions": 237, "test_ratio": 0.05, "top_area": "backend/services/" }
+  },
+  "version_range": ["0.1.0", "0.5.0"],
+  "streak_days": 2,
+  "tweetable": "Week of Mar 19: 34 commits, 31.2k LOC, 4 PRs, P0→P4+cashflow redesign, 70 tests, peak: 9pm | Streak: 2d",
+  "test_health": {
+    "total_test_files": 11,
+    "tests_added_this_period": 56,
+    "regression_test_commits": 0,
+    "test_files_changed": 8
+  },
+  "skill_usage": {
+    "plan-eng-review": 3,
+    "plan-design-review": 2,
+    "plan-ceo-review": 1,
+    "qa": 1,
+    "ship": 1,
+    "retro": 1
+  }
+}
