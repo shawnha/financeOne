@@ -36,6 +36,7 @@ def list_slack_messages(
     entity_id: Optional[int] = None,
     is_completed: Optional[bool] = None,
     is_cancelled: Optional[bool] = None,
+    month: Optional[str] = Query(None, description="YYYY-MM format, e.g. 2026-03"),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     conn: PgConnection = Depends(get_db),
@@ -55,6 +56,22 @@ def list_slack_messages(
     if is_cancelled is not None:
         where.append("sm.is_cancelled = %s")
         params.append(is_cancelled)
+
+    if month:
+        # month = "2026-03" → ts 범위 필터 (unix timestamp 기반)
+        try:
+            year_val, month_val = month.split("-")
+            month_start = datetime(int(year_val), int(month_val), 1)
+            if int(month_val) == 12:
+                month_end = datetime(int(year_val) + 1, 1, 1)
+            else:
+                month_end = datetime(int(year_val), int(month_val) + 1, 1)
+            where.append("CAST(sm.ts AS DOUBLE PRECISION) >= %s")
+            params.append(month_start.timestamp())
+            where.append("CAST(sm.ts AS DOUBLE PRECISION) < %s")
+            params.append(month_end.timestamp())
+        except (ValueError, IndexError):
+            raise HTTPException(400, "month must be YYYY-MM format")
 
     where_clause = " AND ".join(where)
     offset = (page - 1) * per_page
@@ -92,7 +109,15 @@ def list_slack_messages(
     rows = fetch_all(cur)
     cur.close()
 
-    # 월별 요약 통계
+    # 월별 요약 통계 — month 필터 없이 entity 전체
+    summary_where = ["1=1"]
+    summary_params: list = []
+    if entity_id is not None:
+        summary_where.append("sm.entity_id = %s")
+        summary_params.append(entity_id)
+
+    summary_where_clause = " AND ".join(summary_where)
+
     cur2 = conn.cursor()
     cur2.execute(
         f"""
@@ -105,11 +130,11 @@ def list_slack_messages(
             COUNT(CASE WHEN sm.slack_status = 'cancelled' THEN 1 END) AS cancelled_count,
             COALESCE(SUM(sm.parsed_amount) FILTER (WHERE sm.message_type IN ('card_payment', 'expense_share', 'deposit_request', 'tax_invoice')), 0) AS total_expense
         FROM slack_messages sm
-        WHERE {where_clause}
+        WHERE {summary_where_clause}
         GROUP BY yr, mo
         ORDER BY yr DESC, mo DESC
         """,
-        params,
+        summary_params,
     )
     monthly_summary = fetch_all(cur2)
     cur2.close()
