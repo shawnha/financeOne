@@ -33,6 +33,7 @@ import {
   AlertCircle,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
 } from "lucide-react"
 
 // ── Types ──────────────────────────────────────────────
@@ -56,11 +57,22 @@ interface SlackMessage {
   match_confidence: number | null
 }
 
+interface MonthlySummary {
+  yr: number
+  mo: number
+  total: number
+  done_count: number
+  pending_count: number
+  cancelled_count: number
+  total_expense: number
+}
+
 interface SlackMessagesResponse {
   items: SlackMessage[]
   total: number
   page: number
   pages: number
+  monthly_summary: MonthlySummary[]
 }
 
 interface MatchCandidate {
@@ -113,6 +125,51 @@ function formatDate(dateStr: string): string {
   })
 }
 
+function groupByMonth(messages: SlackMessage[]): Map<string, SlackMessage[]> {
+  const groups = new Map<string, SlackMessage[]>()
+  for (const msg of messages) {
+    const ts = msg.message_date
+    let key = "unknown"
+    if (ts) {
+      const d = new Date(ts)
+      if (!isNaN(d.getTime())) {
+        key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+      }
+    }
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(msg)
+  }
+  return groups
+}
+
+function formatMonthLabel(yearMonth: string): string {
+  if (yearMonth === "unknown") return "날짜 미확인"
+  const [yr, mo] = yearMonth.split("-")
+  return `${yr}년 ${parseInt(mo)}월`
+}
+
+function getTypeBadge(type: string | null) {
+  if (!type) return null
+  const typeMap: Record<string, { label: string; className: string }> = {
+    card_payment: { label: "법카결제", className: "bg-purple-500/20 text-purple-400 border-purple-500/30" },
+    deposit_request: { label: "입금요청", className: "bg-blue-500/20 text-blue-400 border-blue-500/30" },
+    tax_invoice: { label: "세금계산서", className: "bg-teal-500/20 text-teal-400 border-teal-500/30" },
+    expense_share: { label: "비용공유", className: "bg-orange-500/20 text-orange-400 border-orange-500/30" },
+  }
+  const info = typeMap[type] || { label: type, className: "bg-secondary text-muted-foreground border-border" }
+  return (
+    <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${info.className}`}>
+      {info.label}
+    </Badge>
+  )
+}
+
+function getStatusDot(status: "confirmed" | "ignored" | "pending") {
+  if (status === "confirmed") return <span className="h-2 w-2 rounded-full bg-[hsl(var(--profit))] inline-block" />
+  if (status === "pending") return <span className="h-2 w-2 rounded-full bg-[hsl(var(--warning))] inline-block" />
+  return <span className="h-2 w-2 rounded-full bg-[hsl(var(--loss))] inline-block" />
+}
+
 // ── Skeletons ──────────────────────────────────────────
 
 function MessageCardSkeleton() {
@@ -160,29 +217,72 @@ function CandidatePanelSkeleton() {
   )
 }
 
-// ── Message Card ───────────────────────────────────────
+// ── KPI Cards ─────────────────────────────────────────
 
-function MessageCard({
+function KPICards({
+  total,
+  doneCount,
+  pendingCount,
+  cancelledCount,
+}: {
+  total: number
+  doneCount: number
+  pendingCount: number
+  cancelledCount: number
+}) {
+  const cards = [
+    { label: "전체", value: total, className: "text-foreground" },
+    { label: "완료", value: doneCount, className: "text-[hsl(var(--profit))]" },
+    { label: "미처리", value: pendingCount, className: "text-[hsl(var(--warning))]" },
+    { label: "취소", value: cancelledCount, className: "text-[hsl(var(--loss))]" },
+  ]
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {cards.map((c) => (
+        <Card key={c.label} className="bg-card border-white/[0.04] backdrop-blur">
+          <CardContent className="p-4 flex flex-col items-center gap-1">
+            <span className="text-xs text-muted-foreground">{c.label}</span>
+            <span className={cn("text-2xl font-mono font-bold tabular-nums", c.className)}>
+              {c.value}
+            </span>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  )
+}
+
+// ── Compact Message Row ───────────────────────────────
+
+function CompactMessageRow({
   message,
   isSelected,
+  isExpanded,
   onSelect,
+  onToggleExpand,
   onConfirmDirect,
   onIgnore,
+  onManualMatch,
 }: {
   message: SlackMessage
   isSelected: boolean
+  isExpanded: boolean
   onSelect: () => void
+  onToggleExpand: () => void
   onConfirmDirect: () => void
   onIgnore: () => void
+  onManualMatch: () => void
 }) {
   const status = getMessageStatus(message)
 
   return (
-    <Card
-      className={`bg-card rounded-xl shadow cursor-pointer transition-all ${
-        isSelected ? "ring-2 ring-[hsl(var(--accent))]" : "hover:bg-secondary/30"
-      }`}
-      onClick={onSelect}
+    <div
+      className={cn(
+        "rounded-lg border transition-all",
+        isSelected
+          ? "ring-2 ring-[hsl(var(--accent))] border-[hsl(var(--accent))]/30 bg-[hsl(var(--accent))]/5"
+          : "border-white/[0.04] hover:bg-secondary/30",
+      )}
       role="option"
       aria-selected={isSelected}
       tabIndex={0}
@@ -190,99 +290,217 @@ function MessageCard({
         if (e.key === "Enter") onSelect()
       }}
     >
-      <CardContent className="p-4 space-y-2">
-        {/* Header: channel, sender, date */}
-        <div className="flex items-center gap-2 text-xs flex-wrap">
-          <Badge
-            variant="outline"
-            className="bg-[#6366F1]/20 text-[#6366F1] border-[#6366F1]/30 text-[11px] px-1.5 py-0"
-          >
-            #{message.channel_name}
-          </Badge>
-          <span className="text-muted-foreground">{message.sender_name}</span>
-          <span className="text-muted-foreground">&middot;</span>
-          <span className="text-muted-foreground">
-            {new Date(message.message_date).toLocaleDateString("ko-KR")}
-          </span>
-        </div>
+      {/* Compact summary line */}
+      <button
+        className="w-full text-left px-3 py-2.5 flex items-center gap-2 min-w-0"
+        onClick={onToggleExpand}
+      >
+        {/* Status dot */}
+        {getStatusDot(status)}
 
-        {/* Message text */}
-        <p className="text-sm leading-relaxed">{message.message_text}</p>
+        {/* Type badge */}
+        {getTypeBadge(message.message_type)}
 
-        {/* Amount */}
-        {message.parsed_amount !== null && (
-          <p className="text-xl font-mono font-bold tabular-nums">
-            {message.parsed_currency === "USD"
+        {/* Sender */}
+        <span className="text-xs text-muted-foreground truncate max-w-[80px]">
+          {message.sender_name}
+        </span>
+
+        {/* Date */}
+        <span className="text-xs text-muted-foreground">
+          {formatDate(message.message_date)}
+        </span>
+
+        {/* Amount - push right */}
+        <span className="ml-auto font-mono font-bold text-sm tabular-nums whitespace-nowrap">
+          {message.parsed_amount !== null
+            ? message.parsed_currency === "USD"
               ? `$${message.parsed_amount.toLocaleString()}`
-              : formatKRW(message.parsed_amount)}
-          </p>
+              : formatKRW(message.parsed_amount)
+            : ""}
+        </span>
+
+        {/* Confidence badge */}
+        {status === "pending" && message.match_confidence !== null && (
+          <span className="shrink-0">{getConfidenceBadge(message.match_confidence)}</span>
         )}
 
-        {/* Match status */}
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-muted-foreground">매칭 상태:</span>
-          {status === "confirmed" && (
-            <Badge
-              variant="outline"
-              className="bg-[hsl(var(--profit))]/20 text-[hsl(var(--profit))] border-0 text-[11px] px-1.5 py-0"
-            >
-              확정됨
-            </Badge>
+        {/* Chevron */}
+        <ChevronDown
+          className={cn(
+            "h-4 w-4 text-muted-foreground shrink-0 transition-transform",
+            isExpanded && "rotate-180",
           )}
-          {status === "ignored" && (
-            <Badge
-              variant="outline"
-              className="bg-secondary text-muted-foreground border-0 text-[11px] px-1.5 py-0"
-            >
-              무시됨
-            </Badge>
-          )}
-          {status === "pending" && message.match_confidence !== null && (
-            <>
-              <span className="text-muted-foreground">AI 매칭</span>
-              {getConfidenceBadge(message.match_confidence)}
-            </>
-          )}
-          {status === "pending" && message.match_confidence === null && (
-            <span className="text-muted-foreground">미매칭</span>
-          )}
-        </div>
+        />
+      </button>
 
-        {/* Actions */}
-        {status === "pending" && (
-          <div className="flex gap-2 pt-1" onClick={(e) => e.stopPropagation()}>
-            {message.matched_transaction_id && (
+      {/* Expanded detail */}
+      {isExpanded && (
+        <div className="px-3 pb-3 space-y-2 border-t border-white/[0.04]">
+          {/* Channel */}
+          <div className="flex items-center gap-2 pt-2 text-xs">
+            <Badge
+              variant="outline"
+              className="bg-[#6366F1]/20 text-[#6366F1] border-[#6366F1]/30 text-[11px] px-1.5 py-0"
+            >
+              #{message.channel_name}
+            </Badge>
+            <span className="text-muted-foreground">{message.sender_name}</span>
+            <span className="text-muted-foreground">&middot;</span>
+            <span className="text-muted-foreground">
+              {new Date(message.message_date).toLocaleDateString("ko-KR")}
+            </span>
+          </div>
+
+          {/* Full message text */}
+          <p className="text-sm leading-relaxed">{message.message_text}</p>
+
+          {/* Match status */}
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-muted-foreground">매칭 상태:</span>
+            {status === "confirmed" && (
+              <Badge
+                variant="outline"
+                className="bg-[hsl(var(--profit))]/20 text-[hsl(var(--profit))] border-0 text-[11px] px-1.5 py-0"
+              >
+                확정됨
+              </Badge>
+            )}
+            {status === "ignored" && (
+              <Badge
+                variant="outline"
+                className="bg-secondary text-muted-foreground border-0 text-[11px] px-1.5 py-0"
+              >
+                무시됨
+              </Badge>
+            )}
+            {status === "pending" && message.match_confidence !== null && (
+              <>
+                <span className="text-muted-foreground">AI 매칭</span>
+                {getConfidenceBadge(message.match_confidence)}
+              </>
+            )}
+            {status === "pending" && message.match_confidence === null && (
+              <span className="text-muted-foreground">미매칭</span>
+            )}
+          </div>
+
+          {/* Actions for pending */}
+          {status === "pending" && (
+            <div className="flex gap-2 pt-1" onClick={(e) => e.stopPropagation()}>
+              {message.matched_transaction_id && (
+                <Button
+                  size="sm"
+                  className="bg-[hsl(var(--accent))] text-accent-foreground hover:bg-[hsl(var(--accent))]/90 h-8 text-xs"
+                  onClick={onConfirmDirect}
+                >
+                  <Check className="h-3 w-3 mr-1" />
+                  확정
+                </Button>
+              )}
               <Button
                 size="sm"
-                className="bg-[hsl(var(--accent))] text-accent-foreground hover:bg-[hsl(var(--accent))]/90 h-8 text-xs"
-                onClick={onConfirmDirect}
+                variant="secondary"
+                className="h-8 text-xs"
+                onClick={onManualMatch}
               >
-                <Check className="h-3 w-3 mr-1" />
-                확정
+                <Search className="h-3 w-3 mr-1" />
+                수동 매칭
               </Button>
-            )}
-            <Button
-              size="sm"
-              variant="secondary"
-              className="h-8 text-xs"
-              onClick={onSelect}
-            >
-              <Search className="h-3 w-3 mr-1" />
-              수동 매칭
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 text-xs text-[hsl(var(--loss))] hover:text-[hsl(var(--loss))]"
-              onClick={onIgnore}
-            >
-              <EyeOff className="h-3 w-3 mr-1" />
-              무시
-            </Button>
-          </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 text-xs text-[hsl(var(--loss))] hover:text-[hsl(var(--loss))]"
+                onClick={onIgnore}
+              >
+                <EyeOff className="h-3 w-3 mr-1" />
+                무시
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Month Section ─────────────────────────────────────
+
+function MonthSection({
+  yearMonth,
+  messages,
+  selectedMessageId,
+  expandedId,
+  onSelectMessage,
+  onToggleExpand,
+  onConfirmDirect,
+  onIgnore,
+  onManualMatch,
+}: {
+  yearMonth: string
+  messages: SlackMessage[]
+  selectedMessageId: number | null
+  expandedId: number | null
+  onSelectMessage: (id: number) => void
+  onToggleExpand: (id: number) => void
+  onConfirmDirect: (msg: SlackMessage) => void
+  onIgnore: (id: number) => void
+  onManualMatch: (id: number) => void
+}) {
+  const [collapsed, setCollapsed] = useState(false)
+
+  const pendingCount = messages.filter((m) => getMessageStatus(m) === "pending").length
+  const totalExpense = messages.reduce((sum, m) => sum + (m.parsed_amount || 0), 0)
+
+  return (
+    <div className="space-y-2">
+      {/* Month header */}
+      <button
+        className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-secondary/30 transition-colors"
+        onClick={() => setCollapsed(!collapsed)}
+      >
+        <ChevronDown
+          className={cn(
+            "h-4 w-4 text-muted-foreground transition-transform",
+            collapsed && "-rotate-90",
+          )}
+        />
+        <span className="font-semibold text-sm">{formatMonthLabel(yearMonth)}</span>
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-white/[0.08]">
+          {messages.length}건
+        </Badge>
+        {pendingCount > 0 && (
+          <Badge
+            variant="outline"
+            className="text-[10px] px-1.5 py-0 bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))] border-[hsl(var(--warning))]/30"
+          >
+            미처리 {pendingCount}
+          </Badge>
         )}
-      </CardContent>
-    </Card>
+        <span className="ml-auto font-mono text-xs text-muted-foreground tabular-nums">
+          {formatKRW(totalExpense)}
+        </span>
+      </button>
+
+      {/* Messages */}
+      {!collapsed && (
+        <div className="space-y-1 pl-2">
+          {messages.map((msg) => (
+            <CompactMessageRow
+              key={msg.id}
+              message={msg}
+              isSelected={selectedMessageId === msg.id}
+              isExpanded={expandedId === msg.id}
+              onSelect={() => onSelectMessage(msg.id)}
+              onToggleExpand={() => onToggleExpand(msg.id)}
+              onConfirmDirect={() => onConfirmDirect(msg)}
+              onIgnore={() => onIgnore(msg.id)}
+              onManualMatch={() => onManualMatch(msg.id)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -476,6 +694,8 @@ function SlackMatchContent() {
   const [error, setError] = useState<string | null>(null)
 
   const [selectedMessageId, setSelectedMessageId] = useState<number | null>(null)
+  const [monthlySummary, setMonthlySummary] = useState<MonthlySummary[]>([])
+  const [expandedId, setExpandedId] = useState<number | null>(null)
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
@@ -491,6 +711,7 @@ function SlackMatchContent() {
       setMessages(data.items)
       setTotal(data.total)
       setPages(data.pages)
+      setMonthlySummary(data.monthly_summary || [])
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Slack 데이터를 불러올 수 없습니다.",
@@ -525,6 +746,7 @@ function SlackMatchContent() {
   // Reset selection and page when entity changes
   useEffect(() => {
     setSelectedMessageId(null)
+    setExpandedId(null)
     setPage(1)
   }, [entityId])
 
@@ -549,9 +771,22 @@ function SlackMatchContent() {
     return true
   })
 
-  // Counts
-  const pendingCount = messages.filter((m) => getMessageStatus(m) === "pending").length
-  const confirmedCount = messages.filter((m) => getMessageStatus(m) === "confirmed").length
+  // Group filtered messages by month
+  const monthGroups = groupByMonth(filteredMessages)
+
+  // KPI counts from monthly_summary (server-side totals) or fallback to client
+  const kpiTotal = monthlySummary.length > 0
+    ? monthlySummary.reduce((s, m) => s + m.total, 0)
+    : messages.length
+  const kpiDone = monthlySummary.length > 0
+    ? monthlySummary.reduce((s, m) => s + m.done_count, 0)
+    : messages.filter((m) => getMessageStatus(m) === "confirmed").length
+  const kpiPending = monthlySummary.length > 0
+    ? monthlySummary.reduce((s, m) => s + m.pending_count, 0)
+    : messages.filter((m) => getMessageStatus(m) === "pending").length
+  const kpiCancelled = monthlySummary.length > 0
+    ? monthlySummary.reduce((s, m) => s + m.cancelled_count, 0)
+    : messages.filter((m) => getMessageStatus(m) === "ignored").length
 
   // Actions
   const handleConfirm = useCallback(
@@ -564,6 +799,7 @@ function SlackMatchContent() {
         toast.success("매칭이 확정되었습니다.")
         fetchMessages()
         setSelectedMessageId(null)
+        setExpandedId(null)
       } catch (err) {
         toast.error(
           err instanceof Error ? err.message : "매칭 확정에 실패했습니다.",
@@ -599,6 +835,15 @@ function SlackMatchContent() {
     [handleConfirm],
   )
 
+  const handleToggleExpand = useCallback((id: number) => {
+    setExpandedId((prev) => (prev === id ? null : id))
+  }, [])
+
+  const handleManualMatch = useCallback((id: number) => {
+    setSelectedMessageId(id)
+    setExpandedId(id)
+  }, [])
+
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -621,12 +866,16 @@ function SlackMatchContent() {
           const nextIndex = currentIndex < filteredMessages.length - 1
             ? currentIndex + 1
             : 0
-          setSelectedMessageId(filteredMessages[nextIndex]?.id ?? null)
+          const nextId = filteredMessages[nextIndex]?.id ?? null
+          setSelectedMessageId(nextId)
+          setExpandedId(nextId)
         } else {
           const prevIndex = currentIndex > 0
             ? currentIndex - 1
             : filteredMessages.length - 1
-          setSelectedMessageId(filteredMessages[prevIndex]?.id ?? null)
+          const prevId = filteredMessages[prevIndex]?.id ?? null
+          setSelectedMessageId(prevId)
+          setExpandedId(prevId)
         }
       }
 
@@ -648,6 +897,11 @@ function SlackMatchContent() {
       <div className="p-6 space-y-6">
         <Skeleton className="h-8 w-40" />
         <Skeleton className="h-5 w-60" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-20 rounded-xl" />
+          ))}
+        </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="space-y-3">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -711,21 +965,6 @@ function SlackMatchContent() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Slack 매칭</h1>
-          <div className="flex items-center gap-3 mt-1 text-sm">
-            <span>
-              미확정{" "}
-              <span className="text-[hsl(var(--warning))] font-medium">
-                {pendingCount}건
-              </span>
-            </span>
-            <span className="text-muted-foreground">&middot;</span>
-            <span>
-              확정{" "}
-              <span className="text-[hsl(var(--profit))] font-medium">
-                {confirmedCount}건
-              </span>
-            </span>
-          </div>
         </div>
         <Button onClick={handleSync} disabled={syncing} variant="outline" className="gap-2">
           <RefreshCw className={cn("h-4 w-4", syncing && "animate-spin")} />
@@ -733,11 +972,19 @@ function SlackMatchContent() {
         </Button>
       </div>
 
+      {/* KPI Cards */}
+      <KPICards
+        total={kpiTotal}
+        doneCount={kpiDone}
+        pendingCount={kpiPending}
+        cancelledCount={kpiCancelled}
+      />
+
       {/* Partial warning */}
-      {pendingCount > 0 && (
+      {kpiPending > 0 && (
         <div className="rounded-lg border border-[hsl(var(--warning))]/30 bg-[hsl(var(--warning))]/5 px-4 py-3">
           <p className="text-sm text-[hsl(var(--warning))]">
-            {pendingCount}건의 매칭을 확인해주세요
+            {kpiPending}건의 매칭을 확인해주세요
           </p>
         </div>
       )}
@@ -780,8 +1027,8 @@ function SlackMatchContent() {
 
       {/* Two-panel layout */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left: Message list */}
-        <div className="space-y-3" role="listbox" aria-label="Slack 메시지 목록">
+        {/* Left: Message list grouped by month */}
+        <div className="space-y-4" role="listbox" aria-label="Slack 메시지 목록">
           {filteredMessages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 gap-2">
               <Search className="h-8 w-8 text-muted-foreground" />
@@ -790,14 +1037,18 @@ function SlackMatchContent() {
               </p>
             </div>
           ) : (
-            filteredMessages.map((msg) => (
-              <MessageCard
-                key={msg.id}
-                message={msg}
-                isSelected={selectedMessageId === msg.id}
-                onSelect={() => setSelectedMessageId(msg.id)}
-                onConfirmDirect={() => handleConfirmDirect(msg)}
-                onIgnore={() => handleIgnore(msg.id)}
+            Array.from(monthGroups.entries()).map(([yearMonth, msgs]) => (
+              <MonthSection
+                key={yearMonth}
+                yearMonth={yearMonth}
+                messages={msgs}
+                selectedMessageId={selectedMessageId}
+                expandedId={expandedId}
+                onSelectMessage={setSelectedMessageId}
+                onToggleExpand={handleToggleExpand}
+                onConfirmDirect={handleConfirmDirect}
+                onIgnore={handleIgnore}
+                onManualMatch={handleManualMatch}
               />
             ))
           )}
@@ -882,6 +1133,11 @@ export default function SlackMatchPage() {
           <div className="p-6 space-y-6">
             <Skeleton className="h-8 w-40" />
             <Skeleton className="h-5 w-60" />
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-20 rounded-xl" />
+              ))}
+            </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="space-y-3">
                 {Array.from({ length: 3 }).map((_, i) => (
