@@ -192,3 +192,18 @@ def parse_message(text: str, *, is_bot: bool = False, is_system: bool = False) -
         "date_override": date_override,
         "skip": message_type == "other" and parsed_amount is None,
     }
+
+
+# ── 환율 변환 ─────────────────────────────────────────
+
+def convert_to_krw(amount: float, currency: str, msg_date, conn) -> float:
+    """외화 금액을 KRW로 변환. KRW면 그대로 반환. 환율 없으면 원본 반환."""
+    if currency == "KRW" or amount is None:
+        return amount
+
+    try:
+        from backend.services.exchange_rate_service import get_closing_rate
+        rate = get_closing_rate(conn, currency, "KRW", msg_date)
+        return round(float(amount) * float(rate), 0)
+    except Exception:
+        return amount

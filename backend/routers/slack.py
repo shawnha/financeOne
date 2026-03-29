@@ -92,12 +92,35 @@ def list_slack_messages(
     rows = fetch_all(cur)
     cur.close()
 
+    # 월별 요약 통계
+    cur2 = conn.cursor()
+    cur2.execute(
+        f"""
+        SELECT
+            EXTRACT(YEAR FROM to_timestamp(CAST(sm.ts AS DOUBLE PRECISION)))::int AS yr,
+            EXTRACT(MONTH FROM to_timestamp(CAST(sm.ts AS DOUBLE PRECISION)))::int AS mo,
+            COUNT(*) AS total,
+            COUNT(CASE WHEN sm.slack_status = 'done' THEN 1 END) AS done_count,
+            COUNT(CASE WHEN sm.slack_status = 'pending' THEN 1 END) AS pending_count,
+            COUNT(CASE WHEN sm.slack_status = 'cancelled' THEN 1 END) AS cancelled_count,
+            COALESCE(SUM(sm.parsed_amount) FILTER (WHERE sm.message_type IN ('card_payment', 'expense_share', 'deposit_request', 'tax_invoice')), 0) AS total_expense
+        FROM slack_messages sm
+        WHERE {where_clause}
+        GROUP BY yr, mo
+        ORDER BY yr DESC, mo DESC
+        """,
+        params,
+    )
+    monthly_summary = fetch_all(cur2)
+    cur2.close()
+
     return {
         "items": rows,
         "total": total,
         "page": page,
         "per_page": per_page,
         "pages": (total + per_page - 1) // per_page if per_page else 0,
+        "monthly_summary": monthly_summary,
     }
 
 
@@ -374,6 +397,16 @@ def sync_slack_channel(
             final_amount = parsed.get("parsed_amount")
             if thread_events.get("new_amount") is not None:
                 final_amount = thread_events["new_amount"]
+
+            # 외화 → KRW 변환
+            if final_amount is not None and parsed["currency"] != "KRW":
+                from backend.services.slack.message_parser import convert_to_krw
+                from datetime import datetime as dt
+                try:
+                    msg_date = dt.fromtimestamp(float(ts)).date()
+                    final_amount = convert_to_krw(final_amount, parsed["currency"], msg_date, conn)
+                except (ValueError, OSError):
+                    pass  # ts 파싱 실패 시 원본 유지
 
             reactions = get_reactions(msg)
             has_check = "white_check_mark" in reactions
