@@ -92,6 +92,8 @@ def fetch_exchange_rates(
             KOREAEXIM_URL,
             params={"authkey": key, "searchdate": search_date, "data": "AP01"},
             timeout=10.0,
+            verify=False,
+            follow_redirects=True,
         )
         if resp.status_code != 200:
             raise KoreaeximApiError(
