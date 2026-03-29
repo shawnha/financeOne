@@ -39,11 +39,15 @@ class MemberCreate(BaseModel):
     entity_id: int
     name: str
     role: Optional[str] = "staff"
+    card_numbers: Optional[list[str]] = None
+    slack_user_id: Optional[str] = None
 
 
 class MemberUpdate(BaseModel):
     name: Optional[str] = None
     role: Optional[str] = None
+    card_numbers: Optional[list[str]] = None
+    slack_user_id: Optional[str] = None
 
 
 class MappingRuleUpdate(BaseModel):
@@ -313,12 +317,12 @@ def list_members(
     cur = conn.cursor()
     if entity_id is not None:
         cur.execute(
-            "SELECT id, entity_id, name, role FROM members WHERE entity_id = %s AND is_active = true ORDER BY name",
+            "SELECT id, entity_id, name, role, card_numbers, slack_user_id FROM members WHERE entity_id = %s AND is_active = true ORDER BY name",
             [entity_id],
         )
     else:
         cur.execute(
-            "SELECT id, entity_id, name, role FROM members WHERE is_active = true ORDER BY entity_id, name"
+            "SELECT id, entity_id, name, role, card_numbers, slack_user_id FROM members WHERE is_active = true ORDER BY entity_id, name"
         )
     rows = fetch_all(cur)
     cur.close()
@@ -334,11 +338,11 @@ def create_member(
     try:
         cur.execute(
             """
-            INSERT INTO members (entity_id, name, role)
-            VALUES (%s, %s, %s)
-            RETURNING id, entity_id, name, role, is_active
+            INSERT INTO members (entity_id, name, role, card_numbers, slack_user_id)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, entity_id, name, role, is_active, card_numbers, slack_user_id
             """,
-            [body.entity_id, body.name, body.role],
+            [body.entity_id, body.name, body.role, body.card_numbers or [], body.slack_user_id],
         )
         cols = [d[0] for d in cur.description]
         row = dict(zip(cols, cur.fetchone()))
@@ -375,7 +379,7 @@ def update_member(
             UPDATE members
             SET {', '.join(set_clauses)}
             WHERE id = %s AND is_active = true
-            RETURNING id, entity_id, name, role, is_active
+            RETURNING id, entity_id, name, role, is_active, card_numbers, slack_user_id
             """,
             params,
         )

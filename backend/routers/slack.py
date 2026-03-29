@@ -1,5 +1,8 @@
 """Slack 메시지 매칭 API -- slack_messages <-> transactions 연결."""
 
+import json
+import time
+from datetime import datetime
 from fastapi import APIRouter, Query, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
@@ -7,6 +10,9 @@ from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
 from backend.utils.db import fetch_all
+from backend.services.slack.slack_client import find_channel_id, fetch_history, fetch_replies, fetch_user_name, get_reactions
+from backend.services.slack.message_parser import parse_message
+from backend.services.slack.thread_analyzer import analyze_thread, resolve_slack_status
 
 router = APIRouter(prefix="/api/slack", tags=["slack"])
 
@@ -61,11 +67,14 @@ def list_slack_messages(
 
     cur.execute(
         f"""
-        SELECT sm.id, sm.entity_id, sm.ts, sm.channel, sm.user_id, sm.text,
+        SELECT sm.id, sm.entity_id, sm.ts, sm.channel AS channel_name,
+               sm.user_id, sm.text AS message_text,
                sm.parsed_amount, sm.parsed_amount_vat_included,
                sm.vat_flag, sm.project_tag,
+               sm.slack_status, sm.message_type,
+               sm.sender_name, sm.currency, sm.member_id,
                sm.is_completed, sm.is_cancelled,
-               sm.date_override, sm.reply_count,
+               sm.date_override AS message_date, sm.reply_count,
                sm.created_at,
                tsm.id AS match_id,
                tsm.transaction_id AS matched_transaction_id,
@@ -75,7 +84,7 @@ def list_slack_messages(
         FROM slack_messages sm
         LEFT JOIN transaction_slack_match tsm ON sm.id = tsm.slack_message_id
         WHERE {where_clause}
-        ORDER BY sm.created_at DESC
+        ORDER BY sm.ts DESC
         LIMIT %s OFFSET %s
         """,
         params + [per_page, offset],
@@ -271,6 +280,158 @@ def ignore_message(
     except HTTPException:
         conn.rollback()
         raise
+    except Exception:
+        conn.rollback()
+        raise
+
+
+@router.post("/sync")
+def sync_slack_channel(
+    channel: str = Query("99-expenses"),
+    entity_id: int = Query(...),
+    year: int = Query(2026),
+    months: Optional[str] = None,
+    conn: PgConnection = Depends(get_db),
+):
+    """Slack 채널 메시지 + 쓰레드를 DB에 동기화."""
+    cur = conn.cursor()
+    try:
+        channel_id = find_channel_id(channel)
+        messages = fetch_history(channel_id)
+
+        user_cache = {}
+
+        # 멤버 매핑 캐시
+        cur.execute(
+            "SELECT slack_user_id, id FROM members WHERE entity_id = %s AND slack_user_id IS NOT NULL AND is_active = true",
+            [entity_id],
+        )
+        member_map = {row[0]: row[1] for row in cur.fetchall()}
+
+        target_months = set()
+        if months:
+            target_months = {int(m) for m in months.split(",")}
+
+        stats = {"total_fetched": len(messages), "new": 0, "updated": 0, "skipped": 0}
+
+        for msg in messages:
+            ts = msg.get("ts", "")
+            text = msg.get("text", "")
+            user_id = msg.get("user", "")
+            bot_id = msg.get("bot_id")
+            subtype = msg.get("subtype")
+
+            # 월 필터
+            if target_months:
+                try:
+                    msg_time = datetime.fromtimestamp(float(ts))
+                    if msg_time.year != year or msg_time.month not in target_months:
+                        stats["skipped"] += 1
+                        continue
+                except (ValueError, OSError):
+                    stats["skipped"] += 1
+                    continue
+
+            is_bot = bool(bot_id)
+            is_system = subtype in ("channel_join", "channel_leave", "channel_purpose", "channel_topic")
+
+            parsed = parse_message(text, is_bot=is_bot, is_system=is_system)
+            if parsed.get("skip"):
+                stats["skipped"] += 1
+                continue
+
+            # 유저 이름
+            sender_name = None
+            if user_id and user_id not in user_cache:
+                try:
+                    user_cache[user_id] = fetch_user_name(user_id)
+                except Exception:
+                    user_cache[user_id] = user_id
+                time.sleep(0.2)
+            sender_name = user_cache.get(user_id)
+
+            member_id = member_map.get(user_id)
+
+            # 쓰레드 분석
+            thread_events = {"deposit_done": False, "cancelled": False, "new_amount": None, "file_urls": []}
+            reply_count = msg.get("reply_count", 0)
+            thread_replies_json = None
+
+            if reply_count > 0:
+                try:
+                    replies = fetch_replies(channel_id, ts)
+                    thread_replies_json = json.dumps(
+                        [{"ts": r.get("ts"), "user": r.get("user"), "text": r.get("text", "")[:500],
+                          "files": [{"name": f.get("name"), "url": f.get("url_private") or f.get("permalink")} for f in r.get("files", [])]}
+                         for r in replies],
+                        ensure_ascii=False,
+                    )
+                    thread_events = analyze_thread(replies, original_amount=parsed.get("parsed_amount"))
+                    time.sleep(0.5)
+                except Exception:
+                    pass
+
+            final_amount = parsed.get("parsed_amount")
+            if thread_events.get("new_amount") is not None:
+                final_amount = thread_events["new_amount"]
+
+            reactions = get_reactions(msg)
+            has_check = "white_check_mark" in reactions
+
+            status_result = resolve_slack_status(parsed["message_type"], has_check, thread_events)
+
+            cur.execute(
+                """
+                INSERT INTO slack_messages
+                    (entity_id, ts, channel, user_id, text, parsed_amount, parsed_amount_vat_included,
+                     vat_flag, project_tag, date_override, reply_count, thread_replies_json, raw_json,
+                     member_id, message_type, slack_status, currency, withholding_tax, sender_name,
+                     sub_amounts, is_cancelled, deposit_completed_date)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (ts) DO UPDATE SET
+                    text = EXCLUDED.text,
+                    parsed_amount = EXCLUDED.parsed_amount,
+                    parsed_amount_vat_included = EXCLUDED.parsed_amount_vat_included,
+                    vat_flag = EXCLUDED.vat_flag,
+                    project_tag = EXCLUDED.project_tag,
+                    date_override = EXCLUDED.date_override,
+                    reply_count = EXCLUDED.reply_count,
+                    thread_replies_json = EXCLUDED.thread_replies_json,
+                    member_id = EXCLUDED.member_id,
+                    message_type = EXCLUDED.message_type,
+                    slack_status = EXCLUDED.slack_status,
+                    currency = EXCLUDED.currency,
+                    withholding_tax = EXCLUDED.withholding_tax,
+                    sender_name = EXCLUDED.sender_name,
+                    sub_amounts = EXCLUDED.sub_amounts,
+                    is_cancelled = EXCLUDED.is_cancelled,
+                    deposit_completed_date = EXCLUDED.deposit_completed_date
+                RETURNING (xmax = 0) AS is_new
+                """,
+                [
+                    entity_id, ts, channel_id, user_id, text,
+                    final_amount, parsed.get("parsed_amount_vat_included"),
+                    parsed["vat_flag"], parsed["project_tag"], parsed.get("date_override"),
+                    reply_count, thread_replies_json, json.dumps(msg, ensure_ascii=False),
+                    member_id, parsed["message_type"], status_result["slack_status"],
+                    parsed["currency"], parsed["withholding_tax"], sender_name,
+                    json.dumps(parsed["sub_amounts"]) if parsed.get("sub_amounts") else None,
+                    status_result.get("is_cancelled", False),
+                    None,
+                ],
+            )
+            is_new = cur.fetchone()[0]
+            if is_new:
+                stats["new"] += 1
+            else:
+                stats["updated"] += 1
+
+        conn.commit()
+        cur.close()
+        return stats
+    except RuntimeError as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception:
         conn.rollback()
         raise
