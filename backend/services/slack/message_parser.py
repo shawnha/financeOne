@@ -35,7 +35,8 @@ def classify(text: str) -> str:
 
 KRW_PATTERN = re.compile(r'(?:총\s*|총금액\s*[=:]\s*)?(\d{1,3}(?:,\d{3})+|\d{4,})\s*원')
 KRW_MAN_PATTERN = re.compile(r'(\d+)\s*만\s*원')
-USD_PATTERN = re.compile(r'(?:US)?\$\s*([\d,]+(?:\.\d{1,2})?)')
+USD_PATTERN = re.compile(r'(?:US)?\$\s*(\d[\d,]*(?:\.\d{1,2})?)')
+USD_SUFFIX_PATTERN = re.compile(r'(\d[\d,]*(?:\.\d{1,2})?)\s*\$')
 USD_BUL_PATTERN = re.compile(r'(\d+(?:,\d+)?)\s*(?:불|달러)')
 EUR_PATTERN = re.compile(r'€\s*([\d,]+(?:\.\d{1,2})?)|(\d+(?:,\d+)?)\s*(?:EURO|유로)')
 
@@ -48,9 +49,14 @@ def extract_amount(text: str) -> dict | None:
     if not text:
         return None
 
-    usd_matches = USD_PATTERN.findall(text)
+    usd_matches = [m for m in USD_PATTERN.findall(text) if m]
     if usd_matches:
         amounts = [_parse_number(m) for m in usd_matches]
+        return {"amount": max(amounts), "currency": "USD"}
+
+    usd_suffix = [m for m in USD_SUFFIX_PATTERN.findall(text) if m]
+    if usd_suffix:
+        amounts = [_parse_number(m) for m in usd_suffix]
         return {"amount": max(amounts), "currency": "USD"}
 
     usd_bul = USD_BUL_PATTERN.findall(text)
