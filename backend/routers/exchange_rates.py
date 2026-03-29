@@ -13,6 +13,10 @@ from backend.services.exchange_rate_service import (
     get_average_rate,
     ExchangeRateNotFoundError,
 )
+from backend.services.exchange_rate_fetcher import (
+    fetch_exchange_rates,
+    KoreaeximApiError,
+)
 
 router = APIRouter(prefix="/api/exchange-rates", tags=["exchange-rates"])
 
@@ -123,3 +127,23 @@ def get_average(
         return {"rate": float(rate), "from": from_currency, "to": to_currency, "period": f"{start_date}~{end_date}"}
     except ExchangeRateNotFoundError as e:
         raise HTTPException(404, str(e))
+
+
+class FetchRequest(BaseModel):
+    start_date: date
+    end_date: date
+
+
+@router.post("/fetch")
+def fetch_rates_from_koreaexim(
+    body: FetchRequest,
+    conn: PgConnection = Depends(get_db),
+):
+    """수출입은행 API에서 환율 데이터를 가져와 DB에 저장."""
+    if (body.end_date - body.start_date).days > 365:
+        raise HTTPException(400, "Date range must be within 365 days")
+    try:
+        result = fetch_exchange_rates(conn, body.start_date, body.end_date)
+        return result
+    except KoreaeximApiError as e:
+        raise HTTPException(502, str(e))
