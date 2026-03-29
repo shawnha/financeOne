@@ -22,6 +22,7 @@ import {
 import { EntityTabs } from "@/components/entity-tabs"
 import { fetchAPI } from "@/lib/api"
 import { formatKRW } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import {
   MessageSquare,
@@ -40,15 +41,18 @@ interface SlackMessage {
   id: number
   entity_id: number
   channel_name: string
-  sender_name: string
+  sender_name: string | null
   message_text: string
   parsed_amount: number | null
   parsed_currency: string | null
   message_date: string
   is_completed: boolean
   is_cancelled: boolean
+  slack_status: string | null
+  message_type: string | null
+  member_id: number | null
   match_id: number | null
-  match_transaction_id: number | null
+  matched_transaction_id: number | null
   match_confidence: number | null
 }
 
@@ -97,7 +101,7 @@ function getConfidenceBadge(confidence: number | null) {
 }
 
 function getMessageStatus(msg: SlackMessage): "confirmed" | "ignored" | "pending" {
-  if (msg.is_completed && msg.match_transaction_id) return "confirmed"
+  if (msg.is_completed && msg.matched_transaction_id) return "confirmed"
   if (msg.is_cancelled) return "ignored"
   return "pending"
 }
@@ -247,7 +251,7 @@ function MessageCard({
         {/* Actions */}
         {status === "pending" && (
           <div className="flex gap-2 pt-1" onClick={(e) => e.stopPropagation()}>
-            {message.match_transaction_id && (
+            {message.matched_transaction_id && (
               <Button
                 size="sm"
                 className="bg-[hsl(var(--accent))] text-accent-foreground hover:bg-[hsl(var(--accent))]/90 h-8 text-xs"
@@ -496,6 +500,24 @@ function SlackMatchContent() {
     }
   }, [entityId, page])
 
+  const [syncing, setSyncing] = useState(false)
+
+  const handleSync = useCallback(async () => {
+    setSyncing(true)
+    try {
+      const result = await fetchAPI<{ total_fetched: number; new: number; updated: number; skipped: number }>(
+        `/slack/sync?channel=99-expenses&entity_id=${entityId}&year=2026`,
+        { method: "POST" },
+      )
+      toast.success(`동기화 완료: 신규 ${result.new}건, 업데이트 ${result.updated}건`)
+      fetchMessages()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "동기화에 실패했습니다")
+    } finally {
+      setSyncing(false)
+    }
+  }, [entityId, fetchMessages])
+
   useEffect(() => {
     fetchMessages()
   }, [fetchMessages])
@@ -570,8 +592,8 @@ function SlackMatchContent() {
 
   const handleConfirmDirect = useCallback(
     (msg: SlackMessage) => {
-      if (msg.match_transaction_id) {
-        handleConfirm(msg.id, msg.match_transaction_id)
+      if (msg.matched_transaction_id) {
+        handleConfirm(msg.id, msg.matched_transaction_id)
       }
     },
     [handleConfirm],
@@ -673,6 +695,10 @@ function SlackMatchContent() {
           <p className="text-sm text-muted-foreground">
             Slack 동기화를 설정하면 경비 메시지가 자동으로 수집됩니다.
           </p>
+          <Button onClick={handleSync} disabled={syncing} variant="outline" className="mt-4 gap-2">
+            <RefreshCw className={cn("h-4 w-4", syncing && "animate-spin")} />
+            {syncing ? "동기화 중..." : "Slack 동기화"}
+          </Button>
         </Card>
       </div>
     )
@@ -701,9 +727,10 @@ function SlackMatchContent() {
             </span>
           </div>
         </div>
-        <p className="text-xs text-muted-foreground">
-          마지막 동기화: 방금 전
-        </p>
+        <Button onClick={handleSync} disabled={syncing} variant="outline" className="gap-2">
+          <RefreshCw className={cn("h-4 w-4", syncing && "animate-spin")} />
+          {syncing ? "동기화 중..." : "Slack 동기화"}
+        </Button>
       </div>
 
       {/* Partial warning */}

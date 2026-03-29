@@ -34,8 +34,8 @@ interface Member {
   entity_id: number
   name: string
   role: string
-  card_number: string | null
-  created_at: string
+  card_numbers: string[]
+  slack_user_id: string | null
 }
 
 type MemberRole = "admin" | "member" | "corporate" | "staff"
@@ -238,6 +238,7 @@ function MembersContent() {
                     <TableHead>이름</TableHead>
                     <TableHead>역할</TableHead>
                     <TableHead>카드번호</TableHead>
+                    <TableHead>Slack</TableHead>
                     <TableHead className="text-right">거래 건수</TableHead>
                     <TableHead className="w-[80px]" />
                   </TableRow>
@@ -266,8 +267,21 @@ function MembersContent() {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
-                          {member.card_number || (
+                          {member.card_numbers?.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {member.card_numbers.map((card) => (
+                                <span key={card} className="font-mono text-xs bg-secondary px-1.5 py-0.5 rounded">
+                                  {card}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
                             <span className="text-xs text-muted-foreground/50">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground font-mono">
+                          {member.slack_user_id || (
+                            <span className="text-muted-foreground/50">-</span>
                           )}
                         </TableCell>
                         <TableCell className="text-right tabular-nums text-muted-foreground">
