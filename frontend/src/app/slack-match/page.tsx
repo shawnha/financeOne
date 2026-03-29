@@ -113,6 +113,20 @@ function getConfidenceBadge(confidence: number | null) {
   )
 }
 
+function stripSlackText(text: string): string {
+  return text
+    .replace(/<@[A-Z0-9]+>/g, "")           // 멘션 제거
+    .replace(/<#[A-Z0-9]+\|([^>]+)>/g, "$1") // 채널 링크 → 채널명
+    .replace(/<(https?:\/\/[^|>]+)\|([^>]+)>/g, "$2") // URL 링크 → 표시 텍스트
+    .replace(/<(https?:\/\/[^>]+)>/g, "$1")  // URL 링크 (표시 텍스트 없음)
+    .replace(/\*([^*]+)\*/g, "$1")           // 볼드 제거
+    .replace(/_([^_]+)_/g, "$1")             // 이탤릭 제거
+    .replace(/~([^~]+)~/g, "$1")             // 취소선 제거
+    .replace(/\n+/g, " ")                    // 줄바꿈 → 공백
+    .replace(/\s+/g, " ")                    // 다중 공백 정리
+    .trim()
+}
+
 function getMessageStatus(msg: SlackMessage): "confirmed" | "ignored" | "pending" {
   if (msg.is_completed && msg.matched_transaction_id) return "confirmed"
   if (msg.is_cancelled) return "ignored"
@@ -311,6 +325,13 @@ function CompactMessageRow({
           )}
         />
       </button>
+
+      {/* Summary preview (collapsed) */}
+      {!isExpanded && message.message_text && (
+        <p className="px-3 pb-2 text-xs text-muted-foreground truncate">
+          {stripSlackText(message.message_text).slice(0, 80)}
+        </p>
+      )}
 
       {/* Expanded detail */}
       {isExpanded && (
