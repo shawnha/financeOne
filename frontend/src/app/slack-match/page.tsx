@@ -20,6 +20,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { EntityTabs } from "@/components/entity-tabs"
+import { MonthPicker } from "@/components/month-picker"
 import { fetchAPI } from "@/lib/api"
 import { formatKRW } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -123,29 +124,6 @@ function formatDate(dateStr: string): string {
     month: "2-digit",
     day: "2-digit",
   })
-}
-
-function groupByMonth(messages: SlackMessage[]): Map<string, SlackMessage[]> {
-  const groups = new Map<string, SlackMessage[]>()
-  for (const msg of messages) {
-    const ts = msg.message_date
-    let key = "unknown"
-    if (ts) {
-      const d = new Date(ts)
-      if (!isNaN(d.getTime())) {
-        key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
-      }
-    }
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key)!.push(msg)
-  }
-  return groups
-}
-
-function formatMonthLabel(yearMonth: string): string {
-  if (yearMonth === "unknown") return "날짜 미확인"
-  const [yr, mo] = yearMonth.split("-")
-  return `${yr}년 ${parseInt(mo)}월`
 }
 
 function getTypeBadge(type: string | null) {
@@ -424,86 +402,6 @@ function CompactMessageRow({
   )
 }
 
-// ── Month Section ─────────────────────────────────────
-
-function MonthSection({
-  yearMonth,
-  messages,
-  selectedMessageId,
-  expandedId,
-  onSelectMessage,
-  onToggleExpand,
-  onConfirmDirect,
-  onIgnore,
-  onManualMatch,
-}: {
-  yearMonth: string
-  messages: SlackMessage[]
-  selectedMessageId: number | null
-  expandedId: number | null
-  onSelectMessage: (id: number) => void
-  onToggleExpand: (id: number) => void
-  onConfirmDirect: (msg: SlackMessage) => void
-  onIgnore: (id: number) => void
-  onManualMatch: (id: number) => void
-}) {
-  const [collapsed, setCollapsed] = useState(false)
-
-  const pendingCount = messages.filter((m) => getMessageStatus(m) === "pending").length
-  const totalExpense = messages.reduce((sum, m) => sum + (m.parsed_amount || 0), 0)
-
-  return (
-    <div className="space-y-2">
-      {/* Month header */}
-      <button
-        className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-secondary/30 transition-colors"
-        onClick={() => setCollapsed(!collapsed)}
-      >
-        <ChevronDown
-          className={cn(
-            "h-4 w-4 text-muted-foreground transition-transform",
-            collapsed && "-rotate-90",
-          )}
-        />
-        <span className="font-semibold text-sm">{formatMonthLabel(yearMonth)}</span>
-        <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-white/[0.08]">
-          {messages.length}건
-        </Badge>
-        {pendingCount > 0 && (
-          <Badge
-            variant="outline"
-            className="text-[10px] px-1.5 py-0 bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))] border-[hsl(var(--warning))]/30"
-          >
-            미처리 {pendingCount}
-          </Badge>
-        )}
-        <span className="ml-auto font-mono text-xs text-muted-foreground tabular-nums">
-          {formatKRW(totalExpense)}
-        </span>
-      </button>
-
-      {/* Messages */}
-      {!collapsed && (
-        <div className="space-y-1 pl-2">
-          {messages.map((msg) => (
-            <CompactMessageRow
-              key={msg.id}
-              message={msg}
-              isSelected={selectedMessageId === msg.id}
-              isExpanded={expandedId === msg.id}
-              onSelect={() => onSelectMessage(msg.id)}
-              onToggleExpand={() => onToggleExpand(msg.id)}
-              onConfirmDirect={() => onConfirmDirect(msg)}
-              onIgnore={() => onIgnore(msg.id)}
-              onManualMatch={() => onManualMatch(msg.id)}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── Candidate Panel ────────────────────────────────────
 
 function CandidatePanel({
@@ -697,6 +595,12 @@ function SlackMatchContent() {
   const [monthlySummary, setMonthlySummary] = useState<MonthlySummary[]>([])
   const [expandedId, setExpandedId] = useState<number | null>(null)
 
+  // Month navigation
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
+  })
+
   // Filters
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [confidenceFilter, setConfidenceFilter] = useState<ConfidenceFilter>("all")
@@ -706,7 +610,7 @@ function SlackMatchContent() {
     setError(null)
     try {
       const data = await fetchAPI<SlackMessagesResponse>(
-        `/slack/messages?entity_id=${entityId}&page=${page}&per_page=20`,
+        `/slack/messages?entity_id=${entityId}&page=${page}&per_page=50&month=${selectedMonth}`,
       )
       setMessages(data.items)
       setTotal(data.total)
@@ -719,7 +623,7 @@ function SlackMatchContent() {
     } finally {
       setLoading(false)
     }
-  }, [entityId, page])
+  }, [entityId, page, selectedMonth])
 
   const [syncing, setSyncing] = useState(false)
 
@@ -750,6 +654,12 @@ function SlackMatchContent() {
     setPage(1)
   }, [entityId])
 
+  useEffect(() => {
+    setPage(1)
+    setSelectedMessageId(null)
+    setExpandedId(null)
+  }, [selectedMonth])
+
   // Filter messages client-side
   const filteredMessages = messages.filter((msg) => {
     // Status filter
@@ -771,22 +681,15 @@ function SlackMatchContent() {
     return true
   })
 
-  // Group filtered messages by month
-  const monthGroups = groupByMonth(filteredMessages)
-
-  // KPI counts from monthly_summary (server-side totals) or fallback to client
-  const kpiTotal = monthlySummary.length > 0
-    ? monthlySummary.reduce((s, m) => s + m.total, 0)
-    : messages.length
-  const kpiDone = monthlySummary.length > 0
-    ? monthlySummary.reduce((s, m) => s + m.done_count, 0)
-    : messages.filter((m) => getMessageStatus(m) === "confirmed").length
-  const kpiPending = monthlySummary.length > 0
-    ? monthlySummary.reduce((s, m) => s + m.pending_count, 0)
-    : messages.filter((m) => getMessageStatus(m) === "pending").length
-  const kpiCancelled = monthlySummary.length > 0
-    ? monthlySummary.reduce((s, m) => s + m.cancelled_count, 0)
-    : messages.filter((m) => getMessageStatus(m) === "ignored").length
+  // KPI: 선택된 월의 summary
+  const selectedSummary = monthlySummary.find((s) => {
+    const key = `${s.yr}-${String(s.mo).padStart(2, "0")}`
+    return key === selectedMonth
+  })
+  const kpiTotal = selectedSummary?.total ?? 0
+  const kpiDone = selectedSummary?.done_count ?? 0
+  const kpiPending = selectedSummary?.pending_count ?? 0
+  const kpiCancelled = selectedSummary?.cancelled_count ?? 0
 
   // Actions
   const handleConfirm = useCallback(
@@ -963,8 +866,15 @@ function SlackMatchContent() {
     <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <div>
+        <div className="flex items-center gap-4">
           <h1 className="text-2xl font-semibold tracking-tight">Slack 매칭</h1>
+          <MonthPicker
+            months={monthlySummary.map((s) =>
+              `${s.yr}-${String(s.mo).padStart(2, "0")}`
+            )}
+            selected={selectedMonth}
+            onSelect={setSelectedMonth}
+          />
         </div>
         <Button onClick={handleSync} disabled={syncing} variant="outline" className="gap-2">
           <RefreshCw className={cn("h-4 w-4", syncing && "animate-spin")} />
@@ -1027,28 +937,27 @@ function SlackMatchContent() {
 
       {/* Two-panel layout */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left: Message list grouped by month */}
-        <div className="space-y-4" role="listbox" aria-label="Slack 메시지 목록">
+        {/* Left: Message list */}
+        <div className="space-y-1" role="listbox" aria-label="Slack 메시지 목록">
           {filteredMessages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 gap-2">
               <Search className="h-8 w-8 text-muted-foreground" />
               <p className="text-sm text-muted-foreground">
-                필터 조건에 맞는 메시지가 없습니다.
+                이 달에 메시지가 없습니다.
               </p>
             </div>
           ) : (
-            Array.from(monthGroups.entries()).map(([yearMonth, msgs]) => (
-              <MonthSection
-                key={yearMonth}
-                yearMonth={yearMonth}
-                messages={msgs}
-                selectedMessageId={selectedMessageId}
-                expandedId={expandedId}
-                onSelectMessage={setSelectedMessageId}
-                onToggleExpand={handleToggleExpand}
-                onConfirmDirect={handleConfirmDirect}
-                onIgnore={handleIgnore}
-                onManualMatch={handleManualMatch}
+            filteredMessages.map((msg) => (
+              <CompactMessageRow
+                key={msg.id}
+                message={msg}
+                isSelected={selectedMessageId === msg.id}
+                isExpanded={expandedId === msg.id}
+                onSelect={() => setSelectedMessageId(msg.id)}
+                onToggleExpand={() => handleToggleExpand(msg.id)}
+                onConfirmDirect={() => handleConfirmDirect(msg)}
+                onIgnore={() => handleIgnore(msg.id)}
+                onManualMatch={() => handleManualMatch(msg.id)}
               />
             ))
           )}
