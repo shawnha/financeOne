@@ -21,13 +21,17 @@ CREATE TABLE IF NOT EXISTS entities (
 
 -- 2. members — 팀 멤버
 CREATE TABLE IF NOT EXISTS members (
-  id          SERIAL PRIMARY KEY,
-  entity_id   INTEGER NOT NULL REFERENCES entities(id),
-  name        TEXT NOT NULL,
-  role        TEXT DEFAULT 'staff',
-  is_active   BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  id            SERIAL PRIMARY KEY,
+  entity_id     INTEGER NOT NULL REFERENCES entities(id),
+  name          TEXT NOT NULL,
+  role          TEXT DEFAULT 'staff',
+  is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+  card_numbers  TEXT[] DEFAULT ARRAY[]::TEXT[],
+  slack_user_id TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_members_slack ON members (entity_id, slack_user_id) WHERE slack_user_id IS NOT NULL;
 
 -- 3. standard_accounts — K-GAAP 표준계정
 CREATE TABLE IF NOT EXISTS standard_accounts (
@@ -274,6 +278,13 @@ CREATE TABLE IF NOT EXISTS slack_messages (
   deposit_completed_date    DATE,
   reply_count               INTEGER NOT NULL DEFAULT 0,
   thread_replies_json       TEXT,
+  member_id                 INTEGER REFERENCES members(id),
+  message_type              TEXT,
+  slack_status              TEXT DEFAULT 'pending',
+  currency                  TEXT DEFAULT 'KRW',
+  withholding_tax           BOOLEAN DEFAULT FALSE,
+  sender_name               TEXT,
+  sub_amounts               JSONB,
   created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
