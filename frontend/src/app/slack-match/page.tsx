@@ -39,6 +39,23 @@ import {
 
 // ── Types ──────────────────────────────────────────────
 
+interface ParsedStructured {
+  summary: string | null
+  vendor: string | null
+  project: string | null
+  category: string | null
+  items: Array<{ description: string; amount: number; currency: string }> | null
+  total_amount: number | null
+  currency: string | null
+  vat: { type: string; vat_amount: number | null; supply_amount: number | null } | null
+  withholding_tax: { applies: boolean; rate: number | null; amount: number | null; net_amount: number | null } | null
+  payment_terms: { type: string; ratio: string | null; related_context: string | null } | null
+  tax_invoice: boolean
+  date_mentioned: string | null
+  urgency: string | null
+  confidence: number | null
+}
+
 interface SlackMessage {
   id: number
   entity_id: number
@@ -56,6 +73,7 @@ interface SlackMessage {
   match_id: number | null
   matched_transaction_id: number | null
   match_confidence: number | null
+  parsed_structured: ParsedStructured | null
 }
 
 interface MonthlySummary {
@@ -244,6 +262,122 @@ function KPICards({
   )
 }
 
+// ── Structured Detail ─────────────────────────────────
+
+function StructuredDetail({ data }: { data: ParsedStructured }) {
+  const vatLabel =
+    data.vat?.type === "included" ? "포함" :
+    data.vat?.type === "excluded" ? "별도" : "해당없음"
+
+  const paymentLabel =
+    data.payment_terms?.type === "full" ? "일시불" :
+    data.payment_terms?.type === "advance" ? "선금" :
+    data.payment_terms?.type === "balance" ? "잔금" :
+    data.payment_terms?.type === "installment" ? "분할" : "일시불"
+
+  return (
+    <div className="space-y-3">
+      {/* 메타 정보 */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+        {data.project && (
+          <>
+            <span className="text-muted-foreground">프로젝트</span>
+            <span className="font-medium">{data.project}</span>
+          </>
+        )}
+        {data.vendor && (
+          <>
+            <span className="text-muted-foreground">거래처</span>
+            <span className="font-medium">{data.vendor}</span>
+          </>
+        )}
+        {data.category && (
+          <>
+            <span className="text-muted-foreground">카테고리</span>
+            <span className="font-medium">{data.category}</span>
+          </>
+        )}
+      </div>
+
+      {/* 항목 테이블 */}
+      {data.items && data.items.length > 0 && (
+        <div className="rounded-md border border-white/[0.06] overflow-hidden">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-white/[0.06] bg-secondary/30">
+                <th className="text-left px-2 py-1.5 font-medium text-muted-foreground">항목</th>
+                <th className="text-right px-2 py-1.5 font-medium text-muted-foreground">금액</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.items.map((item, i) => (
+                <tr key={i} className="border-b border-white/[0.04] last:border-0">
+                  <td className="px-2 py-1.5">{item.description}</td>
+                  <td className="px-2 py-1.5 text-right font-mono tabular-nums">
+                    {item.currency === "USD"
+                      ? `$${item.amount.toLocaleString()}`
+                      : formatKRW(item.amount)}
+                  </td>
+                </tr>
+              ))}
+              {data.items.length > 1 && data.total_amount && (
+                <tr className="bg-secondary/20 font-medium">
+                  <td className="px-2 py-1.5">합계</td>
+                  <td className="px-2 py-1.5 text-right font-mono tabular-nums">
+                    {data.currency === "USD"
+                      ? `$${data.total_amount.toLocaleString()}`
+                      : formatKRW(data.total_amount)}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* 세금/결제 정보 */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+        <span className="text-muted-foreground">VAT</span>
+        <span>
+          {vatLabel}
+          {data.vat?.vat_amount != null && ` (${formatKRW(data.vat.vat_amount)})`}
+        </span>
+
+        {data.withholding_tax?.applies && (
+          <>
+            <span className="text-muted-foreground">원천징수</span>
+            <span>
+              {data.withholding_tax.rate}%
+              {data.withholding_tax.amount != null && ` (${formatKRW(data.withholding_tax.amount)})`}
+              {data.withholding_tax.net_amount != null && ` → 실수령 ${formatKRW(data.withholding_tax.net_amount)}`}
+            </span>
+          </>
+        )}
+
+        <span className="text-muted-foreground">결제조건</span>
+        <span>
+          {paymentLabel}
+          {data.payment_terms?.ratio && ` (${data.payment_terms.ratio})`}
+        </span>
+
+        {data.tax_invoice && (
+          <>
+            <span className="text-muted-foreground">세금계산서</span>
+            <span>발행 예정</span>
+          </>
+        )}
+
+        {data.urgency && (
+          <>
+            <span className="text-muted-foreground">긴급도</span>
+            <span className="text-[hsl(var(--loss))]">{data.urgency}</span>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Compact Message Row ───────────────────────────────
 
 function CompactMessageRow({
@@ -293,14 +427,14 @@ function CompactMessageRow({
         {/* Type badge */}
         {getTypeBadge(message.message_type)}
 
+        {/* Date — 날짜순 정렬이므로 이름 앞에 배치 */}
+        <span className="text-xs text-muted-foreground">
+          {formatDate(message.message_date)}
+        </span>
+
         {/* Sender */}
         <span className="text-xs text-muted-foreground truncate max-w-[80px]">
           {message.sender_name}
-        </span>
-
-        {/* Date */}
-        <span className="text-xs text-muted-foreground">
-          {formatDate(message.message_date)}
         </span>
 
         {/* Amount - push right */}
@@ -351,8 +485,29 @@ function CompactMessageRow({
             </span>
           </div>
 
-          {/* Full message text */}
-          <p className="text-sm leading-relaxed">{message.message_text}</p>
+          {/* 구조화 정보 또는 원문 */}
+          {message.parsed_structured ? (
+            <div className="space-y-2">
+              <StructuredDetail data={message.parsed_structured} />
+              {/* 원문 토글 */}
+              <button
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  const el = e.currentTarget.nextElementSibling
+                  if (el) el.classList.toggle("hidden")
+                }}
+              >
+                <ChevronDown className="h-3 w-3" />
+                원문 보기
+              </button>
+              <p className="hidden text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap bg-secondary/20 rounded p-2">
+                {message.message_text}
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm leading-relaxed">{message.message_text}</p>
+          )}
 
           {/* Match status */}
           <div className="flex items-center gap-2 text-xs">
