@@ -159,19 +159,28 @@ def get_candidates(
     message_id: int,
     conn: PgConnection = Depends(get_db),
 ):
-    """Find candidate transactions for a slack message (amount match +/-1, +/-3%, VAT x1.1)."""
+    """Find candidate transactions for a slack message.
+
+    Matching strategy:
+    1. Amount: exact (±1), ±3%, VAT ×1.1
+    2. Date: ±30일 (크로스월 지원), 날짜 근접도 가산
+    3. Vendor: 구조화 파싱의 vendor와 거래처명 유사도 가산
+    """
     cur = conn.cursor()
 
-    # Get the slack message
+    # Get the slack message + structured data
     cur.execute(
-        "SELECT id, entity_id, parsed_amount, parsed_amount_vat_included, date_override FROM slack_messages WHERE id = %s",
+        """SELECT id, entity_id, parsed_amount, parsed_amount_vat_included,
+                  COALESCE(date_override, to_timestamp(CAST(ts AS DOUBLE PRECISION))::date) AS msg_date,
+                  parsed_structured, text
+           FROM slack_messages WHERE id = %s""",
         [message_id],
     )
     msg = cur.fetchone()
     if not msg:
         raise HTTPException(404, "Slack message not found")
 
-    msg_id, entity_id, parsed_amount, parsed_amount_vat, date_override = msg
+    msg_id, entity_id, parsed_amount, parsed_amount_vat, msg_date, parsed_structured, msg_text = msg
 
     if parsed_amount is None:
         cur.close()
@@ -179,10 +188,13 @@ def get_candidates(
 
     amount = float(parsed_amount)
 
-    # Build candidate conditions:
-    # 1. Exact match +/- 1
-    # 2. Within 3%
-    # 3. VAT included (amount * 1.1)
+    # 구조화 파싱에서 vendor 추출
+    vendor = None
+    if parsed_structured:
+        ps = parsed_structured if isinstance(parsed_structured, dict) else {}
+        vendor = ps.get("vendor")
+
+    # Amount ranges
     lower_3pct = round(amount * 0.97, 2)
     upper_3pct = round(amount * 1.03, 2)
     vat_amount = round(amount * 1.1, 2)
@@ -198,17 +210,46 @@ def get_candidates(
     )
     params.extend([lower_3pct, upper_3pct, vat_lower, vat_upper])
 
-    # Optionally filter by date if date_override is set (within 7 days)
-    if date_override:
-        where_parts.append("t.date BETWEEN %s - interval '7 days' AND %s + interval '7 days'")
-        params.extend([date_override, date_override])
+    # Date: ±30일 크로스월 검색 (date_override 없어도 ts 기반 날짜 사용)
+    if msg_date:
+        where_parts.append("t.date BETWEEN %s - interval '30 days' AND %s + interval '30 days'")
+        params.extend([msg_date, msg_date])
 
-    # Exclude already matched transactions
+    # Exclude already confirmed matches
     where_parts.append(
         "t.id NOT IN (SELECT transaction_id FROM transaction_slack_match WHERE is_confirmed = true)"
     )
 
     where_clause = " AND ".join(where_parts)
+
+    # Confidence scoring:
+    # - amount_score: exact=0.40, 3%=0.30, vat=0.25
+    # - date_score: 같은날=0.30, ±3일=0.25, ±7일=0.15, ±30일=0.05
+    # - vendor_score: 거래처 일치=0.30, 부분일치=0.15
+    vendor_case = "0"
+    extra_params_before: list = []
+    if vendor:
+        vendor_case = """
+            CASE
+                WHEN t.counterparty ILIKE %s THEN 0.30
+                WHEN t.counterparty ILIKE %s THEN 0.15
+                WHEN t.description ILIKE %s THEN 0.15
+                ELSE 0
+            END"""
+        extra_params_before = [vendor, f"%{vendor}%", f"%{vendor}%"]
+
+    date_case = "0"
+    date_params: list = []
+    if msg_date:
+        date_case = """
+            CASE
+                WHEN t.date = %s THEN 0.30
+                WHEN ABS(t.date - %s) <= 3 THEN 0.25
+                WHEN ABS(t.date - %s) <= 7 THEN 0.15
+                WHEN ABS(t.date - %s) <= 14 THEN 0.10
+                ELSE 0.05
+            END"""
+        date_params = [msg_date, msg_date, msg_date, msg_date]
 
     cur.execute(
         f"""
@@ -221,21 +262,25 @@ def get_candidates(
                    WHEN t.amount BETWEEN %s AND %s THEN 'vat_match'
                    ELSE 'fuzzy'
                END AS match_type,
-               CASE
-                   WHEN ABS(t.amount - %s) <= 1 THEN 0.95
-                   WHEN t.amount BETWEEN %s AND %s THEN 0.80
-                   WHEN t.amount BETWEEN %s AND %s THEN 0.75
-                   ELSE 0.50
-               END AS confidence
+               ROUND((
+                   CASE
+                       WHEN ABS(t.amount - %s) <= 1 THEN 0.40
+                       WHEN t.amount BETWEEN %s AND %s THEN 0.30
+                       WHEN t.amount BETWEEN %s AND %s THEN 0.25
+                       ELSE 0.10
+                   END
+                   + {date_case}
+                   + {vendor_case}
+               )::numeric, 2) AS confidence
         FROM transactions t
         WHERE {where_clause}
         ORDER BY confidence DESC, ABS(t.amount - %s) ASC
         LIMIT 20
         """,
         [
-            amount, lower_3pct, upper_3pct, vat_lower, vat_upper,  # match_type CASE
-            amount, lower_3pct, upper_3pct, vat_lower, vat_upper,  # confidence CASE
-        ] + params + [amount],  # ORDER BY
+            amount, lower_3pct, upper_3pct, vat_lower, vat_upper,  # match_type
+            amount, lower_3pct, upper_3pct, vat_lower, vat_upper,  # amount_score
+        ] + date_params + extra_params_before + params + [amount],
     )
     candidates = fetch_all(cur)
     cur.close()
