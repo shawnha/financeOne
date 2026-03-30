@@ -37,6 +37,27 @@ import {
   ChevronDown,
 } from "lucide-react"
 
+// ── Name color helper ─────────────────────────────────
+const NAME_COLORS = [
+  "bg-blue-500/20 text-blue-300 ring-blue-500/30",
+  "bg-emerald-500/20 text-emerald-300 ring-emerald-500/30",
+  "bg-amber-500/20 text-amber-300 ring-amber-500/30",
+  "bg-purple-500/20 text-purple-300 ring-purple-500/30",
+  "bg-rose-500/20 text-rose-300 ring-rose-500/30",
+  "bg-cyan-500/20 text-cyan-300 ring-cyan-500/30",
+  "bg-orange-500/20 text-orange-300 ring-orange-500/30",
+  "bg-indigo-500/20 text-indigo-300 ring-indigo-500/30",
+  "bg-teal-500/20 text-teal-300 ring-teal-500/30",
+  "bg-pink-500/20 text-pink-300 ring-pink-500/30",
+  "bg-lime-500/20 text-lime-300 ring-lime-500/30",
+  "bg-sky-500/20 text-sky-300 ring-sky-500/30",
+]
+function nameColor(name: string): string {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash)
+  return NAME_COLORS[Math.abs(hash) % NAME_COLORS.length]
+}
+
 // ── Types ──────────────────────────────────────────────
 
 interface ParsedStructured {
@@ -435,7 +456,7 @@ function CompactMessageRow({
 
         {/* Sender */}
         {(message.member_name_ko || message.sender_name) && (
-          <span className="inline-flex items-center rounded-md bg-white/[0.06] px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground ring-1 ring-inset ring-white/[0.08] truncate max-w-[72px]">
+          <span className={cn("inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset truncate max-w-[72px]", nameColor(message.member_name_ko || message.sender_name || ""))}>
             {message.member_name_ko || message.sender_name}
           </span>
         )}
@@ -481,7 +502,7 @@ function CompactMessageRow({
             >
               #{message.channel_name}
             </Badge>
-            <span className="inline-flex items-center rounded-md bg-white/[0.06] px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground ring-1 ring-inset ring-white/[0.08]">
+            <span className={cn("inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset", nameColor(message.member_name_ko || message.sender_name || ""))}>
               {message.member_name_ko || message.sender_name}
             </span>
             <span className="text-muted-foreground">&middot;</span>
