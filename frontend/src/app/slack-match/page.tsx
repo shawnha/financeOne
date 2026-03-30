@@ -70,6 +70,7 @@ interface SlackMessage {
   slack_status: string | null
   message_type: string | null
   member_id: number | null
+  member_name_ko: string | null
   match_id: number | null
   matched_transaction_id: number | null
   match_confidence: number | null
@@ -433,9 +434,11 @@ function CompactMessageRow({
         </span>
 
         {/* Sender */}
-        <span className="text-xs text-muted-foreground truncate max-w-[80px]">
-          {message.sender_name}
-        </span>
+        {(message.member_name_ko || message.sender_name) && (
+          <span className="inline-flex items-center rounded-md bg-white/[0.06] px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground ring-1 ring-inset ring-white/[0.08] truncate max-w-[72px]">
+            {message.member_name_ko || message.sender_name}
+          </span>
+        )}
 
         {/* Amount - push right */}
         <span className="ml-auto font-mono font-bold text-sm tabular-nums whitespace-nowrap">
@@ -478,7 +481,9 @@ function CompactMessageRow({
             >
               #{message.channel_name}
             </Badge>
-            <span className="text-muted-foreground">{message.sender_name}</span>
+            <span className="inline-flex items-center rounded-md bg-white/[0.06] px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground ring-1 ring-inset ring-white/[0.08]">
+              {message.member_name_ko || message.sender_name}
+            </span>
             <span className="text-muted-foreground">&middot;</span>
             <span className="text-muted-foreground">
               {new Date(message.message_date).toLocaleDateString("ko-KR")}

@@ -100,9 +100,11 @@ def list_slack_messages(
                tsm.transaction_id AS matched_transaction_id,
                tsm.match_confidence,
                tsm.is_confirmed AS match_confirmed,
-               tsm.is_manual AS match_manual
+               tsm.is_manual AS match_manual,
+               m.name AS member_name_ko
         FROM slack_messages sm
         LEFT JOIN transaction_slack_match tsm ON sm.id = tsm.slack_message_id
+        LEFT JOIN members m ON m.slack_user_id = sm.user_id AND m.entity_id = sm.entity_id
         WHERE {where_clause}
         ORDER BY sm.ts DESC
         LIMIT %s OFFSET %s
