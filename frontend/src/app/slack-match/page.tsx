@@ -687,36 +687,13 @@ function CandidatePanel({
       <CardContent className="p-4 space-y-3">
         <h3 className="text-sm font-semibold">매칭 후보</h3>
 
-        <div className="space-y-1" role="radiogroup" aria-label="매칭 후보 목록">
-          {candidates.map((candidate) => {
-            const isSelected = selectedCandidateId === candidate.id
-
-            return (
-              <button
+        <div className="space-y-1.5" role="list" aria-label="매칭 후보 목록">
+          {candidates.map((candidate) => (
+              <div
                 key={candidate.id}
-                role="radio"
-                aria-checked={isSelected}
-                onClick={() => setSelectedCandidateId(candidate.id)}
-                className={`w-full text-left rounded-lg p-3 transition-colors border ${
-                  isSelected
-                    ? "border-[hsl(var(--accent))] bg-[hsl(var(--accent))]/5"
-                    : "border-transparent hover:bg-secondary/30"
-                }`}
+                className="rounded-lg p-3 border border-white/[0.04] hover:bg-secondary/30 transition-colors"
               >
                 <div className="flex items-start gap-3">
-                  {/* Radio indicator */}
-                  <div
-                    className={`mt-0.5 h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                      isSelected
-                        ? "border-[hsl(var(--accent))]"
-                        : "border-muted-foreground/40"
-                    }`}
-                  >
-                    {isSelected && (
-                      <div className="h-2 w-2 rounded-full bg-[hsl(var(--accent))]" />
-                    )}
-                  </div>
-
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 text-sm">
                       <span className="text-muted-foreground">
@@ -736,31 +713,23 @@ function CandidatePanel({
                       </span>
                       {getConfidenceBadge(candidate.confidence)}
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      매칭 근거: {candidate.match_reason}
-                    </p>
                   </div>
+
+                  <Button
+                    size="sm"
+                    className="shrink-0 bg-[hsl(var(--accent))] text-accent-foreground hover:bg-[hsl(var(--accent))]/90 h-8 px-3"
+                    onClick={() => onConfirm(candidate.id)}
+                  >
+                    <Check className="h-3.5 w-3.5 mr-1" />
+                    확정
+                  </Button>
                 </div>
-              </button>
-            )
-          })}
+              </div>
+          ))}
         </div>
 
         {/* Actions */}
         <div className="flex gap-2 pt-2">
-          <Button
-            size="sm"
-            className="bg-[hsl(var(--accent))] text-accent-foreground hover:bg-[hsl(var(--accent))]/90"
-            disabled={selectedCandidateId === null}
-            onClick={() => {
-              if (selectedCandidateId !== null) {
-                onConfirm(selectedCandidateId)
-              }
-            }}
-          >
-            <Check className="h-3.5 w-3.5 mr-1" />
-            선택 확정
-          </Button>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
