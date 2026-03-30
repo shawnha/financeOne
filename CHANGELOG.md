@@ -2,6 +2,20 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [0.7.0] - 2026-03-30 — Slack 구조화 파싱 엔진
+
+### Added
+- **Claude Sonnet 구조화 파싱** — Slack 경비 메시지를 자동으로 구조화된 JSON으로 변환
+  - vendor, category, 항목별 금액, VAT, 원천징수, 선금/잔금 추출
+  - sync 시 자동 호출 (신규/변경 메시지만, 기존 건 스킵)
+  - `parsed_structured` JSONB 컬럼으로 저장
+  - Claude API 실패 시 기존 regex 결과로 fallback
+- **Slack 카드 구조화 테이블** — 카드 펼침 시 항목/VAT/원천징수/결제조건 테이블 표시
+- **원문 보기 토글** — 구조화 데이터 아래 원문 텍스트 접기/펼치기
+
+### Changed
+- **카드 접힌 상태** — 날짜를 이름 앞에 배치 (날짜순 정렬 기준)
+
 ## [0.6.1] - 2026-03-28 — 현금흐름 UI 재설계 (mockup 반영)
 
 ### Changed
