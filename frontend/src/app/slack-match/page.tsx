@@ -441,7 +441,7 @@ function CompactMessageRow({
       {/* Compact summary line */}
       <button
         className="w-full text-left px-3 py-2.5 flex items-center gap-2 min-w-0"
-        onClick={onToggleExpand}
+        onClick={() => { onToggleExpand(); onSelect(); }}
       >
         {/* Status dot */}
         {getStatusDot(status)}
