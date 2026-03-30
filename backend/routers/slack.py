@@ -13,6 +13,7 @@ from backend.utils.db import fetch_all
 from backend.services.slack.slack_client import find_channel_id, fetch_history, fetch_replies, fetch_user_name, get_reactions
 from backend.services.slack.message_parser import parse_message
 from backend.services.slack.thread_analyzer import analyze_thread, resolve_slack_status
+from backend.services.slack.structured_parser import parse_structured
 
 router = APIRouter(prefix="/api/slack", tags=["slack"])
 
@@ -361,7 +362,14 @@ def sync_slack_channel(
         if months:
             target_months = {int(m) for m in months.split(",")}
 
-        stats = {"total_fetched": len(messages), "new": 0, "updated": 0, "skipped": 0}
+        stats = {"total_fetched": len(messages), "new": 0, "updated": 0, "skipped": 0, "structured": 0}
+
+        # 기존 메시지 캐시 (구조화 파싱 스킵 판단용)
+        cur.execute(
+            "SELECT ts, text, reply_count, parsed_structured IS NOT NULL AS has_structured FROM slack_messages WHERE entity_id = %s",
+            [entity_id],
+        )
+        existing_cache = {row[0]: {"text": row[1], "reply_count": row[2], "has_structured": row[3]} for row in cur.fetchall()}
 
         for msg in messages:
             ts = msg.get("ts", "")
@@ -439,14 +447,34 @@ def sync_slack_channel(
 
             status_result = resolve_slack_status(parsed["message_type"], has_check, thread_events)
 
+            # ── Claude 구조화 파싱 ──
+            parsed_structured = None
+            existing = existing_cache.get(ts)
+            should_call_claude = (
+                existing is None                                    # 신규
+                or not existing["has_structured"]                   # 미파싱
+                or existing["text"] != text                         # 텍스트 변경
+                or existing["reply_count"] < reply_count            # 새 댓글
+            )
+
+            if should_call_claude and not parsed.get("skip") and parsed["message_type"] != "other":
+                parsed_structured = parse_structured(
+                    text,
+                    thread_replies=thread_replies_json,
+                    skip=False,
+                )
+
+            if parsed_structured is not None:
+                stats["structured"] += 1
+
             cur.execute(
                 """
                 INSERT INTO slack_messages
                     (entity_id, ts, channel, user_id, text, parsed_amount, parsed_amount_vat_included,
                      vat_flag, project_tag, date_override, reply_count, thread_replies_json, raw_json,
                      member_id, message_type, slack_status, currency, withholding_tax, sender_name,
-                     sub_amounts, is_cancelled, deposit_completed_date)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     sub_amounts, parsed_structured, is_cancelled, deposit_completed_date)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (ts) DO UPDATE SET
                     text = EXCLUDED.text,
                     parsed_amount = EXCLUDED.parsed_amount,
@@ -463,6 +491,10 @@ def sync_slack_channel(
                     withholding_tax = EXCLUDED.withholding_tax,
                     sender_name = EXCLUDED.sender_name,
                     sub_amounts = EXCLUDED.sub_amounts,
+                    parsed_structured = CASE
+                        WHEN EXCLUDED.parsed_structured IS NOT NULL THEN EXCLUDED.parsed_structured
+                        ELSE slack_messages.parsed_structured
+                    END,
                     is_cancelled = EXCLUDED.is_cancelled,
                     deposit_completed_date = EXCLUDED.deposit_completed_date
                 RETURNING (xmax = 0) AS is_new
@@ -475,6 +507,7 @@ def sync_slack_channel(
                     member_id, parsed["message_type"], status_result["slack_status"],
                     parsed["currency"], parsed["withholding_tax"], sender_name,
                     json.dumps(parsed["sub_amounts"]) if parsed.get("sub_amounts") else None,
+                    json.dumps(parsed_structured, ensure_ascii=False) if parsed_structured else None,
                     status_result.get("is_cancelled", False),
                     None,
                 ],
