@@ -2,24 +2,11 @@
 
 import json
 import logging
-from pathlib import Path
+import os
 
 import anthropic
 
 logger = logging.getLogger(__name__)
-
-# ── API 키 ────────────────────────────────────────────────
-
-def _get_api_key() -> str | None:
-    """Read ANTHROPIC_API_KEY from .env. Returns None if not found (tests use mocked client)."""
-    try:
-        env_path = Path(__file__).resolve().parents[3] / ".env"
-        for line in env_path.read_text().splitlines():
-            if line.startswith("ANTHROPIC_API_KEY="):
-                return line.split("=", 1)[1].strip()
-    except Exception:
-        pass
-    return None
 
 
 # ── 프롬프트 ──────────────────────────────────────────────
@@ -101,7 +88,7 @@ def parse_structured(
     raw_text = None
 
     try:
-        client = anthropic.Anthropic(api_key=_get_api_key())
+        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
         user_prompt = build_user_prompt(text, thread_replies=thread_replies)
 
         response = client.messages.create(
@@ -111,6 +98,9 @@ def parse_structured(
             messages=[{"role": "user", "content": user_prompt}],
         )
 
+        if not response.content:
+            logger.warning("structured_parse: empty content from API")
+            return None
         raw_text = response.content[0].text.strip()
 
         # JSON 블록 추출 (```json ... ``` 감싸는 경우 대비)

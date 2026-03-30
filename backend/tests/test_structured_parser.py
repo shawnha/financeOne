@@ -117,6 +117,33 @@ class TestParseStructured:
         assert result is None
         MockAnthropic.return_value.messages.create.assert_not_called()
 
+    @patch("backend.services.slack.structured_parser.anthropic.Anthropic")
+    def test_json_wrapped_in_code_fence(self, MockAnthropic):
+        """Claude가 ```json으로 감싼 경우 정상 파싱."""
+        client = MockAnthropic.return_value
+        mock_block = MagicMock()
+        mock_block.text = "```json\n" + json.dumps(MOCK_RESPONSE, ensure_ascii=False) + "\n```"
+        mock_response = MagicMock()
+        mock_response.content = [mock_block]
+        mock_response.usage.input_tokens = 500
+        mock_response.usage.output_tokens = 200
+        client.messages.create.return_value = mock_response
+
+        result = parse_structured("[ODD] 택시비 35,000원", thread_replies=None)
+        assert result is not None
+        assert result["total_amount"] == 35000
+
+    @patch("backend.services.slack.structured_parser.anthropic.Anthropic")
+    def test_empty_api_response_returns_none(self, MockAnthropic):
+        """API가 빈 content를 반환하면 None."""
+        client = MockAnthropic.return_value
+        mock_response = MagicMock()
+        mock_response.content = []
+        client.messages.create.return_value = mock_response
+
+        result = parse_structured("[ODD] 택시비 35,000원", thread_replies=None)
+        assert result is None
+
 
 class TestSystemPrompt:
     def test_system_prompt_exists(self):
