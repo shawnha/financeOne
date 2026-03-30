@@ -36,6 +36,8 @@ def classify(text: str) -> str:
 KRW_PATTERN = re.compile(r'(?:총\s*|총금액\s*[=:]\s*)?(\d{1,3}(?:,\d{3})+|\d{4,})\s*원')
 KRW_WON_SIGN_PATTERN = re.compile(r'₩\s*(\d{1,3}(?:,\d{3})+|\d{4,})')
 KRW_KEYWORD_PATTERN = re.compile(r'(?:금액[은는이]?\s*[:=]\s*|입금\s*(?:금액|액)\s*[:=]?\s*)(\d{1,3}(?:,\d{3})+|\d{4,})')
+KRW_BULLET_PATTERN = re.compile(r'•\s*(\d{1,3}(?:,\d{3})+)\s*$', re.MULTILINE)
+KRW_CHEON_PATTERN = re.compile(r'(\d+)\s*천\s*원')
 KRW_MAN_PATTERN = re.compile(r'(\d+)\s*만\s*원')
 USD_PATTERN = re.compile(r'(?:US)?\$\s*(\d[\d,]*(?:\.\d{1,2})?)')
 USD_SUFFIX_PATTERN = re.compile(r'(\d[\d,]*(?:\.\d{1,2})?)\s*\$')
@@ -77,6 +79,11 @@ def extract_amount(text: str) -> dict | None:
         amounts = [int(m) * 10000 for m in man_matches]
         return {"amount": max(amounts), "currency": "KRW"}
 
+    cheon_matches = KRW_CHEON_PATTERN.findall(text)
+    if cheon_matches:
+        amounts = [int(m) * 1000 for m in cheon_matches]
+        return {"amount": max(amounts), "currency": "KRW"}
+
     # ₩ 기호 패턴 (예: ₩119,350, ₩ 500,000)
     won_sign_matches = KRW_WON_SIGN_PATTERN.findall(text)
     if won_sign_matches:
@@ -98,6 +105,12 @@ def extract_amount(text: str) -> dict | None:
     keyword_matches = KRW_KEYWORD_PATTERN.findall(text)
     if keyword_matches:
         amounts = [_parse_number(m) for m in keyword_matches]
+        return {"amount": max(amounts), "currency": "KRW"}
+
+    # "• 170,070" 같이 불릿 뒤에 숫자만 있는 경우 (비용공유 메시지)
+    bullet_matches = KRW_BULLET_PATTERN.findall(text)
+    if bullet_matches:
+        amounts = [_parse_number(m) for m in bullet_matches]
         return {"amount": max(amounts), "currency": "KRW"}
 
     return None
