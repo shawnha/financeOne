@@ -182,52 +182,94 @@ def get_candidates(
 
     msg_id, entity_id, parsed_amount, parsed_amount_vat, msg_date, parsed_structured, msg_text = msg
 
-    if parsed_amount is None:
+    # 구조화 파싱에서 정보 추출
+    ps = parsed_structured if isinstance(parsed_structured, dict) else {}
+    vendor = ps.get("vendor")
+    structured_total = ps.get("total_amount")
+    structured_items = ps.get("items") or []
+
+    # 검색할 금액 목록 생성:
+    # 1. 구조화 파싱 total_amount (가장 신뢰)
+    # 2. 개별 항목 금액들
+    # 3. DB parsed_amount (fallback)
+    search_amounts: list[dict] = []
+
+    if structured_total and structured_total > 0:
+        search_amounts.append({"amount": float(structured_total), "label": "총액"})
+
+    for item in structured_items:
+        item_amt = item.get("amount")
+        if item_amt and item_amt > 0:
+            desc = item.get("description", "")[:30]
+            search_amounts.append({"amount": float(item_amt), "label": desc})
+
+    if parsed_amount is not None and not search_amounts:
+        search_amounts.append({"amount": float(parsed_amount), "label": "파싱금액"})
+
+    if not search_amounts:
         cur.close()
-        return {"candidates": [], "message_id": message_id, "reason": "parsed_amount is NULL"}
+        return {"candidates": [], "message_id": message_id, "reason": "금액 정보 없음"}
 
-    amount = float(parsed_amount)
+    # 주 금액 (총액 또는 첫 번째)
+    primary_amount = search_amounts[0]["amount"]
 
-    # 구조화 파싱에서 vendor 추출
-    vendor = None
-    if parsed_structured:
-        ps = parsed_structured if isinstance(parsed_structured, dict) else {}
-        vendor = ps.get("vendor")
-
-    # Amount ranges
-    lower_3pct = round(amount * 0.97, 2)
-    upper_3pct = round(amount * 1.03, 2)
-    vat_amount = round(amount * 1.1, 2)
-    vat_lower = round(vat_amount * 0.97, 2)
-    vat_upper = round(vat_amount * 1.03, 2)
+    # 모든 검색 금액의 ±3%, VAT 범위를 합쳐서 하나의 쿼리로
+    amount_conditions = []
+    amount_params: list = []
+    for sa in search_amounts:
+        amt = sa["amount"]
+        lo = round(amt * 0.97, 2)
+        hi = round(amt * 1.03, 2)
+        vat_amt = round(amt * 1.1, 2)
+        vat_lo = round(vat_amt * 0.97, 2)
+        vat_hi = round(vat_amt * 1.03, 2)
+        amount_conditions.append("(t.amount BETWEEN %s AND %s OR t.amount BETWEEN %s AND %s)")
+        amount_params.extend([lo, hi, vat_lo, vat_hi])
 
     where_parts = ["t.entity_id = %s"]
     params: list = [entity_id]
 
-    # Amount matching: within 3% of parsed_amount OR within 3% of VAT amount
-    where_parts.append(
-        "(t.amount BETWEEN %s AND %s OR t.amount BETWEEN %s AND %s)"
-    )
-    params.extend([lower_3pct, upper_3pct, vat_lower, vat_upper])
+    where_parts.append("(" + " OR ".join(amount_conditions) + ")")
+    params.extend(amount_params)
 
-    # Date: ±30일 크로스월 검색 (date_override 없어도 ts 기반 날짜 사용)
     if msg_date:
         where_parts.append("t.date BETWEEN %s - interval '30 days' AND %s + interval '30 days'")
         params.extend([msg_date, msg_date])
 
-    # Exclude already confirmed matches
     where_parts.append(
         "t.id NOT IN (SELECT transaction_id FROM transaction_slack_match WHERE is_confirmed = true)"
     )
 
     where_clause = " AND ".join(where_parts)
 
-    # Confidence scoring:
-    # - amount_score: exact=0.40, 3%=0.30, vat=0.25
-    # - date_score: 같은날=0.30, ±3일=0.25, ±7일=0.15, ±30일=0.05
-    # - vendor_score: 거래처 일치=0.30, 부분일치=0.15
+    # 각 검색 금액별 best match를 위한 CASE 구문 동적 생성
+    # 가장 가까운 금액과의 차이 기반 점수
+    best_amount_cases = []
+    best_amount_params: list = []
+    for sa in search_amounts:
+        amt = sa["amount"]
+        lo = round(amt * 0.97, 2)
+        hi = round(amt * 1.03, 2)
+        vat_amt = round(amt * 1.1, 2)
+        vat_lo = round(vat_amt * 0.97, 2)
+        vat_hi = round(vat_amt * 1.03, 2)
+        best_amount_cases.append(
+            "CASE WHEN ABS(t.amount - %s) <= 1 THEN 0.40"
+            " WHEN t.amount BETWEEN %s AND %s THEN 0.30"
+            " WHEN t.amount BETWEEN %s AND %s THEN 0.25"
+            " ELSE 0 END"
+        )
+        best_amount_params.extend([amt, lo, hi, vat_lo, vat_hi])
+
+    amount_score_expr = "GREATEST(" + ", ".join(best_amount_cases) + ")"
+
+    # match_type: 주 금액 기준
+    match_type_params = [primary_amount,
+                         round(primary_amount * 0.97, 2), round(primary_amount * 1.03, 2),
+                         round(primary_amount * 1.1 * 0.97, 2), round(primary_amount * 1.1 * 1.03, 2)]
+
     vendor_case = "0"
-    extra_params_before: list = []
+    vendor_params: list = []
     if vendor:
         vendor_case = """
             CASE
@@ -236,10 +278,10 @@ def get_candidates(
                 WHEN t.description ILIKE %s THEN 0.15
                 ELSE 0
             END"""
-        extra_params_before = [vendor, f"%{vendor}%", f"%{vendor}%"]
+        vendor_params = [vendor, f"%{vendor}%", f"%{vendor}%"]
 
     date_case = "0"
-    date_params: list = []
+    date_params_score: list = []
     if msg_date:
         date_case = """
             CASE
@@ -249,7 +291,7 @@ def get_candidates(
                 WHEN ABS(t.date - %s) <= 14 THEN 0.10
                 ELSE 0.05
             END"""
-        date_params = [msg_date, msg_date, msg_date, msg_date]
+        date_params_score = [msg_date, msg_date, msg_date, msg_date]
 
     cur.execute(
         f"""
@@ -260,15 +302,10 @@ def get_candidates(
                    WHEN ABS(t.amount - %s) <= 1 THEN 'exact'
                    WHEN t.amount BETWEEN %s AND %s THEN 'within_3pct'
                    WHEN t.amount BETWEEN %s AND %s THEN 'vat_match'
-                   ELSE 'fuzzy'
+                   ELSE 'item_match'
                END AS match_type,
                ROUND((
-                   CASE
-                       WHEN ABS(t.amount - %s) <= 1 THEN 0.40
-                       WHEN t.amount BETWEEN %s AND %s THEN 0.30
-                       WHEN t.amount BETWEEN %s AND %s THEN 0.25
-                       ELSE 0.10
-                   END
+                   {amount_score_expr}
                    + {date_case}
                    + {vendor_case}
                )::numeric, 2) AS confidence
@@ -277,17 +314,18 @@ def get_candidates(
         ORDER BY confidence DESC, ABS(t.amount - %s) ASC
         LIMIT 20
         """,
-        [
-            amount, lower_3pct, upper_3pct, vat_lower, vat_upper,  # match_type
-            amount, lower_3pct, upper_3pct, vat_lower, vat_upper,  # amount_score
-        ] + date_params + extra_params_before + params + [amount],
+        match_type_params
+        + best_amount_params + date_params_score + vendor_params
+        + params + [primary_amount],
     )
     candidates = fetch_all(cur)
     cur.close()
 
     return {
         "message_id": message_id,
-        "parsed_amount": amount,
+        "parsed_amount": float(parsed_amount) if parsed_amount else None,
+        "structured_total": structured_total,
+        "search_amounts": search_amounts,
         "candidates": candidates,
     }
 

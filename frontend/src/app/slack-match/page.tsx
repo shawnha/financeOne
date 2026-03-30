@@ -461,13 +461,17 @@ function CompactMessageRow({
           </span>
         )}
 
-        {/* Amount - push right */}
+        {/* Amount - push right (구조화 파싱 총액 우선) */}
         <span className="ml-auto font-mono font-bold text-sm tabular-nums whitespace-nowrap">
-          {message.parsed_amount !== null
-            ? message.parsed_currency === "USD"
-              ? `$${message.parsed_amount.toLocaleString()}`
-              : formatKRW(message.parsed_amount)
-            : ""}
+          {(() => {
+            const structTotal = message.parsed_structured?.total_amount
+            const amount = structTotal ?? message.parsed_amount
+            if (amount === null && structTotal == null) return ""
+            const currency = message.parsed_structured?.currency || message.parsed_currency
+            return currency === "USD"
+              ? `$${(amount ?? 0).toLocaleString()}`
+              : formatKRW(amount ?? 0)
+          })()}
         </span>
 
         {/* Confidence badge */}
