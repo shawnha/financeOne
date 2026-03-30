@@ -285,6 +285,7 @@ CREATE TABLE IF NOT EXISTS slack_messages (
   withholding_tax           BOOLEAN DEFAULT FALSE,
   sender_name               TEXT,
   sub_amounts               JSONB,
+  parsed_structured           JSONB,
   created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
