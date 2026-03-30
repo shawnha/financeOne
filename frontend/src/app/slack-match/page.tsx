@@ -123,7 +123,7 @@ interface MatchCandidate {
   amount: number
   counterparty: string
   confidence: number
-  match_reason: string
+  match_type: string
 }
 
 interface CandidatesResponse {
@@ -627,10 +627,6 @@ function CandidatePanel({
         `/slack/messages/${messageId}/candidates`,
       )
       setCandidates(data.candidates)
-      // Auto-select first candidate
-      if (data.candidates.length > 0) {
-        setSelectedCandidateId(data.candidates[0].id)
-      }
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "후보를 불러올 수 없습니다.",
@@ -687,13 +683,25 @@ function CandidatePanel({
       <CardContent className="p-4 space-y-3">
         <h3 className="text-sm font-semibold">매칭 후보</h3>
 
-        <div className="space-y-1.5" role="list" aria-label="매칭 후보 목록">
-          {candidates.map((candidate) => (
+        <div className="space-y-1.5" role="listbox" aria-label="매칭 후보 목록">
+          {candidates.map((candidate) => {
+            const isSelected = selectedCandidateId === candidate.id
+            return (
               <div
                 key={candidate.id}
-                className="rounded-lg p-3 border border-white/[0.04] hover:bg-secondary/30 transition-colors"
+                role="option"
+                aria-selected={isSelected}
+                tabIndex={0}
+                onClick={() => setSelectedCandidateId(isSelected ? null : candidate.id)}
+                onKeyDown={(e) => { if (e.key === "Enter" && isSelected) onConfirm(candidate.id) }}
+                className={cn(
+                  "rounded-lg p-3 transition-all border cursor-pointer",
+                  isSelected
+                    ? "border-[hsl(var(--accent))] bg-[hsl(var(--accent))]/5"
+                    : "border-white/[0.04] hover:bg-secondary/30"
+                )}
               >
-                <div className="flex items-start gap-3">
+                <div className="flex items-center gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 text-sm">
                       <span className="text-muted-foreground">
@@ -715,17 +723,20 @@ function CandidatePanel({
                     </div>
                   </div>
 
-                  <Button
-                    size="sm"
-                    className="shrink-0 bg-[hsl(var(--accent))] text-accent-foreground hover:bg-[hsl(var(--accent))]/90 h-8 px-3"
-                    onClick={() => onConfirm(candidate.id)}
-                  >
-                    <Check className="h-3.5 w-3.5 mr-1" />
-                    확정
-                  </Button>
+                  {isSelected && (
+                    <Button
+                      size="sm"
+                      className="shrink-0 bg-[hsl(var(--accent))] text-accent-foreground hover:bg-[hsl(var(--accent))]/90 h-8 px-3"
+                      onClick={(e) => { e.stopPropagation(); onConfirm(candidate.id) }}
+                    >
+                      <Check className="h-3.5 w-3.5 mr-1" />
+                      확정
+                    </Button>
+                  )}
                 </div>
               </div>
-          ))}
+            )
+          })}
         </div>
 
         {/* Actions */}
