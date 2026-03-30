@@ -34,6 +34,8 @@ def classify(text: str) -> str:
 # ── 금액 추출 ──────────────────────────────────────────
 
 KRW_PATTERN = re.compile(r'(?:총\s*|총금액\s*[=:]\s*)?(\d{1,3}(?:,\d{3})+|\d{4,})\s*원')
+KRW_WON_SIGN_PATTERN = re.compile(r'₩\s*(\d{1,3}(?:,\d{3})+|\d{4,})')
+KRW_KEYWORD_PATTERN = re.compile(r'(?:금액[은는이]?\s*[:=]\s*|입금\s*(?:금액|액)\s*[:=]?\s*)(\d{1,3}(?:,\d{3})+|\d{4,})')
 KRW_MAN_PATTERN = re.compile(r'(\d+)\s*만\s*원')
 USD_PATTERN = re.compile(r'(?:US)?\$\s*(\d[\d,]*(?:\.\d{1,2})?)')
 USD_SUFFIX_PATTERN = re.compile(r'(\d[\d,]*(?:\.\d{1,2})?)\s*\$')
@@ -75,6 +77,12 @@ def extract_amount(text: str) -> dict | None:
         amounts = [int(m) * 10000 for m in man_matches]
         return {"amount": max(amounts), "currency": "KRW"}
 
+    # ₩ 기호 패턴 (예: ₩119,350, ₩ 500,000)
+    won_sign_matches = KRW_WON_SIGN_PATTERN.findall(text)
+    if won_sign_matches:
+        amounts = [_parse_number(m) for m in won_sign_matches]
+        return {"amount": max(amounts), "currency": "KRW"}
+
     krw_matches = KRW_PATTERN.findall(text)
     if krw_matches:
         amounts = [_parse_number(m) for m in krw_matches]
@@ -84,6 +92,12 @@ def extract_amount(text: str) -> dict | None:
                 line_amounts = KRW_PATTERN.findall(line)
                 if line_amounts:
                     return {"amount": _parse_number(line_amounts[-1]), "currency": "KRW"}
+        return {"amount": max(amounts), "currency": "KRW"}
+
+    # "금액은: 821,000" 같이 키워드 뒤에 숫자만 있는 경우
+    keyword_matches = KRW_KEYWORD_PATTERN.findall(text)
+    if keyword_matches:
+        amounts = [_parse_number(m) for m in keyword_matches]
         return {"amount": max(amounts), "currency": "KRW"}
 
     return None
