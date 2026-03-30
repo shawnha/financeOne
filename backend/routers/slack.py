@@ -94,6 +94,7 @@ def list_slack_messages(
                sm.is_completed, sm.is_cancelled,
                COALESCE(sm.date_override, to_timestamp(CAST(sm.ts AS DOUBLE PRECISION))::date) AS message_date,
                sm.reply_count,
+               sm.parsed_structured,
                sm.created_at,
                tsm.id AS match_id,
                tsm.transaction_id AS matched_transaction_id,
