@@ -42,3 +42,4 @@ transaction_sample/
 *.xlsx
 *.csv
 uploads/
+.superpowers/
