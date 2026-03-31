@@ -28,7 +28,7 @@ import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { fetchAPI } from "@/lib/api"
 import { formatByEntity } from "@/lib/format"
-import { AlertCircle, RefreshCw, Plus, Download } from "lucide-react"
+import { AlertCircle, RefreshCw, Plus, Download, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MonthPicker } from "@/components/month-picker"
 import { AccountCombobox } from "@/components/account-combobox"
@@ -292,7 +292,19 @@ function ForecastBalanceChart({
             stroke="#F59E0B"
             strokeWidth={2}
             strokeDasharray="8 4"
-            dot={false}
+            dot={(props: { cx?: number; cy?: number; payload?: { events?: Array<{ name: string; type: string }> } }) => {
+              const { cx, cy, payload } = props
+              if (!payload?.events?.length || !cx || !cy) return <g />
+              const label = payload.events.map((e) => e.name).join(", ")
+              return (
+                <g>
+                  <circle cx={cx} cy={cy} r={3.5} fill="#F59E0B" stroke="#050508" strokeWidth={1.5} />
+                  <text x={cx} y={cy - 10} textAnchor="middle" fill="#F59E0B" fontSize={8} fontWeight={500}>
+                    {label.length > 12 ? label.slice(0, 12) + "…" : label}
+                  </text>
+                </g>
+              )
+            }}
             activeDot={{ r: 4, fill: "#F59E0B", stroke: "#050508", strokeWidth: 2 }}
           />
           {/* Actual balance (green solid + area) */}
@@ -711,6 +723,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                 {showComparison && <th className="text-right px-4 py-2 text-[hsl(var(--profit))]">실제 진행</th>}
                 <th className="text-right px-4 py-2 text-[hsl(var(--warning))]">예상 잔고</th>
                 {showComparison && <th className="text-right px-4 py-2 text-[hsl(var(--profit))]">실제 잔고</th>}
+                <th className="w-10 px-2 py-2"></th>
               </tr>
             </thead>
             <tbody>
@@ -728,6 +741,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                     {formatByEntity(data.opening_balance, entityId)}
                   </td>
                 )}
+                <td></td>
               </tr>
 
               {/* Forecast items */}
@@ -739,7 +753,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                   : null
 
                 return (
-                  <tr key={item.id} className="border-t border-border hover:bg-white/[0.02] transition-colors">
+                  <tr key={item.id} className="border-t border-border hover:bg-white/[0.02] transition-colors group">
                     <td className="px-4 py-2.5">
                       <Badge variant="outline" className={cn(
                         "text-[10px] font-semibold px-2 py-0.5",
@@ -770,6 +784,21 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                     )}
                     <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-[hsl(var(--warning))]">--</td>
                     {showComparison && <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs"></td>}
+                    <td className="px-2 py-2.5">
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`"${item.internal_account_name ?? item.category}" 항목을 삭제하시겠습니까?`)) return
+                          try {
+                            await fetchAPI(`/forecasts/${item.id}`, { method: "DELETE" })
+                            fetchForecast()
+                          } catch { /* toast handled by fetchAPI */ }
+                        }}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                        title="삭제"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </td>
                   </tr>
                 )
               })}
@@ -790,6 +819,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                   {showComparison && <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-muted-foreground">--</td>}
                   <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-[hsl(var(--warning))]">--</td>
                   {showComparison && <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-muted-foreground">--</td>}
+                  <td></td>
                 </tr>
               )}
 
@@ -807,11 +837,12 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                     {formatByEntity(data.actual_closing, entityId)}
                   </td>
                 )}
+                <td></td>
               </tr>
 
               {data.items.length === 0 && (
                 <tr>
-                  <td colSpan={showComparison ? 6 : 4} className="px-4 py-8 text-center text-muted-foreground">
+                  <td colSpan={showComparison ? 7 : 5} className="px-4 py-8 text-center text-muted-foreground">
                     예상 항목을 추가해보세요
                   </td>
                 </tr>
