@@ -113,6 +113,8 @@ interface SlackMessage {
   parsed_structured: ParsedStructured | null
   item_matches?: ItemMatch[]
   match_progress?: MatchProgress
+  parsed_amount_krw?: number
+  exchange_rate?: number
 }
 
 interface MonthlySummary {
@@ -356,9 +358,16 @@ function StructuredDetail({ data }: { data: ParsedStructured }) {
                 <tr key={i} className="border-b border-white/[0.04] last:border-0">
                   <td className="px-2 py-1.5">{item.description}</td>
                   <td className="px-2 py-1.5 text-right font-mono tabular-nums">
-                    {item.currency === "USD"
-                      ? `$${item.amount.toLocaleString()}`
-                      : formatKRW(item.amount)}
+                    {item.currency === "USD" ? (
+                      <span>
+                        ${item.amount.toLocaleString()}
+                        {(item as Record<string, unknown>).amount_krw != null && (
+                          <span className="text-[10px] text-muted-foreground ml-1">
+                            ({formatKRW((item as Record<string, unknown>).amount_krw as number)})
+                          </span>
+                        )}
+                      </span>
+                    ) : formatKRW(item.amount)}
                   </td>
                 </tr>
               ))}
@@ -366,9 +375,16 @@ function StructuredDetail({ data }: { data: ParsedStructured }) {
                 <tr className="bg-secondary/20 font-medium">
                   <td className="px-2 py-1.5">합계</td>
                   <td className="px-2 py-1.5 text-right font-mono tabular-nums">
-                    {data.currency === "USD"
-                      ? `$${data.total_amount.toLocaleString()}`
-                      : formatKRW(data.total_amount)}
+                    {data.currency === "USD" ? (
+                      <span>
+                        ${data.total_amount.toLocaleString()}
+                        {(data as Record<string, unknown>).total_amount_krw != null && (
+                          <span className="text-[10px] text-muted-foreground ml-1">
+                            ({formatKRW((data as Record<string, unknown>).total_amount_krw as number)})
+                          </span>
+                        )}
+                      </span>
+                    ) : formatKRW(data.total_amount)}
                   </td>
                 </tr>
               )}
@@ -482,15 +498,26 @@ function CompactMessageRow({
         )}
 
         {/* Amount - push right (구조화 파싱 총액 우선) */}
-        <span className="ml-auto font-mono font-bold text-sm tabular-nums whitespace-nowrap">
+        <span className="ml-auto font-mono font-bold text-sm tabular-nums whitespace-nowrap text-right">
           {(() => {
             const structTotal = message.parsed_structured?.total_amount
             const amount = structTotal ?? message.parsed_amount
             if (amount === null && structTotal == null) return ""
             const currency = message.parsed_structured?.currency || message.parsed_currency
-            return currency === "USD"
-              ? `$${(amount ?? 0).toLocaleString()}`
-              : formatKRW(amount ?? 0)
+            if (currency === "USD") {
+              const krwAmount = message.parsed_amount_krw ?? (message.parsed_structured as Record<string, unknown>)?.total_amount_krw as number | undefined
+              return (
+                <span className="flex flex-col items-end">
+                  <span>${(amount ?? 0).toLocaleString()}</span>
+                  {krwAmount != null && (
+                    <span className="text-[10px] text-muted-foreground font-normal">
+                      {formatKRW(krwAmount)}
+                    </span>
+                  )}
+                </span>
+              )
+            }
+            return formatKRW(amount ?? 0)
           })()}
         </span>
 
@@ -1052,8 +1079,8 @@ function SlackMatchContent() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [confidenceFilter, setConfidenceFilter] = useState<ConfidenceFilter>("all")
 
-  const fetchMessages = useCallback(async () => {
-    setLoading(true)
+  const fetchMessages = useCallback(async (background = false) => {
+    if (!background) setLoading(true)
     setError(null)
     try {
       const data = await fetchAPI<SlackMessagesResponse>(
@@ -1082,7 +1109,7 @@ function SlackMatchContent() {
         { method: "POST" },
       )
       toast.success(`동기화 완료: 신규 ${result.new}건, 업데이트 ${result.updated}건`)
-      fetchMessages()
+      fetchMessages(true)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "동기화에 실패했습니다")
     } finally {
@@ -1147,9 +1174,7 @@ function SlackMatchContent() {
           body: JSON.stringify({ transaction_id: transactionId }),
         })
         toast.success("매칭이 확정되었습니다.")
-        fetchMessages()
-        setSelectedMessageId(null)
-        setExpandedId(null)
+        fetchMessages(true)
       } catch (err) {
         toast.error(
           err instanceof Error ? err.message : "매칭 확정에 실패했습니다.",
@@ -1175,7 +1200,7 @@ function SlackMatchContent() {
           body: JSON.stringify({}),
         })
         toast.success("메시지가 무시 처리되었습니다.")
-        fetchMessages()
+        fetchMessages(true)
       } catch (err) {
         toast.error(
           err instanceof Error ? err.message : "무시 처리에 실패했습니다.",
@@ -1453,7 +1478,7 @@ function SlackMatchContent() {
               messageId={selectedMessageId}
               message={selectedMessage}
               onConfirm={(txId) => handleConfirm(selectedMessageId, txId)}
-              onRefresh={fetchMessages}
+              onRefresh={() => fetchMessages(true)}
             />
           ) : (
             <Card className="bg-card rounded-xl shadow">

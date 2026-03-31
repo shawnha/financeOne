@@ -34,6 +34,62 @@ class IgnoreMessage(BaseModel):
     reason: Optional[str] = None
 
 
+def _add_krw_conversion(rows: list[dict], conn: PgConnection) -> None:
+    """외화 메시지에 KRW 환산 금액을 추가한다.
+
+    parsed_amount는 sync 시 이미 KRW 변환됨 → 그대로 사용.
+    parsed_structured의 items/total_amount는 원래 통화 → 환율 적용.
+    """
+    from backend.services.exchange_rate_service import get_closing_rate
+
+    rate_cache: dict[tuple[str, str], float] = {}
+
+    for row in rows:
+        currency = row.get("currency") or "KRW"
+        if currency == "KRW":
+            continue
+
+        msg_date = row.get("message_date")
+        if not msg_date:
+            continue
+
+        cache_key = (currency, str(msg_date))
+        if cache_key not in rate_cache:
+            try:
+                from datetime import date as date_type
+                if isinstance(msg_date, str):
+                    d = date_type.fromisoformat(msg_date)
+                else:
+                    d = msg_date
+                rate = float(get_closing_rate(conn, currency, "KRW", d))
+                rate_cache[cache_key] = rate
+            except Exception:
+                continue
+
+        rate = rate_cache.get(cache_key)
+        if not rate:
+            continue
+
+        row["exchange_rate"] = rate
+
+        # parsed_amount는 이미 KRW → parsed_amount_krw = parsed_amount 그대로
+        parsed_amt = row.get("parsed_amount")
+        if parsed_amt is not None:
+            row["parsed_amount_krw"] = round(float(parsed_amt), 0)
+
+        # parsed_structured items/total은 원래 통화 → KRW 환산
+        ps = row.get("parsed_structured")
+        if ps and isinstance(ps, dict):
+            items = ps.get("items") or []
+            for item in items:
+                item_amt = item.get("amount")
+                if item_amt is not None:
+                    item["amount_krw"] = round(float(item_amt) * rate, 0)
+            total = ps.get("total_amount")
+            if total is not None:
+                ps["total_amount_krw"] = round(float(total) * rate, 0)
+
+
 def _build_search_amounts(
     ps: dict,
     parsed_amount: float | None,
@@ -242,6 +298,9 @@ def list_slack_messages(
         if item_data:
             row["item_matches"] = item_data["item_matches"]
             row["match_progress"] = item_data["match_progress"]
+
+    # ── 외화 → KRW 환산 금액 추가 ──
+    _add_krw_conversion(rows, conn)
 
     # 월별 요약 통계 — month 필터 없이 entity 전체
     summary_where = ["1=1"]

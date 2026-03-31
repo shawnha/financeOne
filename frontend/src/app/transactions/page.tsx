@@ -230,9 +230,9 @@ export default function TransactionsPage() {
   }, [entityId])
 
   // Fetch transactions
-  const fetchTransactions = useCallback(async () => {
+  const fetchTransactions = useCallback(async (background = false) => {
     if (!entityId) return
-    setViewState("loading")
+    if (!background) setViewState("loading")
     setErrorMsg("")
 
     const params = new URLSearchParams()
@@ -313,7 +313,7 @@ export default function TransactionsPage() {
       })
       toast.success(`${result.confirmed}건 확정 완료`)
       setSelectedIds(new Set())
-      fetchTransactions()
+      fetchTransactions(true)
     } catch {
       toast.error("일괄 확정에 실패했습니다.")
     } finally {
@@ -337,7 +337,7 @@ export default function TransactionsPage() {
       setSelectedIds(new Set())
       setBulkMapOpen(false)
       setBulkMapAccountId("")
-      fetchTransactions()
+      fetchTransactions(true)
     } catch {
       toast.error("일괄 매핑에 실패했습니다")
     } finally {
@@ -406,7 +406,7 @@ export default function TransactionsPage() {
       })
       toast.success("거래 정보가 저장되었습니다.")
       setDetailTx(null)
-      fetchTransactions()
+      fetchTransactions(true)
     } catch {
       toast.error("저장에 실패했습니다.")
     } finally {
@@ -430,7 +430,7 @@ export default function TransactionsPage() {
       const result = await fetchAPI(`/transactions/auto-map?entity_id=${entityId}`, { method: "POST" })
       if (result.mapped > 0) {
         toast.success(`${result.mapped}건 자동 매핑 완료 (미분류 ${result.total_unmapped}건 중)`)
-        fetchTransactions()
+        fetchTransactions(true)
       } else {
         toast.info(`자동 매핑할 거래가 없습니다. 매핑 규칙을 먼저 만들어주세요.`)
       }
