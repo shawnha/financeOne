@@ -1323,7 +1323,27 @@ function SlackMatchContent() {
     setSelectedMessageId(null)
     setExpandedId(null)
     setPage(1)
+    setMonthAutoSelected(false)
   }, [entityId])
+
+  // Auto-select latest month with data if current month is empty
+  const [monthAutoSelected, setMonthAutoSelected] = useState(false)
+  useEffect(() => {
+    if (monthAutoSelected) return
+    if (monthlySummary.length > 0 && messages.length === 0 && !loading) {
+      const sorted = [...monthlySummary].sort((a, b) =>
+        a.yr !== b.yr ? b.yr - a.yr : b.mo - a.mo,
+      )
+      const latest = sorted[0]
+      if (latest) {
+        const key = `${latest.yr}-${String(latest.mo).padStart(2, "0")}`
+        if (key !== selectedMonth) {
+          setSelectedMonth(key)
+          setMonthAutoSelected(true)
+        }
+      }
+    }
+  }, [monthlySummary, messages, loading, selectedMonth, monthAutoSelected])
 
   useEffect(() => {
     setPage(1)

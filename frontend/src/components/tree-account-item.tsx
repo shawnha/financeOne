@@ -28,8 +28,6 @@ interface TreeAccountItemProps {
   onEdit: (account: TreeAccount) => void
   onDelete: (account: TreeAccount) => void
   onAddChild: (parentId: number) => void
-  budgetAmount?: number | null
-  onBudgetClick?: (account: TreeAccount) => void
   onToggleRecurring?: (account: TreeAccount) => void
   /** Override is_recurring from forecast data (month-specific) */
   isRecurringOverride?: boolean
@@ -42,8 +40,6 @@ export function TreeAccountItem({
   onEdit,
   onDelete,
   onAddChild,
-  budgetAmount,
-  onBudgetClick,
   onToggleRecurring,
   isRecurringOverride,
 }: TreeAccountItemProps) {
@@ -140,30 +136,6 @@ export function TreeAccountItem({
             고정
           </Badge>
         </button>
-      )}
-
-      {/* Budget amount */}
-      {budgetAmount !== undefined && budgetAmount !== null && !account.isRoot && (
-        <span
-          className={cn(
-            "text-xs font-mono shrink-0",
-            hasChildren
-              ? "text-muted-foreground/60"
-              : "text-muted-foreground cursor-pointer hover:text-foreground",
-          )}
-          onClick={(e) => { if (!hasChildren) { e.stopPropagation(); onBudgetClick?.(account) } }}
-        >
-          {hasChildren && <span className="text-[10px] mr-0.5">Σ</span>}
-          ₩{budgetAmount.toLocaleString()}
-        </span>
-      )}
-      {budgetAmount === null && !account.isRoot && !hasChildren && onBudgetClick && (
-        <span
-          className="text-xs text-muted-foreground/40 cursor-pointer hover:text-muted-foreground shrink-0"
-          onClick={(e) => { e.stopPropagation(); onBudgetClick?.(account) }}
-        >
-          + 예산
-        </span>
       )}
 
       {/* Standard account badge */}
