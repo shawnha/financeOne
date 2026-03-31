@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useEffect, Suspense } from "react"
+import { useState, useCallback, useEffect, useRef, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -84,6 +84,7 @@ interface ItemMatch {
   amount: number | null
   currency: string
   transaction_id: number | null
+  transaction_ids?: number[] | null
   is_confirmed: boolean
 }
 
@@ -143,6 +144,7 @@ interface MatchCandidate {
   counterparty: string
   confidence: number
   match_type: string
+  member_name?: string | null
 }
 
 interface CandidatesResponse {
@@ -707,6 +709,11 @@ function CandidatesList({
                   <span className="text-muted-foreground">
                     {formatDate(candidate.date)}
                   </span>
+                  {candidate.member_name && (
+                    <span className={cn("inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset shrink-0", nameColor(candidate.member_name))}>
+                      {candidate.member_name}
+                    </span>
+                  )}
                   <span className="font-medium truncate">
                     {candidate.counterparty}{" "}
                     {candidate.description}
@@ -744,12 +751,16 @@ function CandidatesList({
 function CandidatePanel({
   messageId,
   message,
+  entityId,
   onConfirm,
+  onMultiConfirm,
   onRefresh,
 }: {
   messageId: number
   message: SlackMessage
+  entityId: string
   onConfirm: (transactionId: number) => void
+  onMultiConfirm: (transactionIds: number[]) => void
   onRefresh: () => void
 }) {
   const [candidates, setCandidates] = useState<MatchCandidate[]>([])
@@ -762,6 +773,50 @@ function CandidatePanel({
   const [itemCandidates, setItemCandidates] = useState<MatchCandidate[]>([])
   const [itemCandidatesLoading, setItemCandidatesLoading] = useState(false)
   const [selectedItemCandidateId, setSelectedItemCandidateId] = useState<number | null>(null)
+
+  // 직접 검색 상태
+  const [searchMode, setSearchMode] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [searchResults, setSearchResults] = useState<MatchCandidate[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [selectedSearchIds, setSelectedSearchIds] = useState<Set<number>>(new Set())
+
+  const toggleSearchSelection = useCallback((id: number) => {
+    setSelectedSearchIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  const selectedSearchTotal = searchResults
+    .filter(r => selectedSearchIds.has(r.id))
+    .reduce((sum, r) => sum + r.amount, 0)
+
+  const doSearch = useCallback(async (query: string) => {
+    if (!query.trim()) return
+    setSearchLoading(true)
+    setSelectedSearchIds(new Set())
+    try {
+      const isAmount = /^[\d,]+$/.test(query.replace(/\s/g, ""))
+      const params = new URLSearchParams({ entity_id: entityId })
+      if (isAmount) {
+        params.set("amount", query.replace(/,/g, ""))
+      } else {
+        params.set("q", query.trim())
+      }
+      const data = await fetchAPI<{ results: MatchCandidate[] }>(
+        `/slack/transactions/search?${params.toString()}`,
+      )
+      setSearchResults(data.results.map(r => ({ ...r, confidence: 0, match_type: "manual" })))
+    } catch {
+      toast.error("검색에 실패했습니다")
+      setSearchResults([])
+    } finally {
+      setSearchLoading(false)
+    }
+  }, [entityId])
 
   const items = message.parsed_structured?.items || []
   const isMultiItem = items.length >= 2
@@ -801,20 +856,22 @@ function CandidatePanel({
   }, [messageId])
 
   const confirmItemMatch = useCallback(async (
-    transactionId: number,
+    transactionIdOrIds: number | number[],
     itemIndex: number,
     itemDescription: string,
   ) => {
     try {
+      const body = Array.isArray(transactionIdOrIds)
+        ? { transaction_ids: transactionIdOrIds, item_index: itemIndex, item_description: itemDescription }
+        : { transaction_id: transactionIdOrIds, item_index: itemIndex, item_description: itemDescription }
       const res = await fetchAPI<{ is_completed: boolean }>(`/slack/messages/${messageId}/confirm`, {
         method: "POST",
-        body: JSON.stringify({
-          transaction_id: transactionId,
-          item_index: itemIndex,
-          item_description: itemDescription,
-        }),
+        body: JSON.stringify(body),
       })
       toast.success(`${itemDescription} 매칭 완료`)
+      setSearchResults([])
+      setSearchQuery("")
+      setSelectedSearchIds(new Set())
       onRefresh()
 
       if (!res.is_completed) {
@@ -1031,21 +1088,109 @@ function CandidatePanel({
           )
         )}
 
-        {/* Actions */}
-        <div className="flex gap-2 pt-2">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button size="sm" variant="secondary" disabled>
-                  <Search className="h-3.5 w-3.5 mr-1" />
-                  직접 검색
+        {/* 직접 검색 */}
+        <div className="pt-2 space-y-2">
+          <Button
+            size="sm"
+            variant={searchMode ? "default" : "secondary"}
+            onClick={() => { setSearchMode(!searchMode); setSearchResults([]); setSearchQuery("") }}
+          >
+            <Search className="h-3.5 w-3.5 mr-1" />
+            직접 검색
+          </Button>
+
+          {searchMode && (
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="거래처명 또는 금액 (예: 쿠팡, 815960)"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") doSearch(searchQuery) }}
+                  className="flex-1 h-8 rounded-md border border-white/[0.06] bg-secondary/30 px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <Button size="sm" variant="secondary" onClick={() => doSearch(searchQuery)} disabled={searchLoading}>
+                  {searchLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : "검색"}
                 </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Phase 2에서 구현</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+              </div>
+              <p className="text-[10px] text-muted-foreground">숫자만 입력하면 금액(±3%) 검색, 텍스트면 거래처/설명 검색</p>
+
+              {searchResults.length > 0 && (
+                <div className="space-y-1">
+                  <div className="space-y-1 max-h-[250px] overflow-y-auto">
+                    {searchResults.map((r) => {
+                      const isChecked = selectedSearchIds.has(r.id)
+                      return (
+                        <div
+                          key={r.id}
+                          className={cn(
+                            "rounded-lg border p-2 cursor-pointer transition-all text-sm",
+                            isChecked
+                              ? "border-[hsl(var(--accent))] bg-[hsl(var(--accent))]/5"
+                              : "border-white/[0.04] hover:bg-secondary/30"
+                          )}
+                          onClick={() => toggleSearchSelection(r.id)}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className={cn(
+                              "h-4 w-4 rounded border shrink-0 flex items-center justify-center transition-colors",
+                              isChecked
+                                ? "bg-[hsl(var(--accent))] border-[hsl(var(--accent))]"
+                                : "border-white/20"
+                            )}>
+                              {isChecked && <Check className="h-3 w-3 text-white" />}
+                            </div>
+                            <span className="text-xs text-muted-foreground">{formatDate(r.date)}</span>
+                            {r.member_name && (
+                              <span className={cn("inline-flex items-center rounded-md px-1 py-0 text-[10px] font-medium ring-1 ring-inset shrink-0", nameColor(r.member_name))}>
+                                {r.member_name}
+                              </span>
+                            )}
+                            <span className="truncate">{r.counterparty} {r.description}</span>
+                            <span className="ml-auto font-mono font-semibold tabular-nums whitespace-nowrap">
+                              {formatKRW(r.amount)}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {/* 선택 합계 + 확정 버튼 */}
+                  {selectedSearchIds.size > 0 && (
+                    <div className="flex items-center justify-between rounded-lg border border-white/[0.06] bg-secondary/20 p-2">
+                      <div className="text-xs">
+                        <span className="text-muted-foreground">선택 {selectedSearchIds.size}건 합계: </span>
+                        <span className="font-mono font-bold tabular-nums">{formatKRW(selectedSearchTotal)}</span>
+                      </div>
+                      <Button
+                        size="sm"
+                        className="h-7 px-3 bg-[hsl(var(--accent))] text-accent-foreground hover:bg-[hsl(var(--accent))]/90"
+                        onClick={() => {
+                          const ids = Array.from(selectedSearchIds)
+                          if (activeItemIndex !== null) {
+                            const item = items[activeItemIndex]
+                            confirmItemMatch(ids.length === 1 ? ids[0] : ids, activeItemIndex, item.description)
+                          } else if (ids.length === 1) {
+                            onConfirm(ids[0])
+                          } else {
+                            onMultiConfirm(ids)
+                          }
+                        }}
+                      >
+                        <Check className="h-3.5 w-3.5 mr-1" />
+                        {selectedSearchIds.size === 1 ? "확정" : `${selectedSearchIds.size}건 합산 확정`}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+              {!searchLoading && searchResults.length === 0 && searchQuery && (
+                <p className="text-xs text-muted-foreground text-center py-2">검색 결과가 없습니다</p>
+              )}
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -1066,6 +1211,18 @@ function SlackMatchContent() {
   const [error, setError] = useState<string | null>(null)
 
   const [selectedMessageId, setSelectedMessageId] = useState<number | null>(null)
+  const [popupTop, setPopupTop] = useState(0)
+  const selectedRowRef = useRef<HTMLDivElement>(null)
+
+  // 선택된 메시지의 위치에 맞춰 팝업 top 업데이트
+  useEffect(() => {
+    if (selectedRowRef.current) {
+      const rect = selectedRowRef.current.getBoundingClientRect()
+      // 화면 하단에 잘리지 않도록 보정
+      const maxTop = window.innerHeight - 400
+      setPopupTop(Math.max(8, Math.min(rect.top, maxTop)))
+    }
+  }, [selectedMessageId])
   const [monthlySummary, setMonthlySummary] = useState<MonthlySummary[]>([])
   const [expandedId, setExpandedId] = useState<number | null>(null)
 
@@ -1076,15 +1233,24 @@ function SlackMatchContent() {
   })
 
   // Filters
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending")
   const [confidenceFilter, setConfidenceFilter] = useState<ConfidenceFilter>("all")
 
   const fetchMessages = useCallback(async (background = false) => {
     if (!background) setLoading(true)
     setError(null)
     try {
+      const params = new URLSearchParams({
+        entity_id: entityId,
+        page: String(page),
+        per_page: "50",
+        month: selectedMonth,
+      })
+      if (statusFilter === "pending") params.set("status", "pending")
+      else if (statusFilter === "confirmed") params.set("status", "done")
+      else if (statusFilter === "ignored") params.set("status", "cancelled")
       const data = await fetchAPI<SlackMessagesResponse>(
-        `/slack/messages?entity_id=${entityId}&page=${page}&per_page=50&month=${selectedMonth}`,
+        `/slack/messages?${params.toString()}`,
       )
       setMessages(data.items)
       setTotal(data.total)
@@ -1097,7 +1263,7 @@ function SlackMatchContent() {
     } finally {
       setLoading(false)
     }
-  }, [entityId, page, selectedMonth])
+  }, [entityId, page, selectedMonth, statusFilter])
 
   const [syncing, setSyncing] = useState(false)
 
@@ -1165,6 +1331,31 @@ function SlackMatchContent() {
   const kpiPending = selectedSummary?.pending_count ?? 0
   const kpiCancelled = selectedSummary?.cancelled_count ?? 0
 
+  // 매칭 확정 후 다음 미매칭 메시지 자동 선택
+  const selectNextPending = useCallback((currentId: number) => {
+    const currentIndex = filteredMessages.findIndex(m => m.id === currentId)
+    // 현재 위치 이후의 pending 메시지 찾기
+    for (let i = currentIndex + 1; i < filteredMessages.length; i++) {
+      const status = getMessageStatus(filteredMessages[i])
+      if (status === "pending" || status === "partial") {
+        setSelectedMessageId(filteredMessages[i].id)
+        setExpandedId(filteredMessages[i].id)
+        return
+      }
+    }
+    // 못 찾으면 이전 메시지에서 찾기
+    for (let i = 0; i < currentIndex; i++) {
+      const status = getMessageStatus(filteredMessages[i])
+      if (status === "pending" || status === "partial") {
+        setSelectedMessageId(filteredMessages[i].id)
+        setExpandedId(filteredMessages[i].id)
+        return
+      }
+    }
+    setSelectedMessageId(null)
+    setExpandedId(null)
+  }, [filteredMessages])
+
   // Actions
   const handleConfirm = useCallback(
     async (messageId: number, transactionId: number) => {
@@ -1174,6 +1365,7 @@ function SlackMatchContent() {
           body: JSON.stringify({ transaction_id: transactionId }),
         })
         toast.success("매칭이 확정되었습니다.")
+        selectNextPending(messageId)
         fetchMessages(true)
       } catch (err) {
         toast.error(
@@ -1181,7 +1373,26 @@ function SlackMatchContent() {
         )
       }
     },
-    [fetchMessages],
+    [fetchMessages, selectNextPending],
+  )
+
+  const handleMultiConfirm = useCallback(
+    async (messageId: number, transactionIds: number[]) => {
+      try {
+        await fetchAPI(`/slack/messages/${messageId}/confirm`, {
+          method: "POST",
+          body: JSON.stringify({ transaction_ids: transactionIds }),
+        })
+        toast.success(`${transactionIds.length}건 합산 매칭이 확정되었습니다.`)
+        selectNextPending(messageId)
+        fetchMessages(true)
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "매칭 확정에 실패했습니다.",
+        )
+      }
+    },
+    [fetchMessages, selectNextPending],
   )
 
   const handleIgnore = useCallback(
@@ -1385,7 +1596,7 @@ function SlackMatchContent() {
         <div className="w-[140px]">
           <Select
             value={statusFilter}
-            onValueChange={(v) => setStatusFilter(v as StatusFilter)}
+            onValueChange={(v) => { setStatusFilter(v as StatusFilter); setPage(1) }}
           >
             <SelectTrigger className="h-9 text-xs">
               <SelectValue placeholder="상태" />
@@ -1416,10 +1627,10 @@ function SlackMatchContent() {
         </div>
       </div>
 
-      {/* Two-panel layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left: Message list */}
-        <div className="space-y-1" role="listbox" aria-label="Slack 메시지 목록">
+      {/* Single column layout — popup on right */}
+      <div className="relative lg:pr-[416px]">
+        {/* Left: Message list — normal flow */}
+        <div className="space-y-1 p-0.5" role="listbox" aria-label="Slack 메시지 목록">
           {filteredMessages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 gap-2">
               <Search className="h-8 w-8 text-muted-foreground" />
@@ -1429,8 +1640,8 @@ function SlackMatchContent() {
             </div>
           ) : (
             filteredMessages.map((msg) => (
+              <div key={msg.id} ref={selectedMessageId === msg.id ? selectedRowRef : undefined}>
               <CompactMessageRow
-                key={msg.id}
                 message={msg}
                 isSelected={selectedMessageId === msg.id}
                 isExpanded={expandedId === msg.id}
@@ -1440,6 +1651,7 @@ function SlackMatchContent() {
                 onIgnore={() => handleIgnore(msg.id)}
                 onManualMatch={() => handleManualMatch(msg.id)}
               />
+              </div>
             ))
           )}
 
@@ -1469,33 +1681,28 @@ function SlackMatchContent() {
           )}
         </div>
 
-        {/* Right: Candidate panel */}
-        <div className="lg:sticky lg:top-6 lg:self-start">
-          {selectedMessageId !== null &&
-          selectedMessage &&
-          (getMessageStatus(selectedMessage) === "pending" || getMessageStatus(selectedMessage) === "partial") ? (
+        {/* Right: Candidate popup — appears at selected message position */}
+        {selectedMessageId !== null && selectedMessage && (
+        <div
+          className="hidden lg:block fixed right-4 w-[400px] max-h-[70vh] overflow-y-auto z-10 scrollbar-thin rounded-xl border border-white/[0.06] shadow-lg bg-card/95 backdrop-blur-xl transition-[top] duration-150 ease-out"
+          style={{ top: `${popupTop}px` }}
+        >
+          {(getMessageStatus(selectedMessage) === "pending" || getMessageStatus(selectedMessage) === "partial") ? (
             <CandidatePanel
               messageId={selectedMessageId}
               message={selectedMessage}
+              entityId={entityId}
               onConfirm={(txId) => handleConfirm(selectedMessageId, txId)}
+              onMultiConfirm={(txIds) => handleMultiConfirm(selectedMessageId, txIds)}
               onRefresh={() => fetchMessages(true)}
             />
           ) : (
-            <Card className="bg-card rounded-xl shadow">
-              <CardContent className="p-8 flex flex-col items-center justify-center text-center gap-2">
-                <Search className="h-8 w-8 text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">
-                  {selectedMessage && getMessageStatus(selectedMessage) !== "pending"
-                    ? "이미 처리된 메시지입니다."
-                    : "왼쪽에서 메시지를 선택하면 매칭 후보가 표시됩니다."}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  j/k 키로 이동, Enter로 확정, i로 무시
-                </p>
-              </CardContent>
-            </Card>
+            <div className="p-4 text-center text-sm text-muted-foreground">
+              이미 처리된 메시지입니다.
+            </div>
           )}
         </div>
+        )}
       </div>
     </div>
   )

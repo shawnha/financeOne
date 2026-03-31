@@ -41,7 +41,7 @@ export default function RootLayout({
           <Suspense fallback={null}>
             <Sidebar />
           </Suspense>
-          <main className="flex-1 overflow-auto">{children}</main>
+          <main className="flex-1 overflow-auto" id="main-scroll">{children}</main>
         </div>
         <Toaster
           theme="dark"

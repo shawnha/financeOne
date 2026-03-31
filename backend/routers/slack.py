@@ -19,7 +19,8 @@ router = APIRouter(prefix="/api/slack", tags=["slack"])
 
 
 class ConfirmMatch(BaseModel):
-    transaction_id: int
+    transaction_id: Optional[int] = None
+    transaction_ids: Optional[list[int]] = None
     match_confidence: Optional[float] = None
     ai_reasoning: Optional[str] = None
     note: Optional[str] = None
@@ -156,25 +157,27 @@ def _build_item_matches(
     if len(items) < 2:
         return None
 
-    match_by_index = {}
+    match_by_index: dict[int, list[dict]] = {}
     for mr in match_rows:
         idx = mr.get("item_index")
         if idx is not None:
-            match_by_index[idx] = mr
+            match_by_index.setdefault(idx, []).append(mr)
 
     item_matches = []
     matched_count = 0
     for i, item in enumerate(items):
-        mr = match_by_index.get(i)
-        is_confirmed = bool(mr and mr.get("is_confirmed"))
+        mrs = match_by_index.get(i, [])
+        is_confirmed = any(mr.get("is_confirmed") for mr in mrs)
         if is_confirmed:
             matched_count += 1
+        tx_ids = [mr["transaction_id"] for mr in mrs if mr.get("is_confirmed")]
         item_matches.append({
             "item_index": i,
             "item_description": item.get("description", ""),
             "amount": item.get("amount"),
             "currency": item.get("currency", "KRW"),
-            "transaction_id": mr["transaction_id"] if mr else None,
+            "transaction_id": tx_ids[0] if len(tx_ids) == 1 else None,
+            "transaction_ids": tx_ids if len(tx_ids) > 1 else None,
             "is_confirmed": is_confirmed,
         })
 
@@ -192,6 +195,7 @@ def list_slack_messages(
     entity_id: Optional[int] = None,
     is_completed: Optional[bool] = None,
     is_cancelled: Optional[bool] = None,
+    status: Optional[str] = Query(None, description="pending|done|cancelled"),
     month: Optional[str] = Query(None, description="YYYY-MM format, e.g. 2026-03"),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -206,12 +210,21 @@ def list_slack_messages(
     if entity_id is not None:
         where.append("sm.entity_id = %s")
         params.append(entity_id)
-    if is_completed is not None:
-        where.append("sm.is_completed = %s")
-        params.append(is_completed)
-    if is_cancelled is not None:
-        where.append("sm.is_cancelled = %s")
-        params.append(is_cancelled)
+
+    # status 필터: pending=미완료+미취소, done=완료, cancelled=취소
+    if status == "pending":
+        where.append("sm.is_completed = false AND sm.is_cancelled = false")
+    elif status == "done":
+        where.append("sm.is_completed = true")
+    elif status == "cancelled":
+        where.append("sm.is_cancelled = true")
+    else:
+        if is_completed is not None:
+            where.append("sm.is_completed = %s")
+            params.append(is_completed)
+        if is_cancelled is not None:
+            where.append("sm.is_cancelled = %s")
+            params.append(is_cancelled)
 
     if month:
         # month = "2026-03" → ts 범위 필터 (unix timestamp 기반)
@@ -251,14 +264,20 @@ def list_slack_messages(
                sm.reply_count,
                sm.parsed_structured,
                sm.created_at,
-               tsm.id AS match_id,
-               tsm.transaction_id AS matched_transaction_id,
-               tsm.match_confidence,
-               tsm.is_confirmed AS match_confirmed,
-               tsm.is_manual AS match_manual,
+               first_match.id AS match_id,
+               first_match.transaction_id AS matched_transaction_id,
+               first_match.match_confidence,
+               first_match.is_confirmed AS match_confirmed,
+               first_match.is_manual AS match_manual,
                m.name AS member_name_ko
         FROM slack_messages sm
-        LEFT JOIN transaction_slack_match tsm ON sm.id = tsm.slack_message_id
+        LEFT JOIN LATERAL (
+            SELECT tsm.id, tsm.transaction_id, tsm.match_confidence, tsm.is_confirmed, tsm.is_manual
+            FROM transaction_slack_match tsm
+            WHERE tsm.slack_message_id = sm.id
+            ORDER BY tsm.is_confirmed DESC, tsm.id ASC
+            LIMIT 1
+        ) first_match ON true
         LEFT JOIN members m ON m.slack_user_id = sm.user_id AND m.entity_id = sm.entity_id
         WHERE {where_clause}
         ORDER BY sm.ts DESC
@@ -371,6 +390,16 @@ def get_candidates(
 
     msg_id, entity_id, parsed_amount, parsed_amount_vat, msg_date, parsed_structured, msg_text = msg
 
+    # Slack 메시지 작성자의 member_id 조회
+    cur.execute(
+        """SELECT COALESCE(sm.member_id, m.id)
+           FROM slack_messages sm
+           LEFT JOIN members m ON m.slack_user_id = sm.user_id AND m.entity_id = sm.entity_id
+           WHERE sm.id = %s""",
+        [message_id],
+    )
+    slack_member_id = cur.fetchone()[0]
+
     # 구조화 파싱에서 정보 추출
     ps = parsed_structured if isinstance(parsed_structured, dict) else {}
     vendor = ps.get("vendor")
@@ -399,6 +428,11 @@ def get_candidates(
 
     where_parts = ["t.entity_id = %s", "(t.is_cancel IS NOT TRUE)"]
     params: list = [entity_id]
+
+    # 카드 결제는 같은 멤버 거래만 후보로 표시 (다른 사람 카드 제외)
+    if slack_member_id:
+        where_parts.append("(t.source_type NOT LIKE '%%card%%' OR t.member_id = %s)")
+        params.append(slack_member_id)
 
     where_parts.append("(" + " OR ".join(amount_conditions) + ")")
     params.extend(amount_params)
@@ -471,6 +505,7 @@ def get_candidates(
         SELECT t.id, t.date, t.amount, t.currency, t.type,
                t.description, t.counterparty, t.source_type,
                t.is_confirmed,
+               COALESCE(m.name, t.parsed_member_name) AS member_name,
                CASE
                    WHEN ABS(t.amount - %s) <= 1 THEN 'exact'
                    WHEN t.amount BETWEEN %s AND %s THEN 'within_3pct'
@@ -483,6 +518,7 @@ def get_candidates(
                    + {vendor_case}
                )::numeric, 2) AS confidence
         FROM transactions t
+        LEFT JOIN members m ON m.id = t.member_id
         WHERE {where_clause}
         ORDER BY confidence DESC, ABS(t.amount - %s) ASC
         LIMIT 20
@@ -503,15 +539,78 @@ def get_candidates(
     }
 
 
+@router.get("/transactions/search")
+def search_transactions(
+    entity_id: int = Query(...),
+    q: Optional[str] = Query(None, description="텍스트 검색 (거래처/설명)"),
+    amount: Optional[float] = Query(None, description="금액 검색 (±3%)"),
+    exclude_matched: bool = Query(True, description="이미 매칭된 거래 제외"),
+    conn: PgConnection = Depends(get_db),
+):
+    """직접 검색: 텍스트 또는 금액으로 거래내역 검색."""
+    cur = conn.cursor()
+
+    where_parts = ["t.entity_id = %s", "(t.is_cancel IS NOT TRUE)"]
+    params: list = [entity_id]
+
+    if exclude_matched:
+        where_parts.append("""
+            NOT EXISTS (
+                SELECT 1 FROM transaction_slack_match tsm
+                WHERE tsm.transaction_id = t.id AND tsm.is_confirmed = true
+            )
+        """)
+
+    if q and q.strip():
+        where_parts.append("(t.counterparty ILIKE %s OR t.description ILIKE %s)")
+        params.extend([f"%{q.strip()}%", f"%{q.strip()}%"])
+
+    if amount is not None:
+        lo = round(amount * 0.97, 2)
+        hi = round(amount * 1.03, 2)
+        where_parts.append("t.amount BETWEEN %s AND %s")
+        params.extend([lo, hi])
+
+    where_clause = " AND ".join(where_parts)
+
+    cur.execute(
+        f"""
+        SELECT t.id, t.date, t.amount, t.currency, t.type,
+               t.description, t.counterparty, t.source_type,
+               t.is_confirmed,
+               COALESCE(m.name, t.parsed_member_name) AS member_name
+        FROM transactions t
+        LEFT JOIN members m ON m.id = t.member_id
+        WHERE {where_clause}
+        ORDER BY t.date DESC
+        LIMIT 30
+        """,
+        params,
+    )
+    results = fetch_all(cur)
+    cur.close()
+
+    return {"results": results, "total": len(results)}
+
+
 @router.post("/messages/{message_id}/confirm")
 def confirm_match(
     message_id: int,
     body: ConfirmMatch,
     conn: PgConnection = Depends(get_db),
 ):
-    """Create a transaction_slack_match record and mark message as completed."""
+    """Create transaction_slack_match record(s) and mark message as completed.
+
+    Supports multi-transaction matching: pass transaction_ids=[id1, id2, ...]
+    for cases where multiple transactions sum up to one Slack item amount.
+    """
     cur = conn.cursor()
     try:
+        # Resolve transaction_id(s)
+        tx_ids = body.transaction_ids or ([body.transaction_id] if body.transaction_id else [])
+        if not tx_ids:
+            raise HTTPException(400, "transaction_id 또는 transaction_ids가 필요합니다.")
+
         # Verify slack message exists
         cur.execute(
             "SELECT id, entity_id, parsed_structured FROM slack_messages WHERE id = %s",
@@ -523,10 +622,13 @@ def confirm_match(
 
         _, _, parsed_structured = msg
 
-        # Verify transaction exists
-        cur.execute("SELECT id FROM transactions WHERE id = %s", [body.transaction_id])
-        if not cur.fetchone():
-            raise HTTPException(404, "Transaction not found")
+        # Verify all transactions exist
+        placeholders = ",".join(["%s"] * len(tx_ids))
+        cur.execute(f"SELECT id FROM transactions WHERE id IN ({placeholders})", tx_ids)
+        found = {r[0] for r in cur.fetchall()}
+        missing = set(tx_ids) - found
+        if missing:
+            raise HTTPException(404, f"Transaction not found: {missing}")
 
         # Check for existing confirmed match
         if body.item_index is not None:
@@ -544,33 +646,35 @@ def confirm_match(
         if cur.fetchone():
             raise HTTPException(409, "이 항목은 이미 매칭이 확정되었습니다.")
 
-        # Create match record
-        cur.execute(
-            """
-            INSERT INTO transaction_slack_match
-                (transaction_id, slack_message_id, match_confidence, is_manual, is_confirmed,
-                 ai_reasoning, note, amount_override, text_override, project_tag_override,
-                 item_index, item_description)
-            VALUES (%s, %s, %s, true, true, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
-            """,
-            [
-                body.transaction_id, message_id,
-                body.match_confidence or 1.0,
-                body.ai_reasoning, body.note,
-                body.amount_override, body.text_override, body.project_tag_override,
-                body.item_index, body.item_description,
-            ],
-        )
-        match_id = cur.fetchone()[0]
+        # Create match records (one per transaction)
+        match_ids = []
+        for tx_id in tx_ids:
+            cur.execute(
+                """
+                INSERT INTO transaction_slack_match
+                    (transaction_id, slack_message_id, match_confidence, is_manual, is_confirmed,
+                     ai_reasoning, note, amount_override, text_override, project_tag_override,
+                     item_index, item_description)
+                VALUES (%s, %s, %s, true, true, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                [
+                    tx_id, message_id,
+                    body.match_confidence or 1.0,
+                    body.ai_reasoning, body.note,
+                    body.amount_override, body.text_override, body.project_tag_override,
+                    body.item_index, body.item_description,
+                ],
+            )
+            match_ids.append(cur.fetchone()[0])
 
-        # is_completed 판단
+        # is_completed 판단: item_index별로 DISTINCT로 체크
         ps = parsed_structured if isinstance(parsed_structured, dict) else {}
         items = ps.get("items") or []
 
         if body.item_index is not None and len(items) >= 2:
             cur.execute(
-                """SELECT COUNT(*) FROM transaction_slack_match
+                """SELECT COUNT(DISTINCT item_index) FROM transaction_slack_match
                    WHERE slack_message_id = %s AND is_confirmed = true AND item_index IS NOT NULL""",
                 [message_id],
             )
@@ -587,11 +691,12 @@ def confirm_match(
         conn.commit()
         cur.close()
         return {
-            "match_id": match_id,
+            "match_ids": match_ids,
             "message_id": message_id,
             "confirmed": True,
             "is_completed": is_completed,
             "item_index": body.item_index,
+            "transaction_count": len(tx_ids),
         }
     except HTTPException:
         conn.rollback()
@@ -631,7 +736,7 @@ def undo_item_match(
             items = ps.get("items") or []
             if len(items) >= 2:
                 cur.execute(
-                    """SELECT COUNT(*) FROM transaction_slack_match
+                    """SELECT COUNT(DISTINCT item_index) FROM transaction_slack_match
                        WHERE slack_message_id = %s AND is_confirmed = true AND item_index IS NOT NULL""",
                     [message_id],
                 )
