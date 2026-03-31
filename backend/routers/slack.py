@@ -338,7 +338,7 @@ def get_candidates(
         amount_conditions.append("(t.amount BETWEEN %s AND %s OR t.amount BETWEEN %s AND %s)")
         amount_params.extend([lo, hi, vat_lo, vat_hi])
 
-    where_parts = ["t.entity_id = %s"]
+    where_parts = ["t.entity_id = %s", "(t.is_cancel IS NOT TRUE)"]
     params: list = [entity_id]
 
     where_parts.append("(" + " OR ".join(amount_conditions) + ")")
