@@ -305,6 +305,8 @@ CREATE TABLE IF NOT EXISTS transaction_slack_match (
   amount_override      NUMERIC(18,2),
   text_override        TEXT,
   project_tag_override TEXT,
+  item_index           INTEGER DEFAULT NULL,
+  item_description     TEXT DEFAULT NULL,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

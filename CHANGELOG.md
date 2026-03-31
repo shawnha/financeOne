@@ -2,6 +2,24 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [0.7.1] - 2026-03-31 — 다중 항목 개별 매칭
+
+### Added
+- Slack 메시지의 다중 비용 항목을 각각 별도 거래에 개별 매칭하는 워크플로우
+- 후보 패널에 [전체 매칭] / [개별 매칭] 탭 (shadcn/ui Tabs)
+- 항목 테이블: 클릭 시 해당 금액 기준 후보 검색, 개별 확정
+- 확정 후 자동으로 다음 미매칭 항목 이동 + 토스트 알림
+- 메시지 카드에 매칭 진행률 Badge (예: 2/3)
+- 개별 매칭 확정 취소(undo) 기능
+- 부분 매칭 메시지 무시 시 경고 다이얼로그 + 매칭 레코드 자동 정리
+
+### Changed
+- transaction_slack_match 테이블에 item_index, item_description 컬럼 추가
+- confirm API에 item_index/item_description 파라미터 지원
+- candidates API에 item_index 쿼리 파라미터 지원
+- list_messages 응답에 item_matches, match_progress 필드 추가
+- 메시지 상태에 partial (부분 매칭) 추가
+
 ## [0.7.0] - 2026-03-30 — Slack 구조화 파싱 엔진
 
 ### Added

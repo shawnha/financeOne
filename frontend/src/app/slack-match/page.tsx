@@ -19,6 +19,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { EntityTabs } from "@/components/entity-tabs"
 import { MonthPicker } from "@/components/month-picker"
 import { fetchAPI } from "@/lib/api"
@@ -77,6 +78,20 @@ interface ParsedStructured {
   confidence: number | null
 }
 
+interface ItemMatch {
+  item_index: number
+  item_description: string
+  amount: number | null
+  currency: string
+  transaction_id: number | null
+  is_confirmed: boolean
+}
+
+interface MatchProgress {
+  total_items: number
+  matched_items: number
+}
+
 interface SlackMessage {
   id: number
   entity_id: number
@@ -96,6 +111,8 @@ interface SlackMessage {
   matched_transaction_id: number | null
   match_confidence: number | null
   parsed_structured: ParsedStructured | null
+  item_matches?: ItemMatch[]
+  match_progress?: MatchProgress
 }
 
 interface MonthlySummary {
@@ -167,9 +184,11 @@ function stripSlackText(text: string): string {
     .trim()
 }
 
-function getMessageStatus(msg: SlackMessage): "confirmed" | "ignored" | "pending" {
+function getMessageStatus(msg: SlackMessage): "confirmed" | "ignored" | "pending" | "partial" {
   if (msg.is_completed && msg.matched_transaction_id) return "confirmed"
+  if (msg.is_completed && msg.match_progress?.matched_items === msg.match_progress?.total_items) return "confirmed"
   if (msg.is_cancelled) return "ignored"
+  if (msg.match_progress && msg.match_progress.matched_items > 0) return "partial"
   return "pending"
 }
 
@@ -196,8 +215,9 @@ function getTypeBadge(type: string | null) {
   )
 }
 
-function getStatusDot(status: "confirmed" | "ignored" | "pending") {
+function getStatusDot(status: "confirmed" | "ignored" | "pending" | "partial") {
   if (status === "confirmed") return <span className="h-2 w-2 rounded-full bg-[hsl(var(--profit))] inline-block" />
+  if (status === "partial") return <span className="w-2 h-2 rounded-full bg-yellow-400 inline-block" />
   if (status === "pending") return <span className="h-2 w-2 rounded-full bg-[hsl(var(--warning))] inline-block" />
   return <span className="h-2 w-2 rounded-full bg-[hsl(var(--loss))] inline-block" />
 }
@@ -479,6 +499,16 @@ function CompactMessageRow({
           <span className="shrink-0">{getConfidenceBadge(message.match_confidence)}</span>
         )}
 
+        {/* Match progress badge */}
+        {message.match_progress && !message.is_completed && (
+          <Badge
+            variant="outline"
+            className="text-[10px] px-1.5 py-0 bg-yellow-500/10 text-yellow-400 border-yellow-500/30"
+          >
+            {message.match_progress.matched_items}/{message.match_progress.total_items}
+          </Badge>
+        )}
+
         {/* Chevron */}
         <ChevronDown
           className={cn(
@@ -610,17 +640,104 @@ function CompactMessageRow({
 
 // ── Candidate Panel ────────────────────────────────────
 
-function CandidatePanel({
-  messageId,
+function CandidatesList({
+  candidates,
+  selectedId,
+  onSelect,
   onConfirm,
 }: {
+  candidates: MatchCandidate[]
+  selectedId: number | null
+  onSelect: (id: number | null) => void
+  onConfirm: (id: number) => void
+}) {
+  if (candidates.length === 0) {
+    return <p className="text-sm text-muted-foreground py-4 text-center">매칭 후보가 없습니다</p>
+  }
+
+  return (
+    <div className="space-y-1.5" role="listbox" aria-label="매칭 후보 목록">
+      {candidates.map((candidate) => {
+        const isSelected = selectedId === candidate.id
+        return (
+          <div
+            key={candidate.id}
+            role="option"
+            aria-selected={isSelected}
+            tabIndex={0}
+            onClick={() => onSelect(isSelected ? null : candidate.id)}
+            onKeyDown={(e) => { if (e.key === "Enter" && isSelected) onConfirm(candidate.id) }}
+            className={cn(
+              "rounded-lg p-3 transition-all border cursor-pointer",
+              isSelected
+                ? "border-[hsl(var(--accent))] bg-[hsl(var(--accent))]/5"
+                : "border-white/[0.04] hover:bg-secondary/30"
+            )}
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-muted-foreground">
+                    {formatDate(candidate.date)}
+                  </span>
+                  <span className="font-medium truncate">
+                    {candidate.counterparty}{" "}
+                    {candidate.description}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="font-mono font-semibold text-sm tabular-nums">
+                    {formatKRW(candidate.amount)}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    신뢰도:
+                  </span>
+                  {getConfidenceBadge(candidate.confidence)}
+                </div>
+              </div>
+
+              {isSelected && (
+                <Button
+                  size="sm"
+                  className="shrink-0 bg-[hsl(var(--accent))] text-accent-foreground hover:bg-[hsl(var(--accent))]/90 h-8 px-3"
+                  onClick={(e) => { e.stopPropagation(); onConfirm(candidate.id) }}
+                >
+                  <Check className="h-3.5 w-3.5 mr-1" />
+                  확정
+                </Button>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function CandidatePanel({
+  messageId,
+  message,
+  onConfirm,
+  onRefresh,
+}: {
   messageId: number
+  message: SlackMessage
   onConfirm: (transactionId: number) => void
+  onRefresh: () => void
 }) {
   const [candidates, setCandidates] = useState<MatchCandidate[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null)
+
+  // 개별 매칭 상태
+  const [activeItemIndex, setActiveItemIndex] = useState<number | null>(null)
+  const [itemCandidates, setItemCandidates] = useState<MatchCandidate[]>([])
+  const [itemCandidatesLoading, setItemCandidatesLoading] = useState(false)
+  const [selectedItemCandidateId, setSelectedItemCandidateId] = useState<number | null>(null)
+
+  const items = message.parsed_structured?.items || []
+  const isMultiItem = items.length >= 2
 
   const fetchCandidates = useCallback(async () => {
     setLoading(true)
@@ -640,8 +757,77 @@ function CandidatePanel({
     }
   }, [messageId])
 
+  const fetchItemCandidates = useCallback(async (itemIdx: number) => {
+    setItemCandidatesLoading(true)
+    setSelectedItemCandidateId(null)
+    try {
+      const data = await fetchAPI<CandidatesResponse>(
+        `/slack/messages/${messageId}/candidates?item_index=${itemIdx}`,
+      )
+      setItemCandidates(data.candidates || [])
+    } catch {
+      toast.error("후보 검색 중 오류가 발생했습니다")
+      setItemCandidates([])
+    } finally {
+      setItemCandidatesLoading(false)
+    }
+  }, [messageId])
+
+  const confirmItemMatch = useCallback(async (
+    transactionId: number,
+    itemIndex: number,
+    itemDescription: string,
+  ) => {
+    try {
+      const res = await fetchAPI<{ is_completed: boolean }>(`/slack/messages/${messageId}/confirm`, {
+        method: "POST",
+        body: JSON.stringify({
+          transaction_id: transactionId,
+          item_index: itemIndex,
+          item_description: itemDescription,
+        }),
+      })
+      toast.success(`${itemDescription} 매칭 완료`)
+      onRefresh()
+
+      if (!res.is_completed) {
+        const confirmedIndices = new Set([
+          ...(message.item_matches || []).filter(m => m.is_confirmed).map(m => m.item_index),
+          itemIndex,
+        ])
+        const nextUnmatched = items.findIndex((_, i) => !confirmedIndices.has(i))
+        if (nextUnmatched >= 0) {
+          setTimeout(() => {
+            setActiveItemIndex(nextUnmatched)
+            fetchItemCandidates(nextUnmatched)
+          }, 300)
+        }
+      } else {
+        toast.success("전체 매칭 완료!")
+        setActiveItemIndex(null)
+      }
+    } catch {
+      toast.error("매칭 확정에 실패했습니다")
+    }
+  }, [messageId, message, items, onRefresh, fetchItemCandidates])
+
+  const undoItemMatch = useCallback(async (itemIndex: number) => {
+    try {
+      await fetchAPI(`/slack/messages/${messageId}/match/${itemIndex}`, {
+        method: "DELETE",
+      })
+      toast.success("매칭이 취소되었습니다")
+      onRefresh()
+      setActiveItemIndex(null)
+    } catch {
+      toast.error("매칭 취소에 실패했습니다")
+    }
+  }, [messageId, onRefresh])
+
   useEffect(() => {
     fetchCandidates()
+    setActiveItemIndex(null)
+    setItemCandidates([])
   }, [fetchCandidates])
 
   if (loading) return <CandidatePanelSkeleton />
@@ -666,82 +852,157 @@ function CandidatePanel({
     )
   }
 
-  if (candidates.length === 0) {
-    return (
-      <Card className="bg-card rounded-xl shadow">
-        <CardContent className="p-6 flex flex-col items-center gap-2">
-          <Search className="h-8 w-8 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">
-            매칭 후보가 없습니다.
-          </p>
-          <p className="text-xs text-muted-foreground">
-            다른 메시지를 선택하거나 거래 데이터를 업로드해주세요.
-          </p>
-        </CardContent>
-      </Card>
-    )
-  }
-
   return (
     <Card className="bg-card rounded-xl shadow">
       <CardContent className="p-4 space-y-3">
         <h3 className="text-sm font-semibold">매칭 후보</h3>
 
-        <div className="space-y-1.5" role="listbox" aria-label="매칭 후보 목록">
-          {candidates.map((candidate) => {
-            const isSelected = selectedCandidateId === candidate.id
-            return (
-              <div
-                key={candidate.id}
-                role="option"
-                aria-selected={isSelected}
-                tabIndex={0}
-                onClick={() => setSelectedCandidateId(isSelected ? null : candidate.id)}
-                onKeyDown={(e) => { if (e.key === "Enter" && isSelected) onConfirm(candidate.id) }}
-                className={cn(
-                  "rounded-lg p-3 transition-all border cursor-pointer",
-                  isSelected
-                    ? "border-[hsl(var(--accent))] bg-[hsl(var(--accent))]/5"
-                    : "border-white/[0.04] hover:bg-secondary/30"
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 text-sm">
-                      <span className="text-muted-foreground">
-                        {formatDate(candidate.date)}
-                      </span>
-                      <span className="font-medium truncate">
-                        {candidate.counterparty}{" "}
-                        {candidate.description}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="font-mono font-semibold text-sm tabular-nums">
-                        {formatKRW(candidate.amount)}
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        신뢰도:
-                      </span>
-                      {getConfidenceBadge(candidate.confidence)}
-                    </div>
-                  </div>
+        {isMultiItem ? (
+          <Tabs defaultValue="total">
+            <TabsList className="w-full">
+              <TabsTrigger value="total" className="flex-1">전체 매칭</TabsTrigger>
+              <TabsTrigger value="items" className="flex-1">
+                개별 매칭
+                <Badge variant="secondary" className="ml-1.5 text-[10px] px-1.5">
+                  {items.length}
+                </Badge>
+              </TabsTrigger>
+            </TabsList>
 
-                  {isSelected && (
-                    <Button
-                      size="sm"
-                      className="shrink-0 bg-[hsl(var(--accent))] text-accent-foreground hover:bg-[hsl(var(--accent))]/90 h-8 px-3"
-                      onClick={(e) => { e.stopPropagation(); onConfirm(candidate.id) }}
+            <TabsContent value="total" className="mt-3">
+              {candidates.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">매칭 후보가 없습니다</p>
+              ) : (
+                <CandidatesList
+                  candidates={candidates}
+                  selectedId={selectedCandidateId}
+                  onSelect={setSelectedCandidateId}
+                  onConfirm={onConfirm}
+                />
+              )}
+            </TabsContent>
+
+            <TabsContent value="items" className="mt-3 space-y-3">
+              {/* 항목 테이블 */}
+              <div className="rounded-md border border-border overflow-hidden">
+                {items.map((item, idx) => {
+                  const match = message.item_matches?.find(m => m.item_index === idx)
+                  const isActive = activeItemIndex === idx
+                  const isConfirmed = match?.is_confirmed
+
+                  return (
+                    <div
+                      key={idx}
+                      role="option"
+                      aria-selected={isActive}
+                      aria-label={`${item.description} 항목, ${formatKRW(item.amount)}원, ${isConfirmed ? "확정" : "미매칭"}`}
+                      className={cn(
+                        "flex items-center justify-between px-3 py-2 cursor-pointer border-b border-border last:border-b-0 transition-colors",
+                        isActive && "bg-yellow-500/10",
+                        isConfirmed && "bg-emerald-500/10",
+                        !isActive && !isConfirmed && "hover:bg-muted/50",
+                      )}
+                      onClick={() => {
+                        if (!isConfirmed) {
+                          setActiveItemIndex(idx)
+                          fetchItemCandidates(idx)
+                        }
+                      }}
                     >
-                      <Check className="h-3.5 w-3.5 mr-1" />
-                      확정
-                    </Button>
-                  )}
+                      <div className="flex items-center gap-2">
+                        {isActive && <span className="text-yellow-400 text-xs">&#9654;</span>}
+                        {isConfirmed && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                        <span className={cn("text-sm", isConfirmed && "text-emerald-400")}>
+                          {item.description}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-mono">{formatKRW(item.amount)}</span>
+                        {isConfirmed ? (
+                          <button
+                            className="text-xs text-muted-foreground hover:text-red-400 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              undoItemMatch(idx)
+                            }}
+                          >
+                            취소
+                          </button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            {isActive ? "선택중" : "미매칭"}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+                {/* 합계 행 */}
+                <div className="flex items-center justify-between px-3 py-2 bg-muted/30 text-sm">
+                  <span className="font-medium">합계</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono">
+                      {formatKRW(items.reduce((s, i) => s + (i.amount || 0), 0))}
+                    </span>
+                    {message.match_progress && (
+                      <Badge variant="outline" className="text-[10px]">
+                        {message.match_progress.matched_items}/{message.match_progress.total_items}
+                      </Badge>
+                    )}
+                  </div>
                 </div>
               </div>
-            )
-          })}
-        </div>
+
+              {/* 항목별 후보 리스트 */}
+              {activeItemIndex !== null && (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    &ldquo;{items[activeItemIndex]?.description}&rdquo; 후보
+                  </p>
+                  {itemCandidatesLoading ? (
+                    <div className="space-y-2">
+                      <Skeleton className="h-12 w-full" />
+                      <Skeleton className="h-12 w-full" />
+                      <Skeleton className="h-12 w-full" />
+                    </div>
+                  ) : itemCandidates.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-4 text-center">
+                      이 금액에 맞는 거래를 찾지 못했습니다
+                    </p>
+                  ) : (
+                    <CandidatesList
+                      candidates={itemCandidates}
+                      selectedId={selectedItemCandidateId}
+                      onSelect={setSelectedItemCandidateId}
+                      onConfirm={(txId) => {
+                        const item = items[activeItemIndex]
+                        confirmItemMatch(txId, activeItemIndex, item.description)
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
+        ) : (
+          /* 단일 항목: 기존 후보 리스트 (탭 없음) */
+          candidates.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-4">
+              <Search className="h-8 w-8 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">매칭 후보가 없습니다.</p>
+              <p className="text-xs text-muted-foreground">
+                다른 메시지를 선택하거나 거래 데이터를 업로드해주세요.
+              </p>
+            </div>
+          ) : (
+            <CandidatesList
+              candidates={candidates}
+              selectedId={selectedCandidateId}
+              onSelect={setSelectedCandidateId}
+              onConfirm={onConfirm}
+            />
+          )
+        )}
 
         {/* Actions */}
         <div className="flex gap-2 pt-2">
@@ -851,7 +1112,7 @@ function SlackMatchContent() {
     // Status filter
     if (statusFilter !== "all") {
       const status = getMessageStatus(msg)
-      if (statusFilter === "pending" && status !== "pending") return false
+      if (statusFilter === "pending" && status !== "pending" && status !== "partial") return false
       if (statusFilter === "confirmed" && status !== "confirmed") return false
       if (statusFilter === "ignored" && status !== "ignored") return false
     }
@@ -900,9 +1161,18 @@ function SlackMatchContent() {
 
   const handleIgnore = useCallback(
     async (messageId: number) => {
+      const msg = messages.find(m => m.id === messageId)
+      if (msg?.match_progress && msg.match_progress.matched_items > 0) {
+        const confirmed = window.confirm(
+          `${msg.match_progress.matched_items}개 항목이 매칭됨. 무시하면 매칭도 해제됩니다. 계속?`
+        )
+        if (!confirmed) return
+      }
+
       try {
         await fetchAPI(`/slack/messages/${messageId}/ignore`, {
           method: "POST",
+          body: JSON.stringify({}),
         })
         toast.success("메시지가 무시 처리되었습니다.")
         fetchMessages()
@@ -912,7 +1182,7 @@ function SlackMatchContent() {
         )
       }
     },
-    [fetchMessages],
+    [messages, fetchMessages],
   )
 
   const handleConfirmDirect = useCallback(
@@ -1178,10 +1448,12 @@ function SlackMatchContent() {
         <div className="lg:sticky lg:top-6 lg:self-start">
           {selectedMessageId !== null &&
           selectedMessage &&
-          getMessageStatus(selectedMessage) === "pending" ? (
+          (getMessageStatus(selectedMessage) === "pending" || getMessageStatus(selectedMessage) === "partial") ? (
             <CandidatePanel
               messageId={selectedMessageId}
+              message={selectedMessage}
               onConfirm={(txId) => handleConfirm(selectedMessageId, txId)}
+              onRefresh={fetchMessages}
             />
           ) : (
             <Card className="bg-card rounded-xl shadow">

@@ -26,10 +26,109 @@ class ConfirmMatch(BaseModel):
     amount_override: Optional[float] = None
     text_override: Optional[str] = None
     project_tag_override: Optional[str] = None
+    item_index: Optional[int] = None
+    item_description: Optional[str] = None
 
 
 class IgnoreMessage(BaseModel):
     reason: Optional[str] = None
+
+
+def _build_search_amounts(
+    ps: dict,
+    parsed_amount: float | None,
+    item_index: int | None = None,
+) -> list[dict]:
+    """매칭 후보 검색에 사용할 금액 목록 생성.
+
+    item_index 지정 시 해당 항목 금액만 반환.
+    미지정 시 total_amount + 모든 items + parsed_amount fallback.
+    """
+    if not ps:
+        ps = {}
+
+    structured_total = ps.get("total_amount")
+    structured_items = ps.get("items") or []
+
+    # 개별 항목 모드
+    if item_index is not None:
+        if 0 <= item_index < len(structured_items):
+            item = structured_items[item_index]
+            item_amt = item.get("amount")
+            if item_amt and item_amt > 0:
+                return [{"amount": float(item_amt), "label": item.get("description", "")[:30]}]
+        return []
+
+    # 전체 모드 (기존 동작)
+    search_amounts: list[dict] = []
+
+    if structured_total and structured_total > 0:
+        search_amounts.append({"amount": float(structured_total), "label": "총액"})
+
+    for item in structured_items:
+        item_amt = item.get("amount")
+        if item_amt and item_amt > 0:
+            desc = item.get("description", "")[:30]
+            search_amounts.append({"amount": float(item_amt), "label": desc})
+
+    if parsed_amount is not None and not search_amounts:
+        search_amounts.append({"amount": float(parsed_amount), "label": "파싱금액"})
+
+    return search_amounts
+
+
+def _get_excluded_transaction_ids(cur, message_id: int) -> set[int]:
+    """이미 확정된 매칭의 transaction_id 집합 반환."""
+    cur.execute(
+        "SELECT transaction_id FROM transaction_slack_match WHERE is_confirmed = true",
+    )
+    return {row[0] for row in cur.fetchall()}
+
+
+def _build_item_matches(
+    parsed_structured: dict | None,
+    match_rows: list[dict],
+) -> dict | None:
+    """다중 항목 메시지의 항목별 매칭 상태를 빌드.
+
+    items < 2이면 None 반환 (개별 매칭 해당 없음).
+    """
+    if not parsed_structured or not isinstance(parsed_structured, dict):
+        return None
+
+    items = parsed_structured.get("items") or []
+    if len(items) < 2:
+        return None
+
+    match_by_index = {}
+    for mr in match_rows:
+        idx = mr.get("item_index")
+        if idx is not None:
+            match_by_index[idx] = mr
+
+    item_matches = []
+    matched_count = 0
+    for i, item in enumerate(items):
+        mr = match_by_index.get(i)
+        is_confirmed = bool(mr and mr.get("is_confirmed"))
+        if is_confirmed:
+            matched_count += 1
+        item_matches.append({
+            "item_index": i,
+            "item_description": item.get("description", ""),
+            "amount": item.get("amount"),
+            "currency": item.get("currency", "KRW"),
+            "transaction_id": mr["transaction_id"] if mr else None,
+            "is_confirmed": is_confirmed,
+        })
+
+    return {
+        "item_matches": item_matches,
+        "match_progress": {
+            "total_items": len(items),
+            "matched_items": matched_count,
+        },
+    }
 
 
 @router.get("/messages")
@@ -114,6 +213,36 @@ def list_slack_messages(
     rows = fetch_all(cur)
     cur.close()
 
+    # ── 항목별 매칭 상태 조회 ──
+    message_ids = [r["id"] for r in rows]
+    item_match_map = {}
+    if message_ids:
+        placeholders = ",".join(["%s"] * len(message_ids))
+        cur3 = conn.cursor()
+        cur3.execute(
+            f"""SELECT slack_message_id, item_index, item_description,
+                       transaction_id, is_confirmed
+                FROM transaction_slack_match
+                WHERE slack_message_id IN ({placeholders})
+                  AND item_index IS NOT NULL AND is_confirmed = true
+                ORDER BY slack_message_id, item_index""",
+            message_ids,
+        )
+        for match_row in fetch_all(cur3):
+            mid = match_row["slack_message_id"]
+            if mid not in item_match_map:
+                item_match_map[mid] = []
+            item_match_map[mid].append(match_row)
+        cur3.close()
+
+    for row in rows:
+        ps = row.get("parsed_structured")
+        match_rows_for_msg = item_match_map.get(row["id"], [])
+        item_data = _build_item_matches(ps, match_rows_for_msg)
+        if item_data:
+            row["item_matches"] = item_data["item_matches"]
+            row["match_progress"] = item_data["match_progress"]
+
     # 월별 요약 통계 — month 필터 없이 entity 전체
     summary_where = ["1=1"]
     summary_params: list = []
@@ -157,6 +286,7 @@ def list_slack_messages(
 @router.get("/messages/{message_id}/candidates")
 def get_candidates(
     message_id: int,
+    item_index: Optional[int] = Query(None, description="개별 항목 인덱스 (0-based)"),
     conn: PgConnection = Depends(get_db),
 ):
     """Find candidate transactions for a slack message.
@@ -185,26 +315,8 @@ def get_candidates(
     # 구조화 파싱에서 정보 추출
     ps = parsed_structured if isinstance(parsed_structured, dict) else {}
     vendor = ps.get("vendor")
-    structured_total = ps.get("total_amount")
-    structured_items = ps.get("items") or []
 
-    # 검색할 금액 목록 생성:
-    # 1. 구조화 파싱 total_amount (가장 신뢰)
-    # 2. 개별 항목 금액들
-    # 3. DB parsed_amount (fallback)
-    search_amounts: list[dict] = []
-
-    if structured_total and structured_total > 0:
-        search_amounts.append({"amount": float(structured_total), "label": "총액"})
-
-    for item in structured_items:
-        item_amt = item.get("amount")
-        if item_amt and item_amt > 0:
-            desc = item.get("description", "")[:30]
-            search_amounts.append({"amount": float(item_amt), "label": desc})
-
-    if parsed_amount is not None and not search_amounts:
-        search_amounts.append({"amount": float(parsed_amount), "label": "파싱금액"})
+    search_amounts = _build_search_amounts(ps, parsed_amount, item_index)
 
     if not search_amounts:
         cur.close()
@@ -236,9 +348,11 @@ def get_candidates(
         where_parts.append("t.date BETWEEN %s - interval '30 days' AND %s + interval '30 days'")
         params.extend([msg_date, msg_date])
 
-    where_parts.append(
-        "t.id NOT IN (SELECT transaction_id FROM transaction_slack_match WHERE is_confirmed = true)"
-    )
+    excluded_ids = _get_excluded_transaction_ids(cur, message_id)
+    if excluded_ids:
+        placeholders = ",".join(["%s"] * len(excluded_ids))
+        where_parts.append(f"t.id NOT IN ({placeholders})")
+        params.extend(list(excluded_ids))
 
     where_clause = " AND ".join(where_parts)
 
@@ -340,10 +454,15 @@ def confirm_match(
     cur = conn.cursor()
     try:
         # Verify slack message exists
-        cur.execute("SELECT id, entity_id FROM slack_messages WHERE id = %s", [message_id])
+        cur.execute(
+            "SELECT id, entity_id, parsed_structured FROM slack_messages WHERE id = %s",
+            [message_id],
+        )
         msg = cur.fetchone()
         if not msg:
             raise HTTPException(404, "Slack message not found")
+
+        _, _, parsed_structured = msg
 
         # Verify transaction exists
         cur.execute("SELECT id FROM transactions WHERE id = %s", [body.transaction_id])
@@ -351,20 +470,29 @@ def confirm_match(
             raise HTTPException(404, "Transaction not found")
 
         # Check for existing confirmed match
-        cur.execute(
-            "SELECT id FROM transaction_slack_match WHERE slack_message_id = %s AND is_confirmed = true",
-            [message_id],
-        )
+        if body.item_index is not None:
+            cur.execute(
+                """SELECT id FROM transaction_slack_match
+                   WHERE slack_message_id = %s AND item_index = %s AND is_confirmed = true""",
+                [message_id, body.item_index],
+            )
+        else:
+            cur.execute(
+                """SELECT id FROM transaction_slack_match
+                   WHERE slack_message_id = %s AND is_confirmed = true AND item_index IS NULL""",
+                [message_id],
+            )
         if cur.fetchone():
-            raise HTTPException(409, "이 Slack 메시지는 이미 매칭이 확정되었습니다.")
+            raise HTTPException(409, "이 항목은 이미 매칭이 확정되었습니다.")
 
         # Create match record
         cur.execute(
             """
             INSERT INTO transaction_slack_match
                 (transaction_id, slack_message_id, match_confidence, is_manual, is_confirmed,
-                 ai_reasoning, note, amount_override, text_override, project_tag_override)
-            VALUES (%s, %s, %s, true, true, %s, %s, %s, %s, %s)
+                 ai_reasoning, note, amount_override, text_override, project_tag_override,
+                 item_index, item_description)
+            VALUES (%s, %s, %s, true, true, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             [
@@ -372,19 +500,95 @@ def confirm_match(
                 body.match_confidence or 1.0,
                 body.ai_reasoning, body.note,
                 body.amount_override, body.text_override, body.project_tag_override,
+                body.item_index, body.item_description,
             ],
         )
         match_id = cur.fetchone()[0]
 
-        # Mark slack message as completed
+        # is_completed 판단
+        ps = parsed_structured if isinstance(parsed_structured, dict) else {}
+        items = ps.get("items") or []
+
+        if body.item_index is not None and len(items) >= 2:
+            cur.execute(
+                """SELECT COUNT(*) FROM transaction_slack_match
+                   WHERE slack_message_id = %s AND is_confirmed = true AND item_index IS NOT NULL""",
+                [message_id],
+            )
+            confirmed_count = cur.fetchone()[0]
+            is_completed = confirmed_count >= len(items)
+        else:
+            is_completed = True
+
         cur.execute(
-            "UPDATE slack_messages SET is_completed = true WHERE id = %s",
-            [message_id],
+            "UPDATE slack_messages SET is_completed = %s WHERE id = %s",
+            [is_completed, message_id],
         )
 
         conn.commit()
         cur.close()
-        return {"match_id": match_id, "message_id": message_id, "confirmed": True}
+        return {
+            "match_id": match_id,
+            "message_id": message_id,
+            "confirmed": True,
+            "is_completed": is_completed,
+            "item_index": body.item_index,
+        }
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception:
+        conn.rollback()
+        raise
+
+
+@router.delete("/messages/{message_id}/match/{item_index}")
+def undo_item_match(
+    message_id: int,
+    item_index: int,
+    conn: PgConnection = Depends(get_db),
+):
+    """개별 항목 매칭 확정 취소."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """DELETE FROM transaction_slack_match
+               WHERE slack_message_id = %s AND item_index = %s AND is_confirmed = true
+               RETURNING id""",
+            [message_id, item_index],
+        )
+        deleted = cur.fetchone()
+        if not deleted:
+            raise HTTPException(404, "해당 항목의 매칭 기록이 없습니다.")
+
+        # is_completed 재계산
+        cur.execute(
+            "SELECT parsed_structured FROM slack_messages WHERE id = %s",
+            [message_id],
+        )
+        msg = cur.fetchone()
+        if msg:
+            ps = msg[0] if isinstance(msg[0], dict) else {}
+            items = ps.get("items") or []
+            if len(items) >= 2:
+                cur.execute(
+                    """SELECT COUNT(*) FROM transaction_slack_match
+                       WHERE slack_message_id = %s AND is_confirmed = true AND item_index IS NOT NULL""",
+                    [message_id],
+                )
+                confirmed_count = cur.fetchone()[0]
+                is_completed = confirmed_count >= len(items)
+            else:
+                is_completed = False
+
+            cur.execute(
+                "UPDATE slack_messages SET is_completed = %s WHERE id = %s",
+                [is_completed, message_id],
+            )
+
+        conn.commit()
+        cur.close()
+        return {"message_id": message_id, "item_index": item_index, "undone": True}
     except HTTPException:
         conn.rollback()
         raise
@@ -399,11 +603,17 @@ def ignore_message(
     body: IgnoreMessage,
     conn: PgConnection = Depends(get_db),
 ):
-    """Mark a slack message as cancelled/ignored."""
+    """Mark a slack message as cancelled/ignored. 부분 매칭 시 매칭 레코드도 삭제."""
     cur = conn.cursor()
     try:
+        # 부분 매칭 레코드 삭제
         cur.execute(
-            "UPDATE slack_messages SET is_cancelled = true WHERE id = %s RETURNING id",
+            "DELETE FROM transaction_slack_match WHERE slack_message_id = %s AND is_confirmed = true",
+            [message_id],
+        )
+
+        cur.execute(
+            "UPDATE slack_messages SET is_cancelled = true, is_completed = false WHERE id = %s RETURNING id",
             [message_id],
         )
         row = cur.fetchone()
