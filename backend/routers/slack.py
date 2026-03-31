@@ -438,7 +438,7 @@ def get_candidates(
     return {
         "message_id": message_id,
         "parsed_amount": float(parsed_amount) if parsed_amount else None,
-        "structured_total": structured_total,
+        "structured_total": ps.get("total_amount"),
         "search_amounts": search_amounts,
         "candidates": candidates,
     }
