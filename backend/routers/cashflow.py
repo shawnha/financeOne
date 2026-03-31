@@ -18,6 +18,7 @@ from backend.services.cashflow_service import (
     get_card_transactions,
     get_monthly_summary_data,
     get_forecast_cashflow,
+    generate_daily_schedule,
 )
 
 router = APIRouter(prefix="/api/cashflow", tags=["cashflow"])
@@ -172,4 +173,19 @@ def get_forecast(
         return get_forecast_cashflow(conn, entity_id, year, month)
     except Exception as e:
         logger.error("Cashflow forecast error: %s", e)
+        raise HTTPException(500, detail=str(e))
+
+
+@router.get("/daily-schedule")
+def get_daily_schedule(
+    entity_id: int = Query(...),
+    year: int = Query(...),
+    month: int = Query(...),
+    conn: PgConnection = Depends(get_db),
+):
+    """일별 잔고 시뮬레이션 — expected_day + card_settings 기반 (TENSION-2)."""
+    try:
+        return generate_daily_schedule(conn, entity_id, year, month)
+    except Exception as e:
+        logger.error("Cashflow daily-schedule error: %s", e)
         raise HTTPException(500, detail=str(e))

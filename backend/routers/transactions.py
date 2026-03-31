@@ -73,9 +73,19 @@ def list_transactions(
     if unclassified:
         where.append("t.is_confirmed = false AND t.standard_account_id IS NULL")
     if search:
-        where.append("(t.description ILIKE %s OR t.counterparty ILIKE %s OR t.note ILIKE %s)")
-        q = f"%{search}%"
-        params.extend([q, q, q])
+        # 숫자만이면 금액 검색 (±3%), 아니면 텍스트 검색, 혼합이면 둘 다
+        clean = search.replace(",", "").strip()
+        try:
+            amount_val = float(clean)
+            lo = round(amount_val * 0.97, 2)
+            hi = round(amount_val * 1.03, 2)
+            where.append("(t.amount BETWEEN %s AND %s OR t.description ILIKE %s OR t.counterparty ILIKE %s OR t.note ILIKE %s)")
+            q = f"%{search}%"
+            params.extend([lo, hi, q, q, q])
+        except ValueError:
+            where.append("(t.description ILIKE %s OR t.counterparty ILIKE %s OR t.note ILIKE %s)")
+            q = f"%{search}%"
+            params.extend([q, q, q])
 
     where_clause = " AND ".join(where)
     offset = (page - 1) * per_page
@@ -337,3 +347,15 @@ def bulk_confirm(body: BulkConfirm, conn: PgConnection = Depends(get_db)):
     except Exception:
         conn.rollback()
         raise
+
+
+@router.post("/remap")
+def remap_batch(
+    entity_id: int = Query(...),
+    dry_run: bool = Query(False),
+    conn: PgConnection = Depends(get_db),
+):
+    """내부계정 재매핑 배치 — mapping_rules + Slack fallback 기반."""
+    from backend.services.remapping_service import remap_transactions
+    result = remap_transactions(conn, entity_id, dry_run=dry_run)
+    return result

@@ -4,7 +4,7 @@
 """
 
 from fastapi import APIRouter, Query, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from psycopg2.extensions import connection as PgConnection
 
@@ -25,6 +25,8 @@ class ForecastCreate(BaseModel):
     is_recurring: bool = False
     internal_account_id: Optional[int] = None
     note: Optional[str] = None
+    expected_day: Optional[int] = Field(None, ge=1, le=31)  # CQ-2
+    payment_method: str = "bank"
 
 
 class ForecastUpdate(BaseModel):
@@ -32,6 +34,8 @@ class ForecastUpdate(BaseModel):
     actual_amount: Optional[float] = None
     is_recurring: Optional[bool] = None
     note: Optional[str] = None
+    expected_day: Optional[int] = Field(None, ge=1, le=31)
+    payment_method: Optional[str] = None
 
 
 @router.get("")
@@ -49,7 +53,7 @@ def list_forecasts(
             SELECT f.id, f.entity_id, f.year, f.month, f.category, f.subcategory, f.type,
                    f.forecast_amount, f.actual_amount, f.is_recurring,
                    f.internal_account_id, ia.name AS internal_account_name,
-                   f.note, f.created_at, f.updated_at
+                   f.note, f.expected_day, f.payment_method, f.created_at, f.updated_at
             FROM forecasts f
             LEFT JOIN internal_accounts ia ON f.internal_account_id = ia.id
             WHERE f.entity_id = %s AND f.year = %s AND f.month = %s
@@ -63,7 +67,7 @@ def list_forecasts(
             SELECT f.id, f.entity_id, f.year, f.month, f.category, f.subcategory, f.type,
                    f.forecast_amount, f.actual_amount, f.is_recurring,
                    f.internal_account_id, ia.name AS internal_account_name,
-                   f.note, f.created_at, f.updated_at
+                   f.note, f.expected_day, f.payment_method, f.created_at, f.updated_at
             FROM forecasts f
             LEFT JOIN internal_accounts ia ON f.internal_account_id = ia.id
             WHERE f.entity_id = %s AND f.year = %s
@@ -91,20 +95,24 @@ def create_forecast(
         """
         INSERT INTO forecasts
             (entity_id, year, month, category, subcategory, type,
-             forecast_amount, is_recurring, internal_account_id, note)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             forecast_amount, is_recurring, internal_account_id, note,
+             expected_day, payment_method)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (entity_id, year, month, internal_account_id, type)
           WHERE internal_account_id IS NOT NULL
         DO UPDATE SET forecast_amount = EXCLUDED.forecast_amount,
                       is_recurring = EXCLUDED.is_recurring,
                       category = EXCLUDED.category,
                       note = EXCLUDED.note,
+                      expected_day = EXCLUDED.expected_day,
+                      payment_method = EXCLUDED.payment_method,
                       updated_at = NOW()
         RETURNING id
         """,
         [body.entity_id, body.year, body.month, body.category,
          body.subcategory, body.type, body.forecast_amount,
-         body.is_recurring, body.internal_account_id, body.note],
+         body.is_recurring, body.internal_account_id, body.note,
+         body.expected_day, body.payment_method],
     )
     forecast_id = cur.fetchone()[0]
     conn.commit()
@@ -137,6 +145,12 @@ def update_forecast(
     if body.note is not None:
         updates.append("note = %s")
         params.append(body.note)
+    if body.expected_day is not None:
+        updates.append("expected_day = %s")
+        params.append(body.expected_day)
+    if body.payment_method is not None:
+        updates.append("payment_method = %s")
+        params.append(body.payment_method)
 
     if not updates:
         raise HTTPException(400, "No fields to update")
@@ -185,18 +199,31 @@ def copy_recurring_forecasts(
     source_month: int = Query(...),
     target_year: int = Query(...),
     target_month: int = Query(...),
+    amount_source: str = Query("forecast"),
     conn: PgConnection = Depends(get_db),
 ):
-    """is_recurring=true인 항목을 source → target 월로 복사."""
+    """is_recurring=true인 항목을 source → target 월로 복사.
+    amount_source='actual'이면 actual_amount 우선 사용 (없으면 forecast_amount fallback).
+    """
+    if amount_source not in ("forecast", "actual"):
+        raise HTTPException(400, "amount_source must be 'forecast' or 'actual'")
+
+    # Choose which amount to copy as the new forecast_amount
+    amount_expr = "forecast_amount"
+    if amount_source == "actual":
+        amount_expr = "COALESCE(actual_amount, forecast_amount)"
+
     cur = conn.cursor()
     try:
         cur.execute(
-            """
+            f"""
             INSERT INTO forecasts
                 (entity_id, year, month, category, subcategory, type,
-                 forecast_amount, is_recurring, internal_account_id, note)
+                 forecast_amount, is_recurring, internal_account_id, note,
+                 expected_day, payment_method)
             SELECT entity_id, %s, %s, category, subcategory, type,
-                   forecast_amount, is_recurring, internal_account_id, note
+                   {amount_expr}, is_recurring, internal_account_id, note,
+                   expected_day, payment_method
             FROM forecasts
             WHERE entity_id = %s AND year = %s AND month = %s AND is_recurring = true
             ON CONFLICT DO NOTHING

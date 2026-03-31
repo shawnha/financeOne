@@ -151,6 +151,8 @@ CREATE TABLE IF NOT EXISTS forecasts (
   is_recurring        BOOLEAN NOT NULL DEFAULT FALSE,
   internal_account_id INTEGER REFERENCES internal_accounts(id),
   note                TEXT,
+  expected_day        INTEGER,
+  payment_method      TEXT NOT NULL DEFAULT 'bank' CHECK (payment_method IN ('bank', 'card')),
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -384,14 +386,19 @@ CREATE INDEX IF NOT EXISTS idx_exchange_rates_lookup ON exchange_rates(from_curr
 CREATE TABLE IF NOT EXISTS card_settings (
   id           SERIAL PRIMARY KEY,
   entity_id    INTEGER NOT NULL REFERENCES entities(id),
-  card_name    TEXT NOT NULL,
-  source_type  TEXT NOT NULL,
-  payment_day  INTEGER NOT NULL DEFAULT 15,
-  card_number  TEXT,
-  is_active    BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  card_name         TEXT NOT NULL,
+  source_type       TEXT NOT NULL,
+  payment_day       INTEGER NOT NULL DEFAULT 15,
+  statement_day     INTEGER,
+  billing_start_day INTEGER,
+  card_number       TEXT,
+  is_active         BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(entity_id, source_type, card_number)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_card_settings_no_cardnum
+  ON card_settings (entity_id, source_type) WHERE card_number IS NULL;
 
 COMMIT;

@@ -79,33 +79,68 @@ export function AccountCombobox({
     }
   }, [open])
 
-  // Filter options by search (searches both code and name)
-  const filtered = useMemo(() => {
-    if (!search) return options
-    const q = search.toLowerCase()
-    return options.filter(
-      (o) => o.code.toLowerCase().includes(q) || o.name.toLowerCase().includes(q),
-    )
-  }, [options, search])
-
-  // Compute depth for each option based on parent_id
-  const depthMap = useMemo(() => {
+  // Build tree-ordered list with depth
+  const { treeOrdered, depthMap } = useMemo(() => {
     const map = new Map<number, number>()
-    const roots = options.filter((o) => !o.parent_id)
-    roots.forEach((r) => map.set(r.id, 0))
+    const childrenOf = new Map<number, AccountOption[]>()
+    const roots: AccountOption[] = []
 
-    let changed = true
-    while (changed) {
-      changed = false
-      for (const opt of options) {
-        if (opt.parent_id && map.has(opt.parent_id) && !map.has(opt.id)) {
-          map.set(opt.id, (map.get(opt.parent_id) || 0) + 1)
-          changed = true
+    for (const o of options) {
+      if (!o.parent_id) {
+        roots.push(o)
+      } else {
+        const siblings = childrenOf.get(o.parent_id) || []
+        siblings.push(o)
+        childrenOf.set(o.parent_id, siblings)
+      }
+    }
+
+    const ordered: AccountOption[] = []
+    const walk = (nodes: AccountOption[], depth: number) => {
+      for (const n of nodes) {
+        ordered.push(n)
+        map.set(n.id, depth)
+        const children = childrenOf.get(n.id)
+        if (children) walk(children, depth + 1)
+      }
+    }
+    walk(roots, 0)
+
+    return { treeOrdered: ordered, depthMap: map }
+  }, [options])
+
+  // Filter options by search — matching items + their children + their parents
+  const filtered = useMemo(() => {
+    if (!search) return treeOrdered
+    const q = search.toLowerCase()
+
+    const directMatches = new Set<number>()
+    for (const o of treeOrdered) {
+      if (o.code.toLowerCase().includes(q) || o.name.toLowerCase().includes(q)) {
+        directMatches.add(o.id)
+      }
+    }
+
+    const includeIds = new Set(directMatches)
+    for (const o of treeOrdered) {
+      if (o.parent_id && includeIds.has(o.parent_id)) {
+        includeIds.add(o.id)
+      }
+    }
+
+    for (const o of treeOrdered) {
+      if (includeIds.has(o.id) && o.parent_id) {
+        let pid: number | null | undefined = o.parent_id
+        while (pid) {
+          includeIds.add(pid)
+          const parent = treeOrdered.find(p => p.id === pid)
+          pid = parent?.parent_id
         }
       }
     }
-    return map
-  }, [options])
+
+    return treeOrdered.filter(o => includeIds.has(o.id))
+  }, [treeOrdered, search])
 
   const ROOT_CODES = ["INC", "EXP"]
 
@@ -175,7 +210,7 @@ export function AccountCombobox({
               filtered.map((opt) => {
                 const depth = depthMap.get(opt.id) ?? 0
                 const isGroupHeader = ROOT_CODES.includes(opt.code)
-                const isCategory = depth === 1 && options.some((o) => o.parent_id === opt.id)
+                const isCategory = depth === 1 && treeOrdered.some((o) => o.parent_id === opt.id)
                 const isSelected = String(opt.id) === value
 
                 // Group header (수입/비용) — not selectable

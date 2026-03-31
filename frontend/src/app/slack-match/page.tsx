@@ -912,6 +912,10 @@ function CandidatePanel({
     fetchCandidates()
     setActiveItemIndex(null)
     setItemCandidates([])
+    setSearchMode(false)
+    setSearchQuery("")
+    setSearchResults([])
+    setSelectedSearchIds(new Set())
   }, [fetchCandidates])
 
   if (loading) return <CandidatePanelSkeleton />
@@ -1001,7 +1005,18 @@ function CandidatePanel({
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-mono">{formatKRW(item.amount)}</span>
+                        <span className="text-sm font-mono">
+                          {item.currency === "USD" ? (
+                            <span className="flex flex-col items-end">
+                              <span>${item.amount.toLocaleString()}</span>
+                              {(item as Record<string, unknown>).amount_krw != null && (
+                                <span className="text-[10px] text-muted-foreground">
+                                  {formatKRW((item as Record<string, unknown>).amount_krw as number)}
+                                </span>
+                              )}
+                            </span>
+                          ) : formatKRW(item.amount)}
+                        </span>
                         {isConfirmed ? (
                           <button
                             className="text-xs text-muted-foreground hover:text-red-400 transition-colors"
@@ -1026,7 +1041,16 @@ function CandidatePanel({
                   <span className="font-medium">합계</span>
                   <div className="flex items-center gap-2">
                     <span className="font-mono">
-                      {formatKRW(items.reduce((s, i) => s + (i.amount || 0), 0))}
+                      {message.parsed_structured?.currency === "USD" ? (
+                        <span className="flex flex-col items-end">
+                          <span>${items.reduce((s, i) => s + (i.amount || 0), 0).toLocaleString()}</span>
+                          {(message.parsed_structured as Record<string, unknown>)?.total_amount_krw != null && (
+                            <span className="text-[10px] text-muted-foreground">
+                              {formatKRW((message.parsed_structured as Record<string, unknown>).total_amount_krw as number)}
+                            </span>
+                          )}
+                        </span>
+                      ) : formatKRW(items.reduce((s, i) => s + (i.amount || 0), 0))}
                     </span>
                     {message.match_progress && (
                       <Badge variant="outline" className="text-[10px]">
@@ -1118,7 +1142,7 @@ function CandidatePanel({
 
               {searchResults.length > 0 && (
                 <div className="space-y-1">
-                  <div className="space-y-1 max-h-[250px] overflow-y-auto">
+                  <div className="space-y-1 max-h-[400px] overflow-y-auto">
                     {searchResults.map((r) => {
                       const isChecked = selectedSearchIds.has(r.id)
                       return (
@@ -1211,16 +1235,23 @@ function SlackMatchContent() {
   const [error, setError] = useState<string | null>(null)
 
   const [selectedMessageId, setSelectedMessageId] = useState<number | null>(null)
-  const [popupTop, setPopupTop] = useState(0)
+  const [popupStyle, setPopupStyle] = useState<React.CSSProperties>({})
   const selectedRowRef = useRef<HTMLDivElement>(null)
 
-  // 선택된 메시지의 위치에 맞춰 팝업 top 업데이트
+  // 선택된 메시지의 위치에 맞춰 팝업 위치 업데이트
   useEffect(() => {
     if (selectedRowRef.current) {
       const rect = selectedRowRef.current.getBoundingClientRect()
-      // 화면 하단에 잘리지 않도록 보정
-      const maxTop = window.innerHeight - 400
-      setPopupTop(Math.max(8, Math.min(rect.top, maxTop)))
+      const vh = window.innerHeight
+      const isLowerHalf = rect.top > vh * 0.45
+
+      if (isLowerHalf) {
+        // 화면 하반부: 팝업을 아래 기준으로 위로 자라게
+        setPopupStyle({ bottom: `${Math.max(8, vh - rect.bottom)}px`, top: "auto", maxHeight: `${rect.bottom - 8}px` })
+      } else {
+        // 화면 상반부: 팝업을 위 기준으로 아래로 자라게
+        setPopupStyle({ top: `${Math.max(8, rect.top)}px`, bottom: "auto", maxHeight: `${vh - rect.top - 8}px` })
+      }
     }
   }, [selectedMessageId])
   const [monthlySummary, setMonthlySummary] = useState<MonthlySummary[]>([])
@@ -1684,8 +1715,8 @@ function SlackMatchContent() {
         {/* Right: Candidate popup — appears at selected message position */}
         {selectedMessageId !== null && selectedMessage && (
         <div
-          className="hidden lg:block fixed right-4 w-[400px] max-h-[70vh] overflow-y-auto z-10 scrollbar-thin rounded-xl border border-white/[0.06] shadow-lg bg-card/95 backdrop-blur-xl transition-[top] duration-150 ease-out"
-          style={{ top: `${popupTop}px` }}
+          className="hidden lg:block fixed right-4 w-[400px] overflow-y-auto z-10 scrollbar-thin rounded-xl border border-white/[0.06] shadow-lg bg-card/95 backdrop-blur-xl transition-all duration-150 ease-out"
+          style={popupStyle}
         >
           {(getMessageStatus(selectedMessage) === "pending" || getMessageStatus(selectedMessage) === "partial") ? (
             <CandidatePanel

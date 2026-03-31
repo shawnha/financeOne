@@ -47,6 +47,8 @@ interface ForecastItem {
   internal_account_id: number | null
   internal_account_name: string | null
   actual_from_transactions: number | null
+  expected_day: number | null
+  payment_method: string
 }
 
 interface CardTiming {
@@ -54,6 +56,35 @@ interface CardTiming {
   curr_month_card_actual: number
   curr_month_card_estimate: number
   adjustment: number
+}
+
+interface CardSetting {
+  source_type: string
+  card_name: string
+  payment_day: number
+}
+
+interface DailyPoint {
+  day: number
+  balance: number
+  events: Array<{ name: string; amount: number; type: string }>
+}
+
+interface DailyAlert {
+  day: number
+  deficit: number
+  message: string
+}
+
+interface DailyScheduleData {
+  year: number
+  month: number
+  entity_id: number
+  opening_balance: number
+  points: DailyPoint[]
+  alerts: DailyAlert[]
+  card_settings: CardSetting[]
+  min_balance_threshold: number
 }
 
 interface ForecastData {
@@ -65,12 +96,14 @@ interface ForecastData {
   forecast_expense: number
   forecast_card_usage: number
   card_timing: CardTiming
+  card_settings: CardSetting[]
   forecast_closing: number
   actual_income: number
   actual_expense: number
   actual_closing: number
   diff: number
   items: ForecastItem[]
+  warnings: string[]
   over_budget: Array<{
     category: string
     internal_account_id: number
@@ -118,73 +151,55 @@ function KPICard({
   )
 }
 
-// ── Forecast Balance Chart ────────────────────────────
+// ── Card color mapping (DESIGN-3) ────────────────────
+const CARD_COLORS: Record<string, { stroke: string; fill: string; label: string }> = {
+  lotte_card: { stroke: "#f87171", fill: "rgba(248,113,113,0.3)", label: "롯데 결제일" },
+  woori_card: { stroke: "#60a5fa", fill: "rgba(96,165,250,0.3)", label: "우리 결제일" },
+}
+const DEFAULT_CARD_COLOR = { stroke: "#8B5CF6", fill: "rgba(139,92,246,0.3)", label: "카드 결제일" }
+
+// ── Forecast Balance Chart (daily-schedule API) ──────
 
 function ForecastBalanceChart({
-  data,
+  schedule,
+  forecastData,
   entityId,
-  year,
   month,
 }: {
-  data: ForecastData
+  schedule: DailyScheduleData | null
+  forecastData: ForecastData
   entityId: string | null
-  year: number
   month: number
 }) {
   const chartData = useMemo(() => {
-    const daysInMonth = new Date(year, month, 0).getDate()
+    if (!schedule) return null
     const today = new Date()
-    const currentDay = today.getFullYear() === year && today.getMonth() + 1 === month
-      ? today.getDate() : (month < today.getMonth() + 1 || year < today.getFullYear() ? daysInMonth : 0)
+    const currentDay = today.getFullYear() === schedule.year && today.getMonth() + 1 === schedule.month
+      ? today.getDate() : (schedule.month < today.getMonth() + 1 || schedule.year < today.getFullYear() ? schedule.points.length : 0)
 
-    const totalExpense = data.forecast_expense + data.forecast_card_usage
-    const totalIncome = data.forecast_income
-    const points: Array<{
-      day: string
-      estimated: number
-      actual: number | null
-    }> = []
-
-    // Simple daily projection: income spread evenly, expenses weighted toward card payment dates (15th, 25th)
-    let estBalance = data.opening_balance
-    let actBalance = data.opening_balance
-    const dailyIncome = totalIncome / daysInMonth
-    const dailyExpense = totalExpense / daysInMonth
-
-    // Actual daily change rate (rough estimate from total actuals)
     const actualDailyChange = currentDay > 0
-      ? (data.actual_closing - data.opening_balance) / currentDay
+      ? (forecastData.actual_closing - forecastData.opening_balance) / currentDay
       : 0
 
-    for (let d = 1; d <= daysInMonth; d++) {
-      // Estimated: smooth with card payment dips
-      let dayExpense = dailyExpense
-      if (d === 15 || d === 25) dayExpense = dailyExpense * 4 // Card payment days spike
-      estBalance = estBalance + dailyIncome - dayExpense
+    const points = schedule.points.map((p) => ({
+      day: `${month}/${p.day}`,
+      estimated: p.balance,
+      actual: p.day <= currentDay
+        ? Math.round(forecastData.opening_balance + actualDailyChange * p.day)
+        : null,
+      events: p.events,
+    }))
 
-      // Actual: only up to current day
-      if (d <= currentDay) {
-        actBalance = data.opening_balance + actualDailyChange * d
-      }
+    return { points, daysInMonth: schedule.points.length, cardSettings: schedule.card_settings }
+  }, [schedule, forecastData, month])
 
-      points.push({
-        day: `${month}/${d}`,
-        estimated: Math.round(estBalance),
-        actual: d <= currentDay ? Math.round(actBalance) : null,
-      })
-    }
-
-    return { points, currentDay, daysInMonth }
-  }, [data, year, month])
+  if (!chartData) return <Skeleton className="h-[220px] rounded-2xl" />
 
   const fmt = (v: number) => {
     if (Math.abs(v) >= 1_000_000) return `₩${(v / 1_000_000).toFixed(0)}M`
     if (Math.abs(v) >= 1_000) return `₩${(v / 1_000).toFixed(0)}K`
     return `₩${v}`
   }
-
-  // Card payment reference lines
-  const cardPaymentDays = [`${month}/15`, `${month}/25`]
 
   return (
     <Card className="bg-secondary rounded-2xl p-6">
@@ -206,7 +221,7 @@ function ForecastBalanceChart({
             tick={{ fontSize: 10, fill: "#64748b" }}
             tickLine={false}
             axisLine={{ stroke: "rgba(255,255,255,0.06)" }}
-            interval={Math.floor(chartData.daysInMonth / 5)}
+            interval={Math.max(1, Math.floor(chartData.daysInMonth / 5))}
           />
           <YAxis
             tick={{ fontSize: 10, fill: "#64748b" }}
@@ -218,30 +233,57 @@ function ForecastBalanceChart({
           <Tooltip
             contentStyle={{ background: "#161b22", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }}
             labelStyle={{ color: "#94a3b8" }}
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            formatter={((value: any, name: any) => [
-              `₩${Number(value).toLocaleString()}`,
-              name === "estimated" ? "예상 잔고" : "실제 잔고",
-            ]) as any}
+            content={({ active, payload, label }) => {
+              if (!active || !payload?.length) return null
+              const point = payload[0]?.payload
+              return (
+                <div className="bg-[#161b22] border border-white/10 rounded-lg p-3 text-xs">
+                  <p className="text-muted-foreground mb-1">{label}</p>
+                  <p className="text-[#F59E0B]">예상: ₩{point?.estimated?.toLocaleString()}</p>
+                  {point?.actual != null && <p className="text-[#22C55E]">실제: ₩{point.actual.toLocaleString()}</p>}
+                  {point?.events?.length > 0 && (
+                    <div className="mt-1 pt-1 border-t border-white/10">
+                      {point.events.map((e: { name: string; amount: number; type: string }, i: number) => (
+                        <p key={i} className={e.type === "out" ? "text-red-400" : "text-green-400"}>
+                          {e.type === "out" ? "-" : "+"}{e.name}: ₩{Math.round(e.amount).toLocaleString()}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            }}
           />
-          {/* Card payment day markers */}
-          {cardPaymentDays.map((day, i) => (
-            <ReferenceLine
-              key={day}
-              x={day}
-              stroke="rgba(139,92,246,0.3)"
-              strokeDasharray="3 3"
-              strokeWidth={1}
-            >
-              <Label
-                value={i === 0 ? "롯데 결제일" : "우리 결제일"}
-                position="top"
-                fill="#8B5CF6"
-                fontSize={9}
-                fontWeight={500}
-              />
-            </ReferenceLine>
-          ))}
+          {/* Card payment day markers (DESIGN-3) */}
+          {chartData.cardSettings.map((card) => {
+            const color = CARD_COLORS[card.source_type] || DEFAULT_CARD_COLOR
+            const day = `${month}/${Math.min(card.payment_day, chartData.daysInMonth)}`
+            return (
+              <ReferenceLine
+                key={card.source_type}
+                x={day}
+                stroke={color.stroke}
+                strokeDasharray="3 3"
+                strokeWidth={1}
+              >
+                <Label
+                  value={color.label}
+                  position="top"
+                  fill={color.stroke}
+                  fontSize={9}
+                  fontWeight={500}
+                  className="hidden sm:block"
+                />
+              </ReferenceLine>
+            )
+          })}
+          {/* Min balance threshold line */}
+          <ReferenceLine
+            y={0}
+            stroke="rgba(239,68,68,0.3)"
+            strokeDasharray="6 3"
+            strokeWidth={1}
+          />
           {/* Estimated balance (amber dashed + area) */}
           <Area
             type="monotone"
@@ -253,7 +295,7 @@ function ForecastBalanceChart({
             dot={false}
             activeDot={{ r: 4, fill: "#F59E0B", stroke: "#050508", strokeWidth: 2 }}
           />
-          {/* Actual balance (green solid + area, only up to current day) */}
+          {/* Actual balance (green solid + area) */}
           <Area
             type="monotone"
             dataKey="actual"
@@ -266,7 +308,7 @@ function ForecastBalanceChart({
           />
         </ComposedChart>
       </ResponsiveContainer>
-      <div className="flex gap-5 mt-2 text-[11px] text-muted-foreground">
+      <div className="flex flex-wrap gap-5 mt-2 text-[11px] text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <span className="inline-block w-2 h-2 rounded-full bg-[#F59E0B]" />
           예상 잔고 (시차보정 포함)
@@ -275,10 +317,15 @@ function ForecastBalanceChart({
           <span className="inline-block w-2 h-2 rounded-full bg-[#22C55E]" style={{ boxShadow: "0 0 6px #22C55E" }} />
           실제 잔고 (업로드마다 업데이트)
         </span>
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block w-2 h-2 rounded-full bg-[#8B5CF6]" />
-          카드 결제일
-        </span>
+        {chartData.cardSettings.map((card) => {
+          const color = CARD_COLORS[card.source_type] || DEFAULT_CARD_COLOR
+          return (
+            <span key={card.source_type} className="flex items-center gap-1.5">
+              <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: color.stroke }} />
+              {card.card_name} ({card.payment_day}일)
+            </span>
+          )
+        })}
       </div>
     </Card>
   )
@@ -311,6 +358,8 @@ function ForecastModal({
   const [internalAccounts, setInternalAccounts] = useState<InternalAccount[]>([])
   const [amount, setAmount] = useState("")
   const [recurring, setRecurring] = useState(false)
+  const [expectedDay, setExpectedDay] = useState("")
+  const [paymentMethod, setPaymentMethod] = useState<"bank" | "card">("bank")
   const [saving, setSaving] = useState(false)
 
   // Fetch internal accounts on mount
@@ -339,6 +388,8 @@ function ForecastModal({
           forecast_amount: parseFloat(amount),
           is_recurring: recurring,
           internal_account_id: selectedAccountId ? Number(selectedAccountId) : null,
+          expected_day: expectedDay ? Number(expectedDay) : null,
+          payment_method: paymentMethod,
         }),
       })
       setOpen(false)
@@ -346,6 +397,8 @@ function ForecastModal({
       setSelectedAccountId("")
       setAmount("")
       setRecurring(false)
+      setExpectedDay("")
+      setPaymentMethod("bank")
       onSaved()
     } finally {
       setSaving(false)
@@ -406,6 +459,32 @@ function ForecastModal({
               className="mt-1 font-mono"
             />
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-muted-foreground">예상 결제일</label>
+              <select
+                value={expectedDay}
+                onChange={(e) => setExpectedDay(e.target.value)}
+                className="mt-1 w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="">미지정</option>
+                {Array.from({ length: 31 }, (_, i) => (
+                  <option key={i + 1} value={i + 1}>{i + 1}일</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">결제수단</label>
+              <select
+                value={paymentMethod}
+                onChange={(e) => setPaymentMethod(e.target.value as "bank" | "card")}
+                className="mt-1 w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="bank">은행이체</option>
+                <option value="card">카드</option>
+              </select>
+            </div>
+          </div>
           <label className="flex items-center gap-2 cursor-pointer">
             <Checkbox checked={recurring} onCheckedChange={(v) => setRecurring(!!v)} />
             <span className="text-sm">매월 반복</span>
@@ -426,6 +505,7 @@ function ForecastModal({
 
 export function ForecastTab({ entityId }: { entityId: string | null }) {
   const [data, setData] = useState<ForecastData | null>(null)
+  const [schedule, setSchedule] = useState<DailyScheduleData | null>(null)
   const [summary, setSummary] = useState<SummaryData | null>(null)
   const [state, setState] = useState<LoadState>("loading")
   const [error, setError] = useState("")
@@ -454,11 +534,18 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
     setState("loading")
     const [y, m] = selectedMonth.split("-").map(Number)
     try {
-      const d = await fetchAPI<ForecastData>(
-        `/cashflow/forecast?entity_id=${entityId}&year=${y}&month=${m}`,
-        { cache: "no-store" },
-      )
+      const [d, s] = await Promise.all([
+        fetchAPI<ForecastData>(
+          `/cashflow/forecast?entity_id=${entityId}&year=${y}&month=${m}`,
+          { cache: "no-store" },
+        ),
+        fetchAPI<DailyScheduleData>(
+          `/cashflow/daily-schedule?entity_id=${entityId}&year=${y}&month=${m}`,
+          { cache: "no-store" },
+        ).catch(() => null),
+      ])
       setData(d)
+      setSchedule(s)
       setState("success")
     } catch (err) {
       setError(err instanceof Error ? err.message : "데이터를 불러올 수 없습니다.")
@@ -537,8 +624,36 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
         카드/은행 데이터 업로드마다 &quot;실제 진행&quot; 컬럼이 업데이트됩니다. 월말에 예상과 실제를 비교합니다.
       </div>
 
-      {/* Forecast vs Actual balance chart */}
-      <ForecastBalanceChart data={data} entityId={entityId} year={y} month={m} />
+      {/* Alerts from daily schedule (DESIGN-2) */}
+      {schedule?.alerts && schedule.alerts.length > 0 && (
+        <Card className="bg-red-500/10 border-red-500/30 rounded-xl p-4" role="alert" aria-live="polite">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertCircle className="h-4 w-4 text-red-400" />
+            <span className="text-sm font-medium text-red-400">잔고 부족 예상</span>
+          </div>
+          <div className="space-y-1">
+            {schedule.alerts.slice(0, 3).map((alert, i) => (
+              <p key={i} className="text-xs text-red-300">
+                {alert.message} (부족액: {formatByEntity(alert.deficit, entityId)})
+              </p>
+            ))}
+            {schedule.alerts.length > 3 && (
+              <p className="text-xs text-red-300/70">외 {schedule.alerts.length - 3}건 더 보기</p>
+            )}
+          </div>
+          <div className="flex gap-2 mt-3 max-sm:flex-col">
+            <Button variant="outline" size="sm" className="text-xs border-red-500/30 text-red-400 hover:bg-red-500/10">
+              예상 항목 조정
+            </Button>
+            <Button variant="outline" size="sm" className="text-xs border-red-500/30 text-red-400 hover:bg-red-500/10">
+              입금 추가
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {/* Forecast vs Actual balance chart (daily-schedule API) */}
+      <ForecastBalanceChart schedule={schedule} forecastData={data} entityId={entityId} month={m} />
 
       {/* KPI */}
       <div className="grid grid-cols-4 gap-3 max-md:grid-cols-2">

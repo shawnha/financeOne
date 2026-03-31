@@ -59,15 +59,26 @@ def learn_mapping_rule(cur, *, entity_id: int, counterparty: str | None, interna
             std_row = cur.fetchone()
             std_id = std_row[0] if std_row else None
 
-            cur.execute(
-                """
-                UPDATE mapping_rules
-                SET internal_account_id = %s, standard_account_id = %s,
-                    confidence = 0.8, hit_count = 1, updated_at = NOW()
-                WHERE id = %s
-                """,
-                [internal_account_id, std_id, rule_id],
-            )
+            if std_id is not None:
+                cur.execute(
+                    """
+                    UPDATE mapping_rules
+                    SET internal_account_id = %s, standard_account_id = %s,
+                        confidence = 0.8, hit_count = 1, updated_at = NOW()
+                    WHERE id = %s
+                    """,
+                    [internal_account_id, std_id, rule_id],
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE mapping_rules
+                    SET internal_account_id = %s,
+                        confidence = 0.8, hit_count = 1, updated_at = NOW()
+                    WHERE id = %s
+                    """,
+                    [internal_account_id, rule_id],
+                )
     else:
         cur.execute(
             "SELECT standard_account_id FROM internal_accounts WHERE id = %s",
@@ -75,6 +86,9 @@ def learn_mapping_rule(cur, *, entity_id: int, counterparty: str | None, interna
         )
         std_row = cur.fetchone()
         std_id = std_row[0] if std_row else None
+
+        if std_id is None:
+            return  # 표준계정 미연결 → 매핑 규칙 저장 건너뜀
 
         cur.execute(
             """

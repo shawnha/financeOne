@@ -348,10 +348,13 @@ export default function TransactionsPage() {
   // Inline cell edit
   const handleInlineEdit = useCallback(async (txId: number, field: "internal_account_id" | "standard_account_id", value: string) => {
     setEditingCell(null)
+    if (!value) return // clear selection — do nothing
+    const numValue = Number(value)
+    if (!numValue || isNaN(numValue)) return
     try {
       await fetchAPI(`/transactions/${txId}`, {
         method: "PATCH",
-        body: JSON.stringify({ [field]: Number(value) }),
+        body: JSON.stringify({ [field]: numValue }),
       })
       // Update local state
       setData(prev => {
@@ -361,11 +364,11 @@ export default function TransactionsPage() {
           items: prev.items.map(tx => {
             if (tx.id !== txId) return tx
             if (field === "internal_account_id") {
-              const account = internalAccounts.find(a => a.id === Number(value))
-              return { ...tx, internal_account_id: Number(value), internal_account_name: account?.name ?? null, internal_account_code: account?.code ?? null }
+              const account = internalAccounts.find(a => a.id === numValue)
+              return { ...tx, internal_account_id: numValue, internal_account_name: account?.name ?? null, internal_account_code: account?.code ?? null }
             } else {
-              const account = standardAccounts.find(a => a.id === Number(value))
-              return { ...tx, standard_account_id: Number(value), standard_account_name: account?.name ?? null, standard_account_code: account?.code ?? null }
+              const account = standardAccounts.find(a => a.id === numValue)
+              return { ...tx, standard_account_id: numValue, standard_account_name: account?.name ?? null, standard_account_code: account?.code ?? null }
             }
           }),
         }
@@ -477,7 +480,7 @@ export default function TransactionsPage() {
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="내역, 거래처 검색..."
+              placeholder="내역, 거래처, 금액 검색..."
               value={filters.search}
               onChange={e => updateFilter("search", e.target.value)}
               className="pl-8 h-9 w-56 text-sm"
@@ -666,6 +669,7 @@ export default function TransactionsPage() {
 
                       {/* Internal Account */}
                       <TableCell
+                        data-account-cell
                         className="p-2 cursor-pointer hover:bg-muted/20 transition-colors"
                         onClick={e => { e.stopPropagation(); if (!(editingCell?.txId === tx.id && editingCell?.field === "internal_account_id")) setEditingCell({ txId: tx.id, field: "internal_account_id" }) }}
                       >
@@ -687,6 +691,7 @@ export default function TransactionsPage() {
 
                       {/* Standard Account */}
                       <TableCell
+                        data-account-cell
                         className="p-2 cursor-pointer hover:bg-muted/20 transition-colors"
                         onClick={e => { e.stopPropagation(); if (!(editingCell?.txId === tx.id && editingCell?.field === "standard_account_id")) setEditingCell({ txId: tx.id, field: "standard_account_id" }) }}
                       >

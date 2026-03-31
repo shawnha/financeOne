@@ -4,6 +4,7 @@
 DB 조회 함수 (get_actual_cashflow, get_monthly_summary, get_card_expenses)를 분리.
 """
 
+import calendar
 from collections import defaultdict
 from decimal import Decimal
 from typing import Optional
@@ -359,22 +360,60 @@ def get_monthly_summary_data(
     }
 
 
-def get_card_total_net(conn: PgConnection, entity_id: int, year: int, month: int) -> Decimal:
-    """특정 월 카드 순 사용액 (출금 - 환불)."""
+def get_active_card_settings(conn: PgConnection, entity_id: int) -> list[dict]:
+    """card_settings에서 활성 카드 목록 조회 (ARCH-1)."""
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT
-            COALESCE(SUM(CASE WHEN type = 'out' THEN amount ELSE 0 END), 0) -
-            COALESCE(SUM(CASE WHEN type = 'in' THEN amount ELSE 0 END), 0)
-        FROM transactions
-        WHERE entity_id = %s
-          AND source_type IN ('lotte_card', 'woori_card')
-          AND date >= %s AND date < %s
-          AND is_duplicate = false
+        SELECT source_type, card_name, payment_day, statement_day, billing_start_day
+        FROM card_settings
+        WHERE entity_id = %s AND is_active = true
+        ORDER BY payment_day
         """,
-        [entity_id, *build_date_range(year, month)],
+        [entity_id],
     )
+    rows = fetch_all(cur)
+    cur.close()
+    return rows
+
+
+def get_card_total_net(
+    conn: PgConnection,
+    entity_id: int,
+    year: int,
+    month: int,
+    source_type: Optional[str] = None,
+) -> Decimal:
+    """특정 월 카드 순 사용액 (출금 - 환불). source_type 지정 시 해당 카드만."""
+    cur = conn.cursor()
+    if source_type:
+        cur.execute(
+            """
+            SELECT
+                COALESCE(SUM(CASE WHEN type = 'out' THEN amount ELSE 0 END), 0) -
+                COALESCE(SUM(CASE WHEN type = 'in' THEN amount ELSE 0 END), 0)
+            FROM transactions
+            WHERE entity_id = %s
+              AND source_type = %s
+              AND date >= %s AND date < %s
+              AND is_duplicate = false
+            """,
+            [entity_id, source_type, *build_date_range(year, month)],
+        )
+    else:
+        cur.execute(
+            """
+            SELECT
+                COALESCE(SUM(CASE WHEN type = 'out' THEN amount ELSE 0 END), 0) -
+                COALESCE(SUM(CASE WHEN type = 'in' THEN amount ELSE 0 END), 0)
+            FROM transactions
+            WHERE entity_id = %s
+              AND source_type IN ('lotte_card', 'woori_card')
+              AND date >= %s AND date < %s
+              AND is_duplicate = false
+            """,
+            [entity_id, *build_date_range(year, month)],
+        )
     result = Decimal(str(cur.fetchone()[0]))
     cur.close()
     return result
@@ -395,11 +434,11 @@ def get_forecast_cashflow(
     # 1. 기초잔고 (전월 확정 기말)
     opening = get_opening_balance(conn, entity_id, year, month)
 
-    # 2. Forecast 항목 조회
+    # 2. Forecast 항목 조회 (expected_day, payment_method 포함)
     cur.execute(
         """
         SELECT f.id, f.category, f.subcategory, f.type, f.forecast_amount, f.actual_amount,
-               f.is_recurring, f.note, f.internal_account_id
+               f.is_recurring, f.note, f.internal_account_id, f.expected_day, f.payment_method
         FROM forecasts f
         WHERE f.entity_id = %s AND f.year = %s AND f.month = %s
         ORDER BY f.type, f.category
@@ -426,28 +465,49 @@ def get_forecast_cashflow(
     for row in cur.fetchall():
         actual_by_account[(row[0], row[1])] = float(row[2])
 
-    # 3. Forecast 합산 (카드 카테고리 제외한 일반 입출금)
+    # 3. Forecast 합산 (payment_method 기반 분리 — ARCH-3)
     forecast_income = Decimal("0")
     forecast_expense = Decimal("0")
     forecast_card_usage = Decimal("0")
+    warnings = []
 
     for item in items:
         amt = Decimal(str(item["forecast_amount"]))
         if item["type"] == "in":
             forecast_income += amt
         else:  # out
-            if item["category"] == "카드사용":
+            if item.get("payment_method") == "card":
                 forecast_card_usage += amt
             else:
                 forecast_expense += amt
 
-    # 4. 카드 시차 보정
+    # 4. 카드별 시차 보정 (card_settings 기반 — ARCH-1)
     prev_year = year if month > 1 else year - 1
     prev_month = month - 1 if month > 1 else 12
-    prev_card_net = get_card_total_net(conn, entity_id, prev_year, prev_month)
 
-    # 당월 예상 카드 사용: forecast에 있으면 사용, 없으면 전월 실적 fallback
-    curr_card_actual = get_card_total_net(conn, entity_id, year, month)
+    cards = get_active_card_settings(conn, entity_id)
+    if not cards:
+        warnings.append("카드 설정이 없습니다. 카드 시차보정이 적용되지 않았습니다.")
+
+    card_details = []
+    total_prev_card = Decimal("0")
+    total_curr_card = Decimal("0")
+    for card in cards:
+        prev = get_card_total_net(conn, entity_id, prev_year, prev_month, source_type=card["source_type"])
+        curr = get_card_total_net(conn, entity_id, year, month, source_type=card["source_type"])
+        total_prev_card += prev
+        total_curr_card += curr
+        card_details.append({
+            "source_type": card["source_type"],
+            "card_name": card["card_name"],
+            "payment_day": card["payment_day"],
+            "prev_month": float(prev),
+            "curr_month": float(curr),
+        })
+
+    # 전체 카드 합산 (source_type 없이 조회 — fallback for when cards is empty)
+    prev_card_net = total_prev_card if cards else get_card_total_net(conn, entity_id, prev_year, prev_month)
+    curr_card_actual = total_curr_card if cards else get_card_total_net(conn, entity_id, year, month)
     curr_card_estimate = forecast_card_usage if forecast_card_usage > 0 else prev_card_net
 
     timing_adj = calc_card_timing_adjustment(prev_card_net, curr_card_estimate)
@@ -512,13 +572,23 @@ def get_forecast_cashflow(
             "curr_month_card_actual": float(curr_card_actual),
             "curr_month_card_estimate": float(curr_card_estimate),
             "adjustment": float(timing_adj),
+            "card_details": card_details,
         },
+        "card_settings": [
+            {
+                "source_type": c["source_type"],
+                "card_name": c["card_name"],
+                "payment_day": c["payment_day"],
+            }
+            for c in cards
+        ],
         "forecast_closing": float(forecast_closing),
         "actual_income": float(actual_income),
         "actual_expense": float(actual_expense),
         "actual_closing": float(actual_closing),
         "diff": float(diff),
         "over_budget": over_budget,
+        "warnings": warnings,
         "items": [
             {
                 "id": i["id"],
@@ -530,10 +600,114 @@ def get_forecast_cashflow(
                 "is_recurring": i["is_recurring"],
                 "note": i["note"],
                 "internal_account_id": i.get("internal_account_id"),
+                "expected_day": i.get("expected_day"),
+                "payment_method": i.get("payment_method", "bank"),
                 "actual_from_transactions": actual_by_account.get(
                     (i.get("internal_account_id"), i["type"]), 0.0
                 ) if i.get("internal_account_id") else None,
             }
             for i in items
         ],
+    }
+
+
+def generate_daily_schedule(
+    conn: PgConnection,
+    entity_id: int,
+    year: int,
+    month: int,
+) -> dict:
+    """일별 잔고 시뮬레이션 생성 (TENSION-2: 백엔드에서 계산)."""
+    forecast_data = get_forecast_cashflow(conn, entity_id, year, month)
+    cards = get_active_card_settings(conn, entity_id)
+    items = forecast_data["items"]
+    days_in_month = calendar.monthrange(year, month)[1]
+
+    prev_year = year if month > 1 else year - 1
+    prev_month = month - 1 if month > 1 else 12
+
+    # 날짜별 이벤트 매핑
+    day_events: dict[int, list[dict]] = defaultdict(list)
+
+    # 1. expected_day 지정 bank 항목
+    for item in items:
+        if item.get("payment_method", "bank") == "bank" and item.get("expected_day"):
+            day = min(item["expected_day"], days_in_month)
+            day_events[day].append({
+                "name": item["category"],
+                "amount": item["forecast_amount"],
+                "type": item["type"],
+            })
+
+    # 2. 카드 결제일 (card_settings 기반)
+    for card in cards:
+        prev_card = get_card_total_net(
+            conn, entity_id, prev_year, prev_month, source_type=card["source_type"],
+        )
+        day = min(card["payment_day"], days_in_month)
+        if prev_card > 0:
+            day_events[day].append({
+                "name": f"{card['card_name']} 결제",
+                "amount": float(prev_card),
+                "type": "out",
+            })
+
+    # 3. 날짜 없는 bank 항목: 균등 분배
+    undated_out = sum(
+        item["forecast_amount"] for item in items
+        if item.get("payment_method", "bank") == "bank"
+        and not item.get("expected_day")
+        and item["type"] == "out"
+    )
+    undated_in = sum(
+        item["forecast_amount"] for item in items
+        if item.get("payment_method", "bank") == "bank"
+        and not item.get("expected_day")
+        and item["type"] == "in"
+    )
+    daily_undated_out = undated_out / days_in_month if days_in_month else 0
+    daily_undated_in = undated_in / days_in_month if days_in_month else 0
+
+    # 일별 잔고 + 경고
+    balance = forecast_data["opening_balance"]
+    points = []
+    alerts = []
+    min_balance_threshold = 0
+
+    for d in range(1, days_in_month + 1):
+        day_change = sum(
+            -e["amount"] if e["type"] == "out" else e["amount"]
+            for e in day_events.get(d, [])
+        ) - daily_undated_out + daily_undated_in
+        balance += day_change
+
+        if balance < min_balance_threshold:
+            alerts.append({
+                "day": d,
+                "deficit": round(abs(balance)),
+                "message": f"{d}일 잔고 부족 예상",
+            })
+
+        points.append({
+            "day": d,
+            "balance": round(balance),
+            "events": day_events.get(d, []),
+        })
+
+    return {
+        "year": year,
+        "month": month,
+        "entity_id": entity_id,
+        "opening_balance": forecast_data["opening_balance"],
+        "points": points,
+        "alerts": alerts,
+        "card_settings": [
+            {
+                "source_type": c["source_type"],
+                "card_name": c["card_name"],
+                "payment_day": c["payment_day"],
+            }
+            for c in cards
+        ],
+        "min_balance_threshold": min_balance_threshold,
     }

@@ -2,7 +2,7 @@ import os
 from logging.config import fileConfig
 from pathlib import Path
 
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, event, pool, text
 from alembic import context
 
 # Load .env
@@ -42,9 +42,18 @@ def run_migrations_online() -> None:
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
+
+    # Set search_path to financeone schema on every new connection
+    @event.listens_for(connectable, "connect")
+    def set_search_path(dbapi_conn, connection_record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("SET search_path TO financeone, public")
+        cursor.close()
+
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection, target_metadata=target_metadata,
+            version_table_schema="financeone",
         )
         with context.begin_transaction():
             context.run_migrations()

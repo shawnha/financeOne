@@ -65,7 +65,27 @@ def _add_krw_conversion(rows: list[dict], conn: PgConnection) -> None:
                 rate = float(get_closing_rate(conn, currency, "KRW", d))
                 rate_cache[cache_key] = rate
             except Exception:
-                continue
+                # fallback: 가장 가까운 환율 사용
+                try:
+                    fb_cur = conn.cursor()
+                    fb_cur.execute(
+                        """SELECT rate FROM exchange_rates
+                           WHERE from_currency = %s AND to_currency = 'KRW'
+                           ORDER BY ABS(date - %s::date) ASC LIMIT 1""",
+                        [currency, str(msg_date)],
+                    )
+                    fb_row = fb_cur.fetchone()
+                    fb_cur.close()
+                    if fb_row:
+                        rate_cache[cache_key] = float(fb_row[0])
+                    else:
+                        continue
+                except Exception:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    continue
 
         rate = rate_cache.get(cache_key)
         if not rate:
@@ -390,15 +410,17 @@ def get_candidates(
 
     msg_id, entity_id, parsed_amount, parsed_amount_vat, msg_date, parsed_structured, msg_text = msg
 
-    # Slack 메시지 작성자의 member_id 조회
+    # Slack 메시지 작성자의 member_id + message_type 조회
     cur.execute(
-        """SELECT COALESCE(sm.member_id, m.id)
+        """SELECT COALESCE(sm.member_id, m.id), sm.message_type
            FROM slack_messages sm
            LEFT JOIN members m ON m.slack_user_id = sm.user_id AND m.entity_id = sm.entity_id
            WHERE sm.id = %s""",
         [message_id],
     )
-    slack_member_id = cur.fetchone()[0]
+    _member_row = cur.fetchone()
+    slack_member_id = _member_row[0]
+    slack_message_type = _member_row[1]
 
     # 구조화 파싱에서 정보 추출
     ps = parsed_structured if isinstance(parsed_structured, dict) else {}
@@ -409,6 +431,33 @@ def get_candidates(
     if not search_amounts:
         cur.close()
         return {"candidates": [], "message_id": message_id, "reason": "금액 정보 없음"}
+
+    # 입금요청 + 외화: KRW 환산 금액으로 검색 (은행 거래는 KRW)
+    msg_currency = ps.get("currency") or "KRW"
+    if slack_message_type == "deposit_request" and msg_currency != "KRW":
+        try:
+            from backend.services.exchange_rate_service import get_closing_rate
+            from datetime import date as date_type
+            d = date_type.fromisoformat(str(msg_date)) if isinstance(msg_date, str) else msg_date
+            rate = float(get_closing_rate(conn, msg_currency, "KRW", d))
+        except Exception:
+            # fallback: 가장 가까운 환율
+            fb_cur = conn.cursor()
+            fb_cur.execute(
+                """SELECT rate FROM exchange_rates
+                   WHERE from_currency = %s AND to_currency = 'KRW'
+                   ORDER BY ABS(date - %s::date) ASC LIMIT 1""",
+                [msg_currency, str(msg_date)],
+            )
+            fb_row = fb_cur.fetchone()
+            fb_cur.close()
+            rate = float(fb_row[0]) if fb_row else None
+
+        if rate:
+            search_amounts = [
+                {"amount": round(sa["amount"] * rate, 0), "label": f'{sa["label"]} (KRW)'}
+                for sa in search_amounts
+            ]
 
     # 주 금액 (총액 또는 첫 번째)
     primary_amount = search_amounts[0]["amount"]
@@ -429,8 +478,8 @@ def get_candidates(
     where_parts = ["t.entity_id = %s", "(t.is_cancel IS NOT TRUE)"]
     params: list = [entity_id]
 
-    # 카드 결제는 같은 멤버 거래만 후보로 표시 (다른 사람 카드 제외)
-    if slack_member_id:
+    # 법카결제 메시지만: 같은 멤버 카드 거래로 필터 (다른 사람 카드 제외)
+    if slack_member_id and slack_message_type == "card_payment":
         where_parts.append("(t.source_type NOT LIKE '%%card%%' OR t.member_id = %s)")
         params.append(slack_member_id)
 
@@ -475,6 +524,11 @@ def get_candidates(
                          round(primary_amount * 0.97, 2), round(primary_amount * 1.03, 2),
                          round(primary_amount * 1.1 * 0.97, 2), round(primary_amount * 1.1 * 1.03, 2)]
 
+    # 입금요청이면 은행 거래 우선
+    source_type_case = "0"
+    if slack_message_type == "deposit_request":
+        source_type_case = "CASE WHEN t.source_type LIKE '%%bank%%' THEN 0.20 ELSE 0 END"
+
     vendor_case = "0"
     vendor_params: list = []
     if vendor:
@@ -516,6 +570,7 @@ def get_candidates(
                    {amount_score_expr}
                    + {date_case}
                    + {vendor_case}
+                   + {source_type_case}
                )::numeric, 2) AS confidence
         FROM transactions t
         LEFT JOIN members m ON m.id = t.member_id
