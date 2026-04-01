@@ -363,8 +363,8 @@ def get_slack_match(
         """
         SELECT
             tsm.slack_message_id,
-            sm.message_text,
-            sm.message_date,
+            sm.text,
+            sm.date_override,
             sm.message_type,
             sm.sender_name,
             tsm.created_at AS matched_at,
