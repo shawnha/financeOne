@@ -558,6 +558,35 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
           { cache: "no-store" },
         ).catch(() => null),
       ])
+      // 항목이 비어있으면 전월 반복 항목 자동 복사 (actual 금액 우선)
+      if (d.items.length === 0) {
+        const prevMonth = m - 1 > 0 ? m - 1 : 12
+        const prevYear = m - 1 > 0 ? y : y - 1
+        try {
+          const copyResult = await fetchAPI<{ copied: number }>(
+            `/forecasts/copy-recurring?entity_id=${entityId}&source_year=${prevYear}&source_month=${prevMonth}&target_year=${y}&target_month=${m}&amount_source=actual`,
+            { method: "POST" },
+          )
+          if (copyResult.copied > 0) {
+            // 복사됐으면 다시 fetch
+            const [d2, s2] = await Promise.all([
+              fetchAPI<ForecastData>(
+                `/cashflow/forecast?entity_id=${entityId}&year=${y}&month=${m}`,
+                { cache: "no-store" },
+              ),
+              fetchAPI<DailyScheduleData>(
+                `/cashflow/daily-schedule?entity_id=${entityId}&year=${y}&month=${m}`,
+                { cache: "no-store" },
+              ).catch(() => null),
+            ])
+            setData(d2)
+            setSchedule(s2)
+            setState("success")
+            return
+          }
+        } catch { /* 복사 실패해도 빈 상태로 표시 */ }
+      }
+
       setData(d)
       setSchedule(s)
       setState("success")
