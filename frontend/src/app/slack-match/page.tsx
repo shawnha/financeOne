@@ -1266,6 +1266,8 @@ function SlackMatchContent() {
   // Filters
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending")
   const [confidenceFilter, setConfidenceFilter] = useState<ConfidenceFilter>("all")
+  const [senderFilter, setSenderFilter] = useState<string>("all")
+  const [textSearch, setTextSearch] = useState<string>("")
 
   const fetchMessages = useCallback(async (background = false) => {
     if (!background) setLoading(true)
@@ -1351,6 +1353,11 @@ function SlackMatchContent() {
     setExpandedId(null)
   }, [selectedMonth])
 
+  // Unique sender names for filter dropdown
+  const senderNames = Array.from(
+    new Set(messages.map(m => m.member_name_ko || m.sender_name).filter(Boolean))
+  ).sort() as string[]
+
   // Filter messages client-side
   const filteredMessages = messages.filter((msg) => {
     // Status filter
@@ -1367,6 +1374,20 @@ function SlackMatchContent() {
       if (confidenceFilter === "high" && pct < 90) return false
       if (confidenceFilter === "medium" && (pct < 70 || pct >= 90)) return false
       if (confidenceFilter === "low" && pct >= 70) return false
+    }
+
+    // Sender filter
+    if (senderFilter !== "all") {
+      const name = msg.member_name_ko || msg.sender_name || ""
+      if (name !== senderFilter) return false
+    }
+
+    // Text search
+    if (textSearch.trim()) {
+      const q = textSearch.trim().toLowerCase()
+      const haystack = [msg.text, msg.sender_name, msg.member_name_ko, msg.parsed_structured?.summary, msg.parsed_structured?.vendor]
+        .filter(Boolean).join(" ").toLowerCase()
+      if (!haystack.includes(q)) return false
     }
 
     return true
@@ -1643,7 +1664,7 @@ function SlackMatchContent() {
       )}
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <div className="w-[140px]">
           <Select
             value={statusFilter}
@@ -1657,6 +1678,22 @@ function SlackMatchContent() {
               <SelectItem value="pending">미확정</SelectItem>
               <SelectItem value="confirmed">확정</SelectItem>
               <SelectItem value="ignored">무시</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="w-[140px]">
+          <Select
+            value={senderFilter}
+            onValueChange={(v) => { setSenderFilter(v); setPage(1) }}
+          >
+            <SelectTrigger className="h-9 text-xs">
+              <SelectValue placeholder="보낸 사람" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">전체 멤버</SelectItem>
+              {senderNames.map((name) => (
+                <SelectItem key={name} value={name}>{name}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -1675,6 +1712,16 @@ function SlackMatchContent() {
               <SelectItem value="low">낮음 (&lt;70%)</SelectItem>
             </SelectContent>
           </Select>
+        </div>
+        <div className="relative flex-1 min-w-[180px] max-w-[280px]">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="메시지 검색..."
+            value={textSearch}
+            onChange={(e) => { setTextSearch(e.target.value); setPage(1) }}
+            className="h-9 w-full rounded-md border border-input bg-background pl-8 pr-3 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
         </div>
       </div>
 
