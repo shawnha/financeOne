@@ -835,12 +835,26 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
               </tr>
 
               {/* Forecast items */}
-              {data.items.map((item) => {
+              {(() => {
+                let runningBalance = data.opening_balance
+                let runningActual = data.opening_balance
+                return data.items.map((item) => {
                 const actual = item.actual_from_transactions
                 const diff = actual != null ? actual - item.forecast_amount : null
                 const diffRatio = item.forecast_amount !== 0 && actual != null
                   ? (actual / item.forecast_amount) * 100
                   : null
+
+                // 누적 잔고 계산
+                if (item.type === "in") {
+                  runningBalance += item.forecast_amount
+                  if (actual != null) runningActual += actual
+                } else {
+                  runningBalance -= item.forecast_amount
+                  if (actual != null) runningActual -= actual
+                }
+                const itemBalance = runningBalance
+                const itemActualBalance = actual != null ? runningActual : null
 
                 return (
                   <tr key={item.id} className="border-t border-border hover:bg-white/[0.02] transition-colors group">
@@ -913,8 +927,14 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                           : <span className="text-muted-foreground">--</span>}
                       </td>
                     )}
-                    <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-[hsl(var(--warning))]">--</td>
-                    {showComparison && <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs"></td>}
+                    <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-[hsl(var(--warning))]">
+                      {formatByEntity(itemBalance, entityId)}
+                    </td>
+                    {showComparison && (
+                      <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-[hsl(var(--profit))]">
+                        {itemActualBalance != null ? formatByEntity(itemActualBalance, entityId) : "--"}
+                      </td>
+                    )}
                     <td className="px-2 py-2.5">
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
@@ -941,7 +961,8 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                     </td>
                   </tr>
                 )
-              })}
+              })
+              })()}
 
               {/* Timing adjustment row */}
               {data.card_timing.adjustment !== 0 && (
