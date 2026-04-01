@@ -1,6 +1,6 @@
 """계정과목 API — CRUD for standard/internal accounts and members"""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from psycopg2.extensions import connection as PgConnection
