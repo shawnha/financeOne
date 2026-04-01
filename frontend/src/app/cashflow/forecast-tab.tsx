@@ -625,7 +625,6 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
       <div className="flex items-center justify-between flex-wrap gap-4">
         <MonthPicker months={months} selected={selectedMonth} onSelect={setSelectedMonth} accentColor="hsl(var(--warning))" allowFuture />
         <div className="flex gap-2">
-          <ForecastModal entityId={entityId!} year={y} month={m} onSaved={fetchForecast} />
           <Button variant="outline" size="sm" className="gap-2">
             <Download className="h-4 w-4" /> 내보내기
           </Button>
@@ -708,12 +707,15 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
       <Card className="overflow-hidden rounded-2xl">
         <div className="px-4 py-3 flex items-center justify-between border-b border-border">
           <h3 className="text-sm font-semibold">{m}월 예상 항목</h3>
-          <button
-            onClick={() => setShowComparison(!showComparison)}
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors bg-muted/30 border border-border px-3 py-1.5 rounded-lg"
-          >
-            {showComparison ? "실제 비교 접기 \u25C2" : "실제 비교 펼치기 \u25B8"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowComparison(!showComparison)}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors bg-muted/30 border border-border px-3 py-1.5 rounded-lg"
+            >
+              {showComparison ? "실제 비교 접기 \u25C2" : "실제 비교 펼치기 \u25B8"}
+            </button>
+            <ForecastModal entityId={entityId!} year={y} month={m} onSaved={fetchForecast} />
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
