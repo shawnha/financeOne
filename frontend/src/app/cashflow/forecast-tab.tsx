@@ -203,8 +203,8 @@ function ForecastBalanceChart({
 
   return (
     <Card className="bg-secondary rounded-2xl p-6">
-      <ResponsiveContainer width="100%" height={220}>
-        <ComposedChart data={chartData.points} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
+      <ResponsiveContainer width="100%" height={250}>
+        <ComposedChart data={chartData.points} margin={{ top: 28, right: 20, left: 10, bottom: 5 }}>
           <defs>
             <linearGradient id="forecastEstGrad" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#F59E0B" stopOpacity={0.15} />
@@ -523,6 +523,8 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
   const [error, setError] = useState("")
   const [selectedMonth, setSelectedMonth] = useState("")
   const [showComparison, setShowComparison] = useState(false)
+  const [editingItemId, setEditingItemId] = useState<number | null>(null)
+  const [editingAmount, setEditingAmount] = useState("")
 
   // Fetch summary for month navigation
   const fetchSummary = useCallback(async () => {
@@ -766,12 +768,53 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                       {item.internal_account_name ?? item.category}
                       {item.subcategory && <span className="text-muted-foreground ml-1">({item.subcategory})</span>}
                       {item.is_recurring && <span className="text-xs text-muted-foreground ml-2">반복</span>}
+                      {item.expected_day && <span className="text-[10px] text-muted-foreground/60 ml-1.5">{item.expected_day}일</span>}
+                      {item.payment_method === "card" && <span className="text-[10px] text-purple-400/60 ml-1">카드</span>}
                     </td>
                     <td className={cn(
                       "px-4 py-2.5 text-right font-mono tabular-nums text-xs",
                       item.type === "in" ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]",
                     )}>
-                      {item.type === "in" ? "+" : "-"}{formatByEntity(item.forecast_amount, entityId)}
+                      {editingItemId === item.id ? (
+                        <input
+                          type="text"
+                          autoFocus
+                          className="w-28 text-right bg-transparent border-b border-foreground/30 outline-none font-mono text-xs py-0.5"
+                          value={editingAmount}
+                          onChange={(e) => {
+                            const raw = e.target.value.replace(/[^\d]/g, "")
+                            setEditingAmount(raw ? Number(raw).toLocaleString() : "")
+                          }}
+                          onBlur={async () => {
+                            const amt = Number(editingAmount.replace(/,/g, ""))
+                            if (!isNaN(amt) && amt !== item.forecast_amount) {
+                              try {
+                                await fetchAPI(`/forecasts/${item.id}`, {
+                                  method: "PUT",
+                                  body: JSON.stringify({ forecast_amount: amt }),
+                                })
+                                fetchForecast()
+                              } catch { /* error */ }
+                            }
+                            setEditingItemId(null)
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") (e.target as HTMLInputElement).blur()
+                            if (e.key === "Escape") setEditingItemId(null)
+                          }}
+                        />
+                      ) : (
+                        <span
+                          className="cursor-pointer hover:underline decoration-dotted"
+                          onClick={() => {
+                            setEditingItemId(item.id)
+                            setEditingAmount(item.forecast_amount.toLocaleString())
+                          }}
+                          title="클릭하여 수정"
+                        >
+                          {item.type === "in" ? "+" : "-"}{formatByEntity(item.forecast_amount, entityId)}
+                        </span>
+                      )}
                     </td>
                     {showComparison && (
                       <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs">
