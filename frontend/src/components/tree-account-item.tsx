@@ -117,7 +117,7 @@ export function TreeAccountItem({
       </span>
 
       {/* Recurring toggle */}
-      {!account.isRoot && !account.children?.length && onToggleRecurring && (
+      {!account.isRoot && onToggleRecurring && (
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onToggleRecurring(account) }}
