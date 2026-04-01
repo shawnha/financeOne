@@ -149,6 +149,21 @@ function InternalAccountsContent() {
 
   useEffect(() => { load() }, [load])
 
+  const handleToggleRecurring = async (account: TreeAccount) => {
+    try {
+      await fetchAPI(`/accounts/internal/${account.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_recurring: !account.is_recurring }),
+      })
+      setAccounts((prev) =>
+        prev.map((a) => a.id === account.id ? { ...a, is_recurring: !a.is_recurring } : a),
+      )
+      toast.success(account.is_recurring ? "고정 해제됨" : "고정 설정됨")
+    } catch {
+      toast.error("고정 설정에 실패했습니다")
+    }
+  }
+
   const tree = useMemo(() => buildTree(accounts), [accounts])
   const visibleItems = useMemo(() => flattenTree(tree, collapsed), [tree, collapsed])
   const sortableIds = useMemo(() => visibleItems.map((n) => n.id), [visibleItems])
@@ -375,6 +390,7 @@ function InternalAccountsContent() {
                       onEdit={handleEdit}
                       onDelete={(a) => setDeleteTarget(a as unknown as RawAccount)}
                       onAddChild={handleAddChild}
+                      onToggleRecurring={handleToggleRecurring}
                     />
                   ))}
                 </div>
