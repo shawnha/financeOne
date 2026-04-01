@@ -43,11 +43,13 @@ type MemberRole = "admin" | "member" | "corporate" | "staff"
 interface FormData {
   name: string
   role: MemberRole | ""
+  card_numbers: string
 }
 
 const EMPTY_FORM: FormData = {
   name: "",
   role: "",
+  card_numbers: "",
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +126,7 @@ function MembersContent() {
     setForm({
       name: member.name,
       role: member.role as MemberRole,
+      card_numbers: (member.card_numbers || []).join(", "),
     })
     setDialogOpen(true)
   }
@@ -139,10 +142,15 @@ function MembersContent() {
       return
     }
     setSaving(true)
+    const cardNums = form.card_numbers
+      .split(",")
+      .map(s => s.trim())
+      .filter(Boolean)
     const body = {
       entity_id: Number(entityId),
       name: form.name.trim(),
       role: form.role,
+      card_numbers: cardNums,
     }
     try {
       if (editingId) {
@@ -351,6 +359,15 @@ function MembersContent() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">카드번호 (끝 4자리)</label>
+              <Input
+                placeholder="예: 1114, 5477"
+                value={form.card_numbers}
+                onChange={(e) => setForm((f) => ({ ...f, card_numbers: e.target.value }))}
+              />
+              <p className="text-[11px] text-muted-foreground">여러 장이면 쉼표로 구분</p>
             </div>
           </div>
           <DialogFooter>

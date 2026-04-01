@@ -358,6 +358,33 @@ def bulk_confirm(body: BulkConfirm, conn: PgConnection = Depends(get_db)):
         raise
 
 
+@router.get("/{tx_id}")
+def get_transaction(
+    tx_id: int,
+    conn: PgConnection = Depends(get_db),
+):
+    """거래 단건 조회"""
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT t.id, t.date, t.counterparty, t.description, t.amount, t.type,
+               t.source_type, t.mapping_source, t.mapping_confidence,
+               ia.name as internal_account_name, sa.name as standard_account_name
+        FROM transactions t
+        LEFT JOIN internal_accounts ia ON t.internal_account_id = ia.id
+        LEFT JOIN standard_accounts sa ON t.standard_account_id = sa.id
+        WHERE t.id = %s
+        """,
+        [tx_id],
+    )
+    row = cur.fetchone()
+    cur.close()
+    if not row:
+        raise HTTPException(404, "Transaction not found")
+    cols = [d[0] for d in cur.description]
+    return dict(zip(cols, row))
+
+
 @router.get("/{tx_id}/slack-match")
 def get_slack_match(
     tx_id: int,

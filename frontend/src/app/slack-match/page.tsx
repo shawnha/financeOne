@@ -748,6 +748,87 @@ function CandidatesList({
   )
 }
 
+function ConfirmedPanel({
+  message,
+  messageId,
+  onRestore,
+  onUndoMatch,
+}: {
+  message: SlackMessage
+  messageId: number
+  onRestore: () => void
+  onUndoMatch: () => void
+}) {
+  const isIgnored = message.is_cancelled
+  const [txDetail, setTxDetail] = useState<{ id: number; date: string; counterparty: string | null; description: string | null; amount: number; type: string } | null>(null)
+
+  useEffect(() => {
+    if (message.matched_transaction_id) {
+      fetchAPI<{ id: number; date: string; counterparty: string | null; description: string | null; amount: number; type: string }>(
+        `/transactions/${message.matched_transaction_id}`
+      ).then(setTxDetail).catch(() => setTxDetail(null))
+    }
+  }, [message.matched_transaction_id])
+
+  return (
+    <div className="p-4 space-y-3">
+      {isIgnored ? (
+        <>
+          <p className="text-sm text-muted-foreground text-center">무시된 메시지입니다.</p>
+          <div className="flex justify-center">
+            <Button variant="outline" size="sm" onClick={onRestore}>
+              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+              무시 해제
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium">확정된 매칭</p>
+            {message.match_confidence != null && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-mono bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+                {Math.round(message.match_confidence * 100)}%
+              </Badge>
+            )}
+          </div>
+          {txDetail ? (
+            <div className="rounded-lg border border-white/[0.06] bg-muted/30 p-3 space-y-1.5 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">날짜</span>
+                <span>{txDetail.date}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">거래처</span>
+                <span className="truncate ml-4 text-right">{txDetail.counterparty || "-"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">내역</span>
+                <span className="truncate ml-4 text-right">{txDetail.description || "-"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">금액</span>
+                <span className={txDetail.type === "in" ? "text-green-400" : "text-red-400"}>
+                  {formatKRW(txDetail.amount)}
+                </span>
+              </div>
+            </div>
+          ) : message.matched_transaction_id ? (
+            <p className="text-xs text-muted-foreground">거래 #{message.matched_transaction_id}</p>
+          ) : (
+            <p className="text-xs text-muted-foreground">연결된 거래 정보 없음</p>
+          )}
+          <div className="flex justify-center pt-1">
+            <Button variant="outline" size="sm" className="text-red-400 border-red-500/30 hover:bg-red-500/10" onClick={onUndoMatch}>
+              매칭 해제
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function CandidatePanel({
   messageId,
   message,
@@ -1506,6 +1587,25 @@ function SlackMatchContent() {
     [fetchMessages],
   )
 
+  const handleUndoMatch = useCallback(
+    async (messageId: number) => {
+      if (!window.confirm("매칭을 해제하시겠습니까?")) return
+      try {
+        await fetchAPI(`/slack/messages/${messageId}/ignore`, {
+          method: "POST",
+          body: JSON.stringify({}),
+        })
+        // 바로 복원해서 미확정 상태로 만듦
+        await fetchAPI(`/slack/messages/${messageId}/restore`, { method: "POST" })
+        toast.success("매칭이 해제되었습니다.")
+        fetchMessages(true)
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "매칭 해제에 실패했습니다.")
+      }
+    },
+    [fetchMessages],
+  )
+
   const handleConfirmDirect = useCallback(
     (msg: SlackMessage) => {
       if (msg.matched_transaction_id) {
@@ -1808,19 +1908,12 @@ function SlackMatchContent() {
               onRefresh={() => fetchMessages(true)}
             />
           ) : (
-            <div className="p-4 text-center text-sm text-muted-foreground space-y-3">
-              <p>{getMessageStatus(selectedMessage) === "ignored" ? "무시된 메시지입니다." : "이미 확정된 메시지입니다."}</p>
-              {getMessageStatus(selectedMessage) === "ignored" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleRestore(selectedMessageId)}
-                >
-                  <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                  무시 해제
-                </Button>
-              )}
-            </div>
+            <ConfirmedPanel
+              message={selectedMessage}
+              messageId={selectedMessageId}
+              onRestore={() => handleRestore(selectedMessageId)}
+              onUndoMatch={() => handleUndoMatch(selectedMessageId)}
+            />
           )}
         </div>
         )}
