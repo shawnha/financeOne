@@ -479,12 +479,16 @@ export default function TransactionsPage() {
     if (!entityId) return
     setAutoMapping(true)
     try {
-      const result = await fetchAPI<{ mapped: number; total_unmapped: number }>(`/transactions/auto-map?entity_id=${entityId}`, { method: "POST" })
-      if (result.mapped > 0) {
-        toast.success(`${result.mapped}건 자동 매핑 완료 (미분류 ${result.total_unmapped}건 중)`)
+      const result = await fetchAPI<{ new_mapped: number; updated: number; total_targets: number }>(`/transactions/auto-map?entity_id=${entityId}`, { method: "POST" })
+      const total = (result.new_mapped || 0) + (result.updated || 0)
+      if (total > 0) {
+        const parts = []
+        if (result.new_mapped) parts.push(`신규 ${result.new_mapped}건`)
+        if (result.updated) parts.push(`변경 ${result.updated}건`)
+        toast.success(`자동 매핑: ${parts.join(", ")} (대상 ${result.total_targets}건)`)
         fetchTransactions(true)
       } else {
-        toast.info(`자동 매핑할 거래가 없습니다. 매핑 규칙을 먼저 만들어주세요.`)
+        toast.info(`변경할 거래가 없습니다.`)
       }
     } catch {
       toast.error("자동 매핑에 실패했습니다")

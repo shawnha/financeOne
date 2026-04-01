@@ -215,57 +215,87 @@ def auto_map_unmapped(
     enable_ai: bool = Query(False),
     conn: PgConnection = Depends(get_db),
 ):
-    """미분류 거래에 5단계 캐스케이드 자동 매핑 일괄 적용"""
+    """자동 매핑: manual/confirmed 제외 전체 거래에 5단계 캐스케이드 적용.
+
+    Slack 매칭이 확정된 거래는 item_description을 description에 합쳐서
+    키워드/유사 매칭 정확도를 높인다.
+    """
     cur = conn.cursor()
     try:
+        # manual/confirmed 제외, 나머지 전체 대상
         cur.execute(
             """
-            SELECT id, counterparty, description
-            FROM transactions
-            WHERE entity_id = %s
-              AND internal_account_id IS NULL
-              AND (counterparty IS NOT NULL OR description IS NOT NULL)
+            SELECT t.id, t.counterparty, t.description, t.internal_account_id,
+                   (
+                       SELECT string_agg(
+                           COALESCE(tsm.item_description, ''),
+                           ' '
+                       )
+                       FROM transaction_slack_match tsm
+                       WHERE tsm.transaction_id = t.id AND tsm.is_confirmed = true
+                   ) AS slack_description
+            FROM transactions t
+            WHERE t.entity_id = %s
+              AND (t.counterparty IS NOT NULL OR t.description IS NOT NULL)
+              AND (t.mapping_source IS NULL OR t.mapping_source NOT IN ('manual', 'confirmed'))
+              AND t.is_duplicate = false
             """,
             [entity_id],
         )
-        unmapped = cur.fetchall()
+        targets = cur.fetchall()
 
         mapped_count = 0
+        updated_count = 0
         mapped_ids = []
-        for tx_id, counterparty, description in unmapped:
+        for tx_id, counterparty, description, current_ia, slack_desc in targets:
+            # Slack 컨텍스트를 description에 합침
+            enriched_desc = " ".join(filter(None, [description, slack_desc]))
+
             mapping = auto_map_transaction(
                 cur, entity_id=entity_id,
                 counterparty=counterparty,
-                description=description,
+                description=enriched_desc or None,
                 enable_ai=enable_ai,
             )
-            if mapping:
-                cur.execute(
-                    """
-                    UPDATE transactions
-                    SET internal_account_id = %s,
-                        standard_account_id = %s,
-                        mapping_confidence = %s,
-                        mapping_source = %s,
-                        updated_at = NOW()
-                    WHERE id = %s
-                    """,
-                    [
-                        mapping["internal_account_id"],
-                        mapping["standard_account_id"],
-                        mapping["confidence"],
-                        mapping.get("match_type", "rule"),
-                        tx_id,
-                    ],
-                )
+            if not mapping:
+                continue
+
+            new_ia = mapping["internal_account_id"]
+            # 미분류 → 매핑: mapped
+            # 기존 매핑 → 다른 계정: updated
+            if current_ia is None:
                 mapped_count += 1
-                mapped_ids.append(tx_id)
+            elif new_ia != current_ia:
+                updated_count += 1
+            else:
+                continue  # 같은 계정이면 스킵
+
+            cur.execute(
+                """
+                UPDATE transactions
+                SET internal_account_id = %s,
+                    standard_account_id = %s,
+                    mapping_confidence = %s,
+                    mapping_source = %s,
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                [
+                    new_ia,
+                    mapping["standard_account_id"],
+                    mapping["confidence"],
+                    mapping.get("match_type", "rule"),
+                    tx_id,
+                ],
+            )
+            mapped_ids.append(tx_id)
 
         conn.commit()
         cur.close()
         return {
-            "total_unmapped": len(unmapped),
-            "mapped": mapped_count,
+            "total_targets": len(targets),
+            "new_mapped": mapped_count,
+            "updated": updated_count,
             "mapped_ids": mapped_ids,
         }
     except Exception:
