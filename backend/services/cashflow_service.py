@@ -469,6 +469,28 @@ def get_forecast_cashflow(
     for row in cur.fetchall():
         actual_by_account[(row[0], row[1])] = float(row[2])
 
+    # 2-ter. 미매핑 거래 합계 (internal_account_id IS NULL, 은행 거래만)
+    cur.execute(
+        """
+        SELECT
+            COALESCE(SUM(CASE WHEN type = 'in' THEN amount ELSE 0 END), 0) AS income,
+            COALESCE(SUM(CASE WHEN type = 'out' THEN amount ELSE 0 END), 0) AS expense,
+            COUNT(*) AS cnt
+        FROM transactions
+        WHERE entity_id = %s
+          AND date >= make_date(%s, %s, 1)
+          AND date < make_date(%s, %s, 1) + INTERVAL '1 month'
+          AND is_duplicate = false
+          AND internal_account_id IS NULL
+          AND source_type IN ('woori_bank', 'mercury_api', 'manual')
+        """,
+        [entity_id, year, month, year, month],
+    )
+    unmapped_row = cur.fetchone()
+    unmapped_income = float(unmapped_row[0])
+    unmapped_expense = float(unmapped_row[1])
+    unmapped_count = int(unmapped_row[2])
+
     # 3. Forecast 합산 (payment_method 기반 분리 — ARCH-3)
     forecast_income = Decimal("0")
     forecast_expense = Decimal("0")
@@ -525,6 +547,9 @@ def get_forecast_cashflow(
         card_timing_adjustment=timing_adj,
     )
 
+    # 5-bis. 조정 예상 기말 (미분류 반영)
+    adjusted_forecast_closing = forecast_closing + Decimal(str(unmapped_income)) - Decimal(str(unmapped_expense))
+
     # 6. 실제 진행 기준 기말 (은행 거래 기준)
     cur.execute(
         """
@@ -544,7 +569,35 @@ def get_forecast_cashflow(
     actual_expense = Decimal(str(row[1]))
     actual_closing = opening + actual_income - actual_expense
 
-    diff = actual_closing - forecast_closing
+    diff = actual_closing - adjusted_forecast_closing
+
+    # 6-bis. 일별 실제 잔고 (그래프용 — 계단식)
+    bank_txs = get_bank_transactions(conn, entity_id, year, month)
+    actual_daily_balances = []
+    running = opening
+    last_actual_day = 0
+    for tx in bank_txs:
+        amt = Decimal(str(tx["amount"]))
+        if tx["type"] == "in":
+            running += amt
+        else:
+            running -= amt
+        day = tx["date"].day if hasattr(tx["date"], "day") else int(str(tx["date"]).split("-")[2])
+        last_actual_day = max(last_actual_day, day)
+        actual_daily_balances.append({
+            "day": day,
+            "balance": float(running),
+            "type": tx["type"],
+            "amount": float(amt),
+        })
+    # Deduplicate: keep last balance per day for chart step rendering
+    daily_balance_by_day: dict[int, float] = {}
+    for pt in actual_daily_balances:
+        daily_balance_by_day[pt["day"]] = pt["balance"]
+    actual_daily_points = [
+        {"day": d, "balance": b}
+        for d, b in sorted(daily_balance_by_day.items())
+    ]
 
     # 예산 초과 항목 (실제 >= 예상 * 1.1)
     over_budget = []
@@ -587,11 +640,17 @@ def get_forecast_cashflow(
             for c in cards
         ],
         "forecast_closing": float(forecast_closing),
+        "adjusted_forecast_closing": float(adjusted_forecast_closing),
         "actual_income": float(actual_income),
         "actual_expense": float(actual_expense),
         "actual_closing": float(actual_closing),
         "diff": float(diff),
+        "actual_daily_points": actual_daily_points,
+        "last_actual_day": last_actual_day,
         "over_budget": over_budget,
+        "unmapped_income": unmapped_income,
+        "unmapped_expense": unmapped_expense,
+        "unmapped_count": unmapped_count,
         "warnings": warnings,
         "items": [
             {

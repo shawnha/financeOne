@@ -110,11 +110,17 @@ interface ForecastData {
   card_timing: CardTiming
   card_settings: CardSetting[]
   forecast_closing: number
+  adjusted_forecast_closing: number
   actual_income: number
   actual_expense: number
   actual_closing: number
   diff: number
+  actual_daily_points: Array<{ day: number; balance: number }>
+  last_actual_day: number
   items: ForecastItem[]
+  unmapped_income: number
+  unmapped_expense: number
+  unmapped_count: number
   warnings: string[]
   over_budget: Array<{
     category: string
@@ -185,19 +191,37 @@ function ForecastBalanceChart({
 }) {
   const chartData = useMemo(() => {
     if (!schedule) return null
-    const today = new Date()
-    const currentDay = today.getFullYear() === schedule.year && today.getMonth() + 1 === schedule.month
-      ? today.getDate() : (schedule.month < today.getMonth() + 1 || schedule.year < today.getFullYear() ? schedule.points.length : 0)
 
-    const actualDailyChange = currentDay > 0
-      ? (forecastData.actual_closing - forecastData.opening_balance) / currentDay
-      : 0
+    // Build actual balance lookup from daily points (step chart)
+    const actualBalanceByDay = new Map<number, number>()
+    if (forecastData.actual_daily_points?.length) {
+      // Fill forward: each day keeps the last known balance
+      let lastBal = forecastData.opening_balance
+      for (const pt of forecastData.actual_daily_points) {
+        lastBal = pt.balance
+        actualBalanceByDay.set(pt.day, lastBal)
+      }
+      // Fill forward for intermediate days
+      let prev = forecastData.opening_balance
+      for (let d = 1; d <= schedule.points.length; d++) {
+        if (actualBalanceByDay.has(d)) {
+          prev = actualBalanceByDay.get(d)!
+        } else if (d <= forecastData.last_actual_day) {
+          actualBalanceByDay.set(d, prev)
+        }
+      }
+    }
+
+    // Calculate adjusted forecast: apply unmapped impact proportionally on unmapped tx dates
+    // Simple approach: distribute unmapped net evenly across the schedule
+    const unmappedNet = (forecastData.unmapped_income ?? 0) - (forecastData.unmapped_expense ?? 0)
 
     const points = schedule.points.map((p) => ({
       day: `${month}/${p.day}`,
-      estimated: p.balance,
-      actual: p.day <= currentDay
-        ? Math.round(forecastData.opening_balance + actualDailyChange * p.day)
+      originalEstimated: p.balance,
+      estimated: p.balance + (unmappedNet * p.day / schedule.points.length),
+      actual: p.day <= forecastData.last_actual_day
+        ? (actualBalanceByDay.get(p.day) ?? null)
         : null,
       events: p.events,
     }))
@@ -251,7 +275,10 @@ function ForecastBalanceChart({
               return (
                 <div className="bg-[#161b22] border border-white/10 rounded-lg p-3 text-xs">
                   <p className="text-muted-foreground mb-1">{label}</p>
-                  <p className="text-[#F59E0B]">예상: ₩{point?.estimated?.toLocaleString()}</p>
+                  <p className="text-[#F59E0B]">조정 예상: ₩{point?.estimated?.toLocaleString()}</p>
+                  {point?.originalEstimated != null && point.originalEstimated !== point.estimated && (
+                    <p className="text-[#71717a]">원래 예상: ₩{point.originalEstimated.toLocaleString()}</p>
+                  )}
                   {point?.actual != null && <p className="text-[#22C55E]">실제: ₩{point.actual.toLocaleString()}</p>}
                   {point?.events?.length > 0 && (
                     <div className="mt-1 pt-1 border-t border-white/10">
@@ -296,14 +323,26 @@ function ForecastBalanceChart({
             strokeDasharray="6 3"
             strokeWidth={1}
           />
-          {/* Estimated balance (amber dashed + area) */}
+          {/* Original forecast (thin gray dashed line — reference only) */}
+          <Line
+            type="monotone"
+            dataKey="originalEstimated"
+            stroke="#71717a"
+            strokeWidth={1.2}
+            strokeDasharray="6 4"
+            strokeOpacity={0.4}
+            dot={false}
+            activeDot={false}
+          />
+          {/* Adjusted forecast (amber area + dashed border) */}
           <Area
             type="monotone"
             dataKey="estimated"
             fill="url(#forecastEstGrad)"
             stroke="#F59E0B"
-            strokeWidth={2}
-            strokeDasharray="8 4"
+            strokeWidth={1.8}
+            strokeDasharray="6 4"
+            strokeOpacity={0.6}
             dot={(props: { cx?: number; cy?: number; payload?: { events?: Array<{ name: string; type: string }> } }) => {
               const { cx, cy, payload } = props
               if (!payload?.events?.length || !cx || !cy) return <g />
@@ -319,11 +358,10 @@ function ForecastBalanceChart({
             }}
             activeDot={{ r: 4, fill: "#F59E0B", stroke: "#050508", strokeWidth: 2 }}
           />
-          {/* Actual balance (green solid + area) */}
-          <Area
+          {/* Actual balance (green solid line, smooth, stops at last upload day) */}
+          <Line
             type="monotone"
             dataKey="actual"
-            fill="url(#forecastActGrad)"
             stroke="#22C55E"
             strokeWidth={2.5}
             dot={false}
@@ -334,12 +372,16 @@ function ForecastBalanceChart({
       </ResponsiveContainer>
       <div className="flex flex-wrap gap-5 mt-2 text-[11px] text-muted-foreground">
         <span className="flex items-center gap-1.5">
-          <span className="inline-block w-2 h-2 rounded-full bg-[#F59E0B]" />
-          예상 잔고 (시차보정 포함)
+          <span className="inline-block w-4 h-0.5 bg-[#22C55E] rounded" />
+          실제 잔고
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="inline-block w-2 h-2 rounded-full bg-[#22C55E]" style={{ boxShadow: "0 0 6px #22C55E" }} />
-          실제 잔고 (업로드마다 업데이트)
+          <span className="inline-block w-4 h-2 rounded-sm" style={{ background: "linear-gradient(180deg, rgba(245,158,11,0.25), rgba(245,158,11,0.03))", borderTop: "1.5px dashed #F59E0B" }} />
+          조정 예상 (미분류 반영)
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-4 h-0 border-t border-dashed" style={{ borderColor: "rgba(113,113,122,0.4)" }} />
+          원래 예상
         </span>
         {chartData.cardSettings.map((card) => {
           const color = CARD_COLORS[card.source_type] || DEFAULT_CARD_COLOR
@@ -926,8 +968,8 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
   if (!data) return null
   const [y, m] = selectedMonth.split("-").map(Number)
 
-  const diffPct = data.forecast_closing !== 0
-    ? ((data.actual_closing - data.forecast_closing) / Math.abs(data.forecast_closing) * 100)
+  const diffPct = data.adjusted_forecast_closing !== 0
+    ? ((data.actual_closing - data.adjusted_forecast_closing) / Math.abs(data.adjusted_forecast_closing) * 100)
     : 0
   const diffColor = Math.abs(diffPct) <= 5 ? "text-[hsl(var(--profit))]" : Math.abs(diffPct) <= 10 ? "text-[hsl(var(--warning))]" : "text-[hsl(var(--loss))]"
 
@@ -983,7 +1025,13 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
       {/* KPI */}
       <div className="grid grid-cols-4 gap-3 max-md:grid-cols-2">
         <KPICard label={`기초 (${m - 1 || 12}월 확정)`} value={formatByEntity(data.opening_balance, entityId)} />
-        <KPICard label="예상 기말" value={formatByEntity(data.forecast_closing, entityId)} colorClass="text-[hsl(var(--warning))]" />
+        <KPICard
+          label="조정 예상 기말"
+          value={formatByEntity(data.adjusted_forecast_closing, entityId)}
+          colorClass="text-[hsl(var(--warning))]"
+          subtext={data.unmapped_count > 0 ? `미분류 ${data.unmapped_count}건 반영` : undefined}
+          subtextColor="text-amber-400"
+        />
         <KPICard
           label="실제 진행 기준 기말"
           value={formatByEntity(data.actual_closing, entityId)}
@@ -1330,6 +1378,52 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                 return rows
               })()}
 
+              {/* Unmapped transactions row — affects forecast balance */}
+              {(data.unmapped_income > 0 || data.unmapped_expense > 0) && (() => {
+                const unmappedNet = data.unmapped_income - data.unmapped_expense
+                // Calculate adjusted balance: forecast_closing already excludes unmapped,
+                // so adjusted = forecast_closing + unmappedNet, then subtract timing to get pre-timing value
+                const adjustedPreTiming = data.forecast_closing - data.card_timing.adjustment + unmappedNet
+                return (
+                  <tr className="border-t border-dashed border-amber-500/30 bg-amber-500/[0.04] hover:bg-amber-500/[0.07] transition-colors">
+                    <td className="px-4 py-2.5">
+                      <Badge variant="outline" className="text-[10px] font-semibold px-2 py-0.5 bg-amber-500/12 text-amber-400">미분류</Badge>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <a
+                        href={`/transactions?entity=${entityId}&year=${data.year}&month=${data.month}&filter=unmapped`}
+                        className="flex items-center gap-1.5 group/link"
+                      >
+                        <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
+                        <span className="text-xs text-amber-400 underline decoration-dotted underline-offset-2 group-hover/link:decoration-solid">
+                          미분류 실제 거래 {data.unmapped_count}건 &rarr;
+                        </span>
+                      </a>
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-muted-foreground">--</td>
+                    {showComparison && (
+                      <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs">
+                        <div className="space-y-0.5">
+                          {data.unmapped_income > 0 && (
+                            <div className="text-[hsl(var(--profit))]">+{formatByEntity(data.unmapped_income, entityId)}</div>
+                          )}
+                          {data.unmapped_expense > 0 && (
+                            <div className="text-[hsl(var(--loss))]">-{formatByEntity(data.unmapped_expense, entityId)}</div>
+                          )}
+                        </div>
+                      </td>
+                    )}
+                    <td className={cn(
+                      "px-4 py-2.5 text-right font-mono tabular-nums text-xs text-[hsl(var(--warning))]",
+                    )}>
+                      {formatByEntity(adjustedPreTiming, entityId)}
+                    </td>
+                    {showComparison && <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-muted-foreground">--</td>}
+                    <td></td>
+                  </tr>
+                )
+              })()}
+
               {/* Timing adjustment row */}
               {data.card_timing.adjustment !== 0 && (
                 <tr className="border-t border-border bg-purple-500/[0.03]">
@@ -1357,7 +1451,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                 <td className="px-4 py-3 text-right font-mono tabular-nums text-xs">--</td>
                 {showComparison && <td className="px-4 py-3 text-right font-mono tabular-nums text-xs">--</td>}
                 <td className="px-4 py-3 text-right font-mono tabular-nums text-xs text-[hsl(var(--warning))]">
-                  {formatByEntity(data.forecast_closing, entityId)}
+                  {formatByEntity(data.adjusted_forecast_closing, entityId)}
                 </td>
                 {showComparison && (
                   <td className="px-4 py-3 text-right font-mono tabular-nums text-xs text-[hsl(var(--profit))]">
@@ -1381,11 +1475,17 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
 
       {/* Formula (collapsible) */}
       <Card className="p-4 bg-muted/30 font-mono text-xs leading-relaxed text-cyan-400 rounded-lg">
-        <p>{m}월 예상 기말 = {m - 1 || 12}월 확정 기말</p>
+        <p>{m}월 조정 예상 기말 = {m - 1 || 12}월 확정 기말</p>
         <p className="ml-4">+ {m}월 예상 입금</p>
         <p className="ml-4">- {m}월 예상 출금</p>
         <p className="ml-4">- {m}월 예상 카드 사용액</p>
         <p className="ml-4 text-amber-400">+ ({m}월 예상 카드 사용액 - {m - 1 || 12}월 카드 사용액) &larr; 시차 보정</p>
+        {data.unmapped_count > 0 && (
+          <>
+            <p className="ml-4 text-amber-400">+ 미분류 실제 입금 ({formatByEntity(data.unmapped_income, entityId)})</p>
+            <p className="ml-4 text-amber-400">- 미분류 실제 출금 ({formatByEntity(data.unmapped_expense, entityId)})</p>
+          </>
+        )}
       </Card>
 
       {/* Comparison boxes */}
@@ -1420,8 +1520,8 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
           <h4 className="text-xs font-semibold text-[hsl(var(--warning))] mb-3">예상 vs 실제</h4>
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
-              <span className="text-muted-foreground">예상 기말</span>
-              <span className="font-mono tabular-nums text-[hsl(var(--warning))]">{formatByEntity(data.forecast_closing, entityId)}</span>
+              <span className="text-muted-foreground">조정 예상 기말</span>
+              <span className="font-mono tabular-nums text-[hsl(var(--warning))]">{formatByEntity(data.adjusted_forecast_closing, entityId)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">실제 기말</span>
@@ -1433,7 +1533,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                 {data.diff >= 0 ? "+" : ""}{formatByEntity(data.diff, entityId)}
               </span>
             </div>
-            {data.forecast_closing !== 0 && (
+            {data.adjusted_forecast_closing !== 0 && (
               <div className="flex justify-between">
                 <span className="text-muted-foreground">정확도</span>
                 <span className={cn("font-mono tabular-nums", diffColor)}>
