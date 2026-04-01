@@ -350,6 +350,7 @@ interface InternalAccount {
   code: string
   name: string
   parent_id: number | null
+  is_recurring?: boolean
 }
 
 function ForecastModal({
@@ -401,7 +402,7 @@ function ForecastModal({
   useEffect(() => {
     if (!entityId) return
     fetchAPI<InternalAccount[]>(
-      `/internal-accounts?entity_id=${entityId}`,
+      `/accounts/internal?entity_id=${entityId}`,
       { cache: "no-store" },
     ).then(setInternalAccounts).catch(() => {})
   }, [entityId])

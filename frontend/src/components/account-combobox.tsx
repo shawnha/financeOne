@@ -9,6 +9,7 @@ interface AccountOption {
   code: string
   name: string
   parent_id?: number | null
+  is_recurring?: boolean
 }
 
 interface AccountComboboxProps {
@@ -261,16 +262,19 @@ export function AccountCombobox({
                       setSearch("")
                     }}
                     className={cn(
-                      "w-full text-left px-3 py-1.5 text-xs transition-colors",
+                      "w-full text-left px-3 py-1.5 text-xs transition-colors flex items-center",
                       "hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none",
                       isSelected && "bg-accent/20 text-accent-foreground font-medium",
                       "pl-6",
                     )}
                   >
                     <span className="text-muted-foreground/40 mr-1">└</span>
-                    {opt.name}
+                    <span className="flex-1">{opt.name}</span>
+                    {opt.is_recurring && (
+                      <span className="text-[9px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded ml-2 shrink-0">반복</span>
+                    )}
                     {showCode && (
-                      <span className="text-muted-foreground/50 text-[10px] ml-2">{opt.code}</span>
+                      <span className="text-muted-foreground/50 text-[10px] ml-2 shrink-0">{opt.code}</span>
                     )}
                   </button>
                 )
