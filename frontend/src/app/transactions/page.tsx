@@ -57,6 +57,7 @@ interface Transaction {
   standard_account_id: number | null
   standard_account_code: string | null
   standard_account_name: string | null
+  has_slack_match: boolean
 }
 
 interface PaginatedResponse {
@@ -661,8 +662,15 @@ export default function TransactionsPage() {
                       {/* Date */}
                       <TableCell className="p-2 text-sm whitespace-nowrap">{tx.date}</TableCell>
 
-                      {/* Source */}
-                      <TableCell className="p-2 whitespace-nowrap">{sourceLabel(tx.source_type)}</TableCell>
+                      {/* Source + Slack match indicator */}
+                      <TableCell className="p-2 whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1.5">
+                          {sourceLabel(tx.source_type)}
+                          {tx.has_slack_match && (
+                            <span className="inline-block w-2 h-2 rounded-full bg-indigo-400" title="Slack 매칭됨" />
+                          )}
+                        </span>
+                      </TableCell>
 
                       {/* Member */}
                       <TableCell className="p-2 text-sm truncate max-w-[80px]">

@@ -107,7 +107,8 @@ def list_transactions(
                t.internal_account_id, t.standard_account_id, t.is_cancel, t.card_number,
                m.name AS member_name,
                ia.code AS internal_account_code, ia.name AS internal_account_name,
-               sa.code AS standard_account_code, sa.name AS standard_account_name
+               sa.code AS standard_account_code, sa.name AS standard_account_name,
+               EXISTS(SELECT 1 FROM transaction_slack_match tsm WHERE tsm.transaction_id = t.id) AS has_slack_match
         FROM transactions t
         LEFT JOIN members m ON t.member_id = m.id
         LEFT JOIN internal_accounts ia ON t.internal_account_id = ia.id
