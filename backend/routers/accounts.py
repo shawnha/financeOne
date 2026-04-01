@@ -369,12 +369,16 @@ def list_members(
     cur = conn.cursor()
     if entity_id is not None:
         cur.execute(
-            "SELECT id, entity_id, name, role, card_numbers, slack_user_id FROM members WHERE entity_id = %s AND is_active = true ORDER BY name",
+            """SELECT m.id, m.entity_id, m.name, m.role, m.card_numbers, m.slack_user_id,
+                      (SELECT COUNT(*) FROM transactions t WHERE t.member_id = m.id) AS tx_count
+               FROM members m WHERE m.entity_id = %s AND m.is_active = true ORDER BY m.name""",
             [entity_id],
         )
     else:
         cur.execute(
-            "SELECT id, entity_id, name, role, card_numbers, slack_user_id FROM members WHERE is_active = true ORDER BY entity_id, name"
+            """SELECT m.id, m.entity_id, m.name, m.role, m.card_numbers, m.slack_user_id,
+                      (SELECT COUNT(*) FROM transactions t WHERE t.member_id = m.id) AS tx_count
+               FROM members m WHERE m.is_active = true ORDER BY m.entity_id, m.name"""
         )
     rows = fetch_all(cur)
     cur.close()

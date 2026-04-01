@@ -36,6 +36,7 @@ interface Member {
   role: string
   card_numbers: string[]
   slack_user_id: string | null
+  tx_count: number | null
 }
 
 type MemberRole = "admin" | "member" | "corporate" | "staff"
@@ -293,7 +294,7 @@ function MembersContent() {
                           )}
                         </TableCell>
                         <TableCell className="text-right tabular-nums text-muted-foreground">
-                          -
+                          {member.tx_count || 0}
                         </TableCell>
                         <TableCell>
                           <Button
