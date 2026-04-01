@@ -493,7 +493,7 @@ export default function TransactionsPage() {
       {/* Entity Tabs */}
       <EntityTabs />
 
-      <div className="flex-1 flex flex-col p-6 gap-4 overflow-hidden">
+      <div className="flex-1 flex flex-col p-6 gap-4 min-h-0">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -756,11 +756,12 @@ export default function TransactionsPage() {
               </Table>
             </>
           )}
+
         </div>
 
         {/* Pagination */}
-        {data && viewState !== "loading" && viewState !== "error" && data.pages > 0 && (
-          <div className="flex items-center justify-between text-sm">
+        {data && viewState !== "loading" && viewState !== "error" && data.pages > 1 && (
+          <div className="flex-shrink-0 flex items-center justify-between text-sm py-3">
             <span className="text-muted-foreground">
               {data.page}/{data.pages} 페이지 ({data.total.toLocaleString()}건)
             </span>
@@ -784,6 +785,37 @@ export default function TransactionsPage() {
               >
                 <ChevronLeft className="h-4 w-4" />
               </Button>
+              {(() => {
+                const totalPages = data?.pages || 1
+                const pages: (number | "...")[] = []
+                if (totalPages <= 7) {
+                  for (let i = 1; i <= totalPages; i++) pages.push(i)
+                } else {
+                  pages.push(1)
+                  if (page > 3) pages.push("...")
+                  for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) pages.push(i)
+                  if (page < totalPages - 2) pages.push("...")
+                  pages.push(totalPages)
+                }
+                return pages.map((p, i) =>
+                  p === "..." ? (
+                    <span key={`dot-${i}`} className="text-xs text-muted-foreground px-1">...</span>
+                  ) : (
+                    <button
+                      key={p}
+                      onClick={() => setPage(p)}
+                      className={cn(
+                        "h-8 w-8 rounded-full text-xs font-medium transition-colors",
+                        p === page
+                          ? "bg-[#F59E0B] text-black font-bold"
+                          : "border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+                      )}
+                    >
+                      {p}
+                    </button>
+                  )
+                )
+              })()}
               <Button
                 variant="outline"
                 size="sm"

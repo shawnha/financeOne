@@ -271,7 +271,7 @@ def delete_internal_account(
         )
         tx_count = cur.fetchone()[0]
 
-        # Soft-delete regardless, but include warning
+        # Soft-delete + unlink transactions
         cur.execute(
             """
             UPDATE internal_accounts SET is_active = false
@@ -286,14 +286,19 @@ def delete_internal_account(
                 status_code=404,
                 detail="Internal account not found or already deleted",
             )
+
+        # 연결된 거래를 미분류로 되돌림
+        if tx_count > 0:
+            cur.execute(
+                "UPDATE transactions SET internal_account_id = NULL WHERE internal_account_id = %s",
+                [account_id],
+            )
+
         conn.commit()
 
         response = {"id": account_id, "deleted": True}
         if tx_count > 0:
-            response["warning"] = (
-                f"{tx_count} transaction(s) reference this account. "
-                "They retain the reference but this account is now inactive."
-            )
+            response["unlinked_transactions"] = tx_count
         return response
     except HTTPException:
         conn.rollback()
