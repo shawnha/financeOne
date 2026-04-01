@@ -1493,6 +1493,19 @@ function SlackMatchContent() {
     [messages, fetchMessages],
   )
 
+  const handleRestore = useCallback(
+    async (messageId: number) => {
+      try {
+        await fetchAPI(`/slack/messages/${messageId}/restore`, { method: "POST" })
+        toast.success("메시지가 복원되었습니다.")
+        fetchMessages(true)
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "복원에 실패했습니다.")
+      }
+    },
+    [fetchMessages],
+  )
+
   const handleConfirmDirect = useCallback(
     (msg: SlackMessage) => {
       if (msg.matched_transaction_id) {
@@ -1795,8 +1808,18 @@ function SlackMatchContent() {
               onRefresh={() => fetchMessages(true)}
             />
           ) : (
-            <div className="p-4 text-center text-sm text-muted-foreground">
-              이미 처리된 메시지입니다.
+            <div className="p-4 text-center text-sm text-muted-foreground space-y-3">
+              <p>{getMessageStatus(selectedMessage) === "ignored" ? "무시된 메시지입니다." : "이미 확정된 메시지입니다."}</p>
+              {getMessageStatus(selectedMessage) === "ignored" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleRestore(selectedMessageId)}
+                >
+                  <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                  무시 해제
+                </Button>
+              )}
             </div>
           )}
         </div>

@@ -850,6 +850,33 @@ def ignore_message(
         raise
 
 
+@router.post("/messages/{message_id}/restore")
+def restore_message(
+    message_id: int,
+    conn: PgConnection = Depends(get_db),
+):
+    """무시된 메시지를 미확정 상태로 복원."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "UPDATE slack_messages SET is_cancelled = false, is_completed = false WHERE id = %s RETURNING id",
+            [message_id],
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "Slack message not found")
+
+        conn.commit()
+        cur.close()
+        return {"message_id": message_id, "restored": True}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception:
+        conn.rollback()
+        raise
+
+
 @router.post("/sync")
 def sync_slack_channel(
     channel: str = Query("99-expenses"),
