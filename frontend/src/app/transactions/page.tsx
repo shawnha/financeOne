@@ -172,8 +172,8 @@ function mappingBadge(mappingSource: string | null, confidence: number | null) {
   const pct = confidence != null ? Math.round(confidence * 100) : null
   const config = MAPPING_SOURCE_CONFIG[mappingSource || ""] || MAPPING_SOURCE_CONFIG.rule
   return (
-    <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0 font-mono", config.classes)}>
-      {config.label}{pct != null ? ` ${pct}%` : ""}
+    <Badge variant="outline" className={cn("text-[10px] px-1 py-0 font-mono whitespace-nowrap", config.classes)}>
+      {config.label}{pct != null ? `${pct}%` : ""}
     </Badge>
   )
 }
@@ -639,7 +639,7 @@ export default function TransactionsPage() {
         </div>
 
         {/* Main content area */}
-        <div className="flex-1 overflow-auto rounded-md border">
+        <div className="flex-1 overflow-y-auto rounded-md border">
           {viewState === "loading" && <TableSkeleton />}
           {viewState === "error" && <ErrorState message={errorMsg} onRetry={fetchTransactions} />}
           {viewState === "empty" && <EmptyState />}
@@ -651,26 +651,26 @@ export default function TransactionsPage() {
                   일부 데이터만 표시됩니다.
                 </div>
               )}
-              <Table className="min-w-[1100px]">
+              <Table className="w-full table-fixed">
                 <TableHeader className="sticky top-0 z-10 bg-primary">
                   <TableRow className="hover:bg-primary border-b-0 whitespace-nowrap">
-                    <TableHead className="w-[40px] text-center">
+                    <TableHead className="w-[36px] text-center">
                       <Checkbox
                         checked={allSelected}
                         onCheckedChange={toggleSelectAll}
                         aria-label="전체 선택"
                       />
                     </TableHead>
-                    <TableHead className="min-w-[100px]">날짜</TableHead>
-                    <TableHead className="min-w-[80px]">출처</TableHead>
-                    <TableHead className="min-w-[60px]">회원</TableHead>
-                    <TableHead className="min-w-[160px]">내역</TableHead>
-                    <TableHead className="min-w-[120px]">거래처</TableHead>
-                    <TableHead className="min-w-[100px] text-right">수입</TableHead>
-                    <TableHead className="min-w-[100px] text-right">지출</TableHead>
-                    <TableHead className="min-w-[100px]">내부 계정</TableHead>
-                    <TableHead className="min-w-[100px]">표준 계정</TableHead>
-                    <TableHead className="min-w-[50px] text-center">신뢰</TableHead>
+                    <TableHead className="w-[88px]">날짜</TableHead>
+                    <TableHead className="w-[64px]">출처</TableHead>
+                    <TableHead className="w-[64px]">회원</TableHead>
+                    <TableHead className="w-[18%]">내역</TableHead>
+                    <TableHead className="w-[14%]">거래처</TableHead>
+                    <TableHead className="w-[90px] text-right">수입</TableHead>
+                    <TableHead className="w-[90px] text-right">지출</TableHead>
+                    <TableHead className="w-[80px]">내부 계정</TableHead>
+                    <TableHead className="w-[80px]">표준 계정</TableHead>
+                    <TableHead className="w-[80px] text-center">신뢰</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -719,16 +719,16 @@ export default function TransactionsPage() {
                       </TableCell>
 
                       {/* Description */}
-                      <TableCell className="p-2 text-sm truncate max-w-[300px]" title={tx.description || ""}>
-                        <span className={cn(tx.is_cancel && "line-through")}>
+                      <TableCell className="p-2 text-sm overflow-hidden" title={tx.description || ""}>
+                        <span className={cn("block truncate", tx.is_cancel && "line-through")}>
                           {tx.description || "\u2014"}
+                          {tx.is_cancel && <Badge variant="outline" className="ml-1.5 text-[10px] px-1 py-0 bg-amber-500/15 text-amber-400 border-amber-500/30">취소</Badge>}
                         </span>
-                        {tx.is_cancel && <Badge variant="outline" className="ml-1.5 text-[10px] px-1 py-0 bg-amber-500/15 text-amber-400 border-amber-500/30">취소</Badge>}
                       </TableCell>
 
                       {/* Counterparty */}
-                      <TableCell className="p-2 text-sm truncate max-w-[140px]" title={tx.counterparty || ""}>
-                        {tx.counterparty || "\u2014"}
+                      <TableCell className="p-2 text-sm overflow-hidden" title={tx.counterparty || ""}>
+                        <span className="block truncate">{tx.counterparty || "\u2014"}</span>
                       </TableCell>
 
                       {/* Income */}
@@ -754,7 +754,7 @@ export default function TransactionsPage() {
                       {/* Internal Account */}
                       <TableCell
                         data-account-cell
-                        className="p-2 cursor-pointer hover:bg-muted/20 transition-colors"
+                        className="p-2 overflow-hidden cursor-pointer hover:bg-muted/20 transition-colors"
                         onClick={e => { e.stopPropagation(); if (!(editingCell?.txId === tx.id && editingCell?.field === "internal_account_id")) setEditingCell({ txId: tx.id, field: "internal_account_id" }) }}
                       >
                         {editingCell?.txId === tx.id && editingCell?.field === "internal_account_id" ? (
@@ -776,7 +776,7 @@ export default function TransactionsPage() {
                       {/* Standard Account */}
                       <TableCell
                         data-account-cell
-                        className="p-2 cursor-pointer hover:bg-muted/20 transition-colors"
+                        className="p-2 overflow-hidden cursor-pointer hover:bg-muted/20 transition-colors"
                         onClick={e => { e.stopPropagation(); if (!(editingCell?.txId === tx.id && editingCell?.field === "standard_account_id")) setEditingCell({ txId: tx.id, field: "standard_account_id" }) }}
                       >
                         {editingCell?.txId === tx.id && editingCell?.field === "standard_account_id" ? (
