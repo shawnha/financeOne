@@ -148,14 +148,14 @@ async def upload_transactions(
             )
             inserted_count += 1
 
-            # 자동 매핑: mapping_rules에서 counterparty 조회
-            mapping = auto_map_transaction(cur, entity_id=entity_id, counterparty=tx.counterparty)
+            # 자동 매핑: 5단계 캐스케이드 (exact → similar → keyword → AI → manual)
+            mapping = auto_map_transaction(cur, entity_id=entity_id, counterparty=tx.counterparty, description=tx.description)
             if mapping:
                 cur.execute(
                     """
                     UPDATE transactions
                     SET internal_account_id = %s, standard_account_id = %s,
-                        mapping_source = 'rule', mapping_confidence = %s
+                        mapping_source = %s, mapping_confidence = %s
                     WHERE id = (
                         SELECT id FROM transactions
                         WHERE entity_id = %s AND file_id = %s AND date = %s
@@ -166,6 +166,7 @@ async def upload_transactions(
                     [
                         mapping["internal_account_id"],
                         mapping["standard_account_id"],
+                        mapping.get("match_type", "rule"),
                         mapping["confidence"],
                         entity_id, file_id, tx.date, tx.amount, tx.counterparty, tx.description,
                     ],
@@ -495,26 +496,28 @@ def rematch_file_transactions(
         # 2. 계정 재매칭: mapping_service 사용
         cur.execute(
             """
-            SELECT t.id, t.counterparty
+            SELECT t.id, t.counterparty, t.description
             FROM transactions t
-            WHERE t.file_id = %s AND t.internal_account_id IS NULL AND t.counterparty IS NOT NULL
+            WHERE t.file_id = %s AND t.internal_account_id IS NULL
+              AND (t.counterparty IS NOT NULL OR t.description IS NOT NULL)
             """,
             [file_id],
         )
         unmapped_rows = cur.fetchall()
 
         account_matched = 0
-        for tx_id, counterparty in unmapped_rows:
-            mapping = auto_map_transaction(cur, entity_id=entity_id, counterparty=counterparty)
+        for tx_id, counterparty, description in unmapped_rows:
+            mapping = auto_map_transaction(cur, entity_id=entity_id, counterparty=counterparty, description=description)
             if mapping:
                 cur.execute(
                     """
                     UPDATE transactions
                     SET internal_account_id = %s, standard_account_id = %s,
-                        mapping_source = 'rule', mapping_confidence = %s
+                        mapping_source = %s, mapping_confidence = %s
                     WHERE id = %s
                     """,
-                    [mapping["internal_account_id"], mapping["standard_account_id"], mapping["confidence"], tx_id],
+                    [mapping["internal_account_id"], mapping["standard_account_id"],
+                     mapping.get("match_type", "rule"), mapping["confidence"], tx_id],
                 )
                 account_matched += 1
 

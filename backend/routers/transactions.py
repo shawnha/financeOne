@@ -212,20 +212,19 @@ def update_transaction(
 @router.post("/auto-map")
 def auto_map_unmapped(
     entity_id: int = Query(...),
+    enable_ai: bool = Query(False),
     conn: PgConnection = Depends(get_db),
 ):
-    """미분류 거래에 mapping_rules 기반 자동 매핑 일괄 적용"""
+    """미분류 거래에 5단계 캐스케이드 자동 매핑 일괄 적용"""
     cur = conn.cursor()
     try:
-        # 미분류 거래 조회 (internal_account_id가 NULL이고 counterparty가 있는 거래)
         cur.execute(
             """
-            SELECT id, counterparty
+            SELECT id, counterparty, description
             FROM transactions
             WHERE entity_id = %s
               AND internal_account_id IS NULL
-              AND counterparty IS NOT NULL
-              AND counterparty != ''
+              AND (counterparty IS NOT NULL OR description IS NOT NULL)
             """,
             [entity_id],
         )
@@ -233,8 +232,13 @@ def auto_map_unmapped(
 
         mapped_count = 0
         mapped_ids = []
-        for tx_id, counterparty in unmapped:
-            mapping = auto_map_transaction(cur, entity_id=entity_id, counterparty=counterparty)
+        for tx_id, counterparty, description in unmapped:
+            mapping = auto_map_transaction(
+                cur, entity_id=entity_id,
+                counterparty=counterparty,
+                description=description,
+                enable_ai=enable_ai,
+            )
             if mapping:
                 cur.execute(
                     """
@@ -242,7 +246,7 @@ def auto_map_unmapped(
                     SET internal_account_id = %s,
                         standard_account_id = %s,
                         mapping_confidence = %s,
-                        mapping_source = 'rule',
+                        mapping_source = %s,
                         updated_at = NOW()
                     WHERE id = %s
                     """,
@@ -250,6 +254,7 @@ def auto_map_unmapped(
                         mapping["internal_account_id"],
                         mapping["standard_account_id"],
                         mapping["confidence"],
+                        mapping.get("match_type", "rule"),
                         tx_id,
                     ],
                 )
@@ -294,7 +299,7 @@ def bulk_map(body: BulkMap, conn: PgConnection = Depends(get_db)):
             f"""
             UPDATE transactions
             SET internal_account_id = %s, standard_account_id = %s,
-                mapping_source = 'manual', updated_at = NOW()
+                mapping_source = 'manual', mapping_confidence = 1.0, updated_at = NOW()
             WHERE id IN ({placeholders})
             RETURNING id, counterparty, entity_id
             """,
@@ -330,7 +335,7 @@ def bulk_confirm(body: BulkConfirm, conn: PgConnection = Depends(get_db)):
     try:
         placeholders = ",".join(["%s"] * len(body.ids))
         cur.execute(
-            f"UPDATE transactions SET is_confirmed = true, updated_at = NOW() WHERE id IN ({placeholders}) RETURNING id",
+            f"UPDATE transactions SET is_confirmed = true, mapping_source = 'confirmed', updated_at = NOW() WHERE id IN ({placeholders}) RETURNING id",
             body.ids,
         )
         updated = [r[0] for r in cur.fetchall()]

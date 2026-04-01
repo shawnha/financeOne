@@ -1,7 +1,8 @@
-"""내부계정 재매핑 배치 서비스 — CQ-1 배치 최적화 + ARCH-4 Slack fallback."""
+"""내부계정 재매핑 배치 서비스 — CQ-1 배치 최적화 + ARCH-4 Slack fallback + v2 캐스케이드."""
 
 from psycopg2.extensions import connection as PgConnection
 from backend.utils.db import fetch_all
+from backend.services.mapping_service import auto_map_transaction
 
 
 def load_all_mapping_rules(cur, entity_id: int) -> dict:
@@ -31,11 +32,10 @@ def query_remap_candidates(cur, entity_id: int) -> list[dict]:
     """재매핑 대상 거래 조회 (manual/confirmed 제외, 중복 제외)."""
     cur.execute(
         """
-        SELECT id, counterparty, internal_account_id, mapping_source
+        SELECT id, counterparty, internal_account_id, mapping_source, description
         FROM transactions
         WHERE entity_id = %s
-          AND counterparty IS NOT NULL
-          AND counterparty != ''
+          AND (counterparty IS NOT NULL OR description IS NOT NULL)
           AND is_duplicate = false
           AND (mapping_source IS NULL OR mapping_source NOT IN ('manual', 'confirmed'))
         ORDER BY date, id
@@ -106,13 +106,24 @@ def remap_transactions(conn: PgConnection, entity_id: int, dry_run: bool = False
     for tx in candidates:
         counterparty = (tx["counterparty"] or "").strip().lower()
         current_ia = tx["internal_account_id"]
+        match_type = "rule"
 
-        # Priority 1: mapping_rules (in-memory)
+        # Priority 1: mapping_rules (in-memory exact match)
         mapping = rules.get(counterparty)
 
         # Priority 2: Slack fallback (ARCH-4)
         if not mapping:
             mapping = slack_fallback_mapping(cur, tx["id"], entity_id)
+
+        # Priority 3: cascade (similar → keyword) for remaining
+        if not mapping:
+            mapping = auto_map_transaction(
+                cur, entity_id=entity_id,
+                counterparty=tx.get("counterparty"),
+                description=tx.get("description"),
+            )
+            if mapping:
+                match_type = mapping.get("match_type", "rule")
 
         if not mapping:
             skipped += 1
@@ -130,11 +141,12 @@ def remap_transactions(conn: PgConnection, entity_id: int, dry_run: bool = False
                 SET internal_account_id = %s,
                     standard_account_id = %s,
                     mapping_confidence = %s,
-                    mapping_source = 'rule',
+                    mapping_source = %s,
                     updated_at = NOW()
                 WHERE id = %s
                 """,
-                [new_ia, mapping["standard_account_id"], mapping["confidence"], tx["id"]],
+                [new_ia, mapping["standard_account_id"], mapping["confidence"],
+                 mapping.get("match_type", match_type), tx["id"]],
             )
 
         mapped += 1

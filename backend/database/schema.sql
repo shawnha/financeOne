@@ -247,6 +247,27 @@ CREATE TABLE IF NOT EXISTS mapping_rules (
 );
 
 CREATE INDEX IF NOT EXISTS idx_mapping_pattern ON mapping_rules(counterparty_pattern);
+-- match_type on mapping_rules: 'exact' | 'similar' | 'keyword' | 'ai'
+
+-- 13b. keyword_mapping_rules — 키워드 기반 매핑
+CREATE TABLE IF NOT EXISTS keyword_mapping_rules (
+  id                  SERIAL PRIMARY KEY,
+  entity_id           INTEGER NOT NULL REFERENCES entities(id),
+  keyword             VARCHAR(100) NOT NULL,
+  match_field         VARCHAR(20) NOT NULL DEFAULT 'description',
+  internal_account_id INTEGER NOT NULL REFERENCES internal_accounts(id),
+  confidence          NUMERIC(3,2) NOT NULL DEFAULT 0.75,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(entity_id, keyword, match_field)
+);
+
+-- 13c. standard_account_keywords — 일상어 -> 표준계정 매핑 사전
+CREATE TABLE IF NOT EXISTS standard_account_keywords (
+  id                  SERIAL PRIMARY KEY,
+  keyword             VARCHAR(100) NOT NULL UNIQUE,
+  standard_account_id INTEGER NOT NULL REFERENCES standard_accounts(id),
+  confidence          NUMERIC(3,2) NOT NULL DEFAULT 0.80
+);
 
 -- 14. gaap_mapping — US GAAP ↔ K-GAAP 매핑
 CREATE TABLE IF NOT EXISTS gaap_mapping (

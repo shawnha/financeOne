@@ -157,15 +157,23 @@ const INITIAL_FILTERS: Filters = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function confidenceBadge(confidence: number | null) {
-  if (confidence == null) return null
-  const pct = Math.round(confidence * 100)
-  let colorClass = "bg-red-500/15 text-red-400 border-red-500/30"
-  if (pct >= 90) colorClass = "bg-green-500/15 text-green-400 border-green-500/30"
-  else if (pct >= 70) colorClass = "bg-yellow-500/15 text-yellow-400 border-yellow-500/30"
+const MAPPING_SOURCE_CONFIG: Record<string, { label: string; classes: string }> = {
+  exact:     { label: "규칙",   classes: "bg-green-500/15 text-green-400 border-green-500/30" },
+  similar:   { label: "유사",   classes: "bg-blue-500/15 text-blue-400 border-blue-500/30" },
+  keyword:   { label: "키워드", classes: "bg-cyan-500/15 text-cyan-400 border-cyan-500/30" },
+  ai:        { label: "AI",    classes: "bg-purple-500/15 text-purple-400 border-purple-500/30" },
+  rule:      { label: "규칙",   classes: "bg-green-500/15 text-green-400 border-green-500/30" },
+  manual:    { label: "수동",   classes: "bg-gray-500/15 text-gray-400 border-gray-500/30" },
+  confirmed: { label: "확정",   classes: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" },
+}
+
+function mappingBadge(mappingSource: string | null, confidence: number | null) {
+  if (!mappingSource && confidence == null) return null
+  const pct = confidence != null ? Math.round(confidence * 100) : null
+  const config = MAPPING_SOURCE_CONFIG[mappingSource || ""] || MAPPING_SOURCE_CONFIG.rule
   return (
-    <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0 font-mono", colorClass)}>
-      {pct}%
+    <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0 font-mono", config.classes)}>
+      {config.label}{pct != null ? ` ${pct}%` : ""}
     </Badge>
   )
 }
@@ -485,6 +493,33 @@ export default function TransactionsPage() {
     }
   }, [entityId, fetchTransactions])
 
+  // 자동 매핑 일괄 확정
+  const autoMappedUnconfirmed = useMemo(() => {
+    if (!data) return []
+    return data.items.filter(tx =>
+      tx.internal_account_id && !tx.is_confirmed &&
+      tx.mapping_source && ["exact", "similar", "keyword", "ai", "rule"].includes(tx.mapping_source)
+    )
+  }, [data])
+
+  const handleBulkConfirmAutoMapped = useCallback(async () => {
+    if (autoMappedUnconfirmed.length === 0) return
+    setBulkConfirming(true)
+    try {
+      const ids = autoMappedUnconfirmed.map(tx => tx.id)
+      const result = await fetchAPI<{ confirmed: number }>("/transactions/bulk-confirm", {
+        method: "POST",
+        body: JSON.stringify({ ids }),
+      })
+      toast.success(`${result.confirmed}건 자동 매핑 거래 확정 완료`)
+      fetchTransactions(true)
+    } catch {
+      toast.error("일괄 확정에 실패했습니다")
+    } finally {
+      setBulkConfirming(false)
+    }
+  }, [autoMappedUnconfirmed, fetchTransactions])
+
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -508,6 +543,12 @@ export default function TransactionsPage() {
               <Wand2 className="h-4 w-4 mr-1.5" />
               {autoMapping ? "매핑 중..." : "자동 매핑"}
             </Button>
+            {autoMappedUnconfirmed.length > 0 && (
+              <Button variant="outline" size="sm" onClick={handleBulkConfirmAutoMapped} disabled={bulkConfirming}
+                className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10">
+                {bulkConfirming ? "확정 중..." : `자동 매핑 ${autoMappedUnconfirmed.length}건 일괄 확정`}
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={handleCSVDownload}>
               <Download className="h-4 w-4 mr-1.5" />
               CSV 다운로드
@@ -756,7 +797,7 @@ export default function TransactionsPage() {
 
                       {/* Confidence */}
                       <TableCell className="p-2 text-center">
-                        {confidenceBadge(tx.mapping_confidence)}
+                        {mappingBadge(tx.mapping_source, tx.mapping_confidence)}
                       </TableCell>
                     </TableRow>
                   ))}

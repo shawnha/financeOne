@@ -137,8 +137,23 @@ def create_internal_account(
     body: InternalAccountCreate,
     conn: PgConnection = Depends(get_db),
 ):
+    from backend.services.standard_account_recommender import recommend_standard_account
+
     cur = conn.cursor()
     try:
+        # 표준계정 미지정 시 자동 추천
+        std_account_id = body.standard_account_id
+        recommendation = None
+        if not std_account_id:
+            recommendation = recommend_standard_account(
+                cur,
+                entity_id=body.entity_id,
+                account_name=body.name,
+                parent_id=body.parent_id,
+            )
+            if recommendation:
+                std_account_id = recommendation["standard_account_id"]
+
         cur.execute(
             """
             INSERT INTO internal_accounts
@@ -151,7 +166,7 @@ def create_internal_account(
                 body.entity_id,
                 body.code,
                 body.name,
-                body.standard_account_id,
+                std_account_id,
                 body.parent_id,
                 body.sort_order,
                 body.is_recurring,
@@ -159,6 +174,8 @@ def create_internal_account(
         )
         cols = [d[0] for d in cur.description]
         row = dict(zip(cols, cur.fetchone()))
+        if recommendation:
+            row["std_recommendation"] = recommendation
         conn.commit()
         return row
     except Exception as e:
@@ -172,6 +189,36 @@ def create_internal_account(
         raise HTTPException(status_code=400, detail=error_msg)
     finally:
         cur.close()
+
+
+@router.get("/internal/recommend-standard")
+def recommend_standard(
+    entity_id: int = Query(...),
+    name: str = Query(...),
+    parent_id: int | None = Query(None),
+    conn: PgConnection = Depends(get_db),
+):
+    """내부계정 이름으로 표준계정 추천 (미리보기용)"""
+    from backend.services.standard_account_recommender import recommend_standard_account
+
+    cur = conn.cursor()
+    result = recommend_standard_account(cur, entity_id=entity_id, account_name=name, parent_id=parent_id)
+    cur.close()
+    if not result:
+        return {"recommendation": None}
+
+    # 표준계정 이름도 같이 반환
+    cur2 = conn.cursor()
+    cur2.execute(
+        "SELECT code, name FROM standard_accounts WHERE id = %s",
+        [result["standard_account_id"]],
+    )
+    sa = cur2.fetchone()
+    cur2.close()
+    if sa:
+        result["standard_code"] = sa[0]
+        result["standard_name"] = sa[1]
+    return {"recommendation": result}
 
 
 class SortOrderItem(BaseModel):
