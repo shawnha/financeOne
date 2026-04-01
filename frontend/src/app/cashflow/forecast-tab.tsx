@@ -409,6 +409,25 @@ function ForecastModal({
 
   const selectedAccount = internalAccounts.find((a) => String(a.id) === selectedAccountId)
 
+  // 전월 실적 조회 (suggest-from-actuals는 내부적으로 전월 계산)
+  const [prevActual, setPrevActual] = useState<number | null>(null)
+  const [prevSuggestions, setPrevSuggestions] = useState<Array<{ internal_account_id: number; total: number; type: string }>>([])
+  useEffect(() => {
+    if (!entityId || isEdit) return
+    fetchAPI<{ suggestions: Array<{ internal_account_id: number; total: number; type: string }> }>(
+      `/forecasts/suggest-from-actuals?entity_id=${entityId}&year=${year}&month=${month}`,
+    ).then((data) => {
+      setPrevSuggestions(data.suggestions || [])
+    }).catch(() => setPrevSuggestions([]))
+  }, [entityId, year, month, isEdit])
+
+  // 선택된 계정의 전월 실적
+  useEffect(() => {
+    if (!selectedAccountId || isEdit) { setPrevActual(null); return }
+    const match = prevSuggestions.find((s) => String(s.internal_account_id) === selectedAccountId)
+    setPrevActual(match ? match.total : null)
+  }, [selectedAccountId, prevSuggestions, isEdit])
+
   const resetForm = () => {
     setCategory("")
     setSelectedAccountId("")
@@ -526,6 +545,15 @@ function ForecastModal({
               onChange={(e) => setAmount(e.target.value)}
               className="mt-1 font-mono"
             />
+            {prevActual !== null && !isEdit && (
+              <button
+                type="button"
+                onClick={() => setAmount(String(prevActual))}
+                className="mt-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+              >
+                전월 실적: ₩{prevActual.toLocaleString()} ← 클릭하여 적용
+              </button>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
