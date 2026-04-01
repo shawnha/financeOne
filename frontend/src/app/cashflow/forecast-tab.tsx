@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState, useCallback, useMemo } from "react"
+import { useGlobalMonth } from "@/hooks/use-global-month"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import {
@@ -722,7 +723,9 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
   const [summary, setSummary] = useState<SummaryData | null>(null)
   const [state, setState] = useState<LoadState>("loading")
   const [error, setError] = useState("")
-  const [selectedMonth, setSelectedMonth] = useState("")
+  const [globalMonth, setGlobalMonth] = useGlobalMonth()
+  const [selectedMonth, setSelectedMonthLocal] = useState(globalMonth)
+  const setSelectedMonth = useCallback((m: string) => { setSelectedMonthLocal(m); setGlobalMonth(m) }, [setGlobalMonth])
   const [showComparison, setShowComparison] = useState(false)
   const [editingItemId, setEditingItemId] = useState<number | null>(null)
   const [editingAmount, setEditingAmount] = useState("")

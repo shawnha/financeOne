@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
+import { useGlobalMonth } from "@/hooks/use-global-month"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -147,7 +148,9 @@ export function ActualTab({ entityId }: { entityId: string | null }) {
   const [state, setState] = useState<LoadState>("loading")
   const [detailState, setDetailState] = useState<LoadState>("loading")
   const [error, setError] = useState("")
-  const [selectedMonth, setSelectedMonth] = useState("")
+  const [globalMonth, setGlobalMonth] = useGlobalMonth()
+  const [selectedMonth, setSelectedMonthLocal] = useState(globalMonth)
+  const setSelectedMonth = useCallback((m: string) => { setSelectedMonthLocal(m); setGlobalMonth(m) }, [setGlobalMonth])
 
   // Fetch summary (chart data)
   const fetchSummary = useCallback(async () => {
@@ -164,9 +167,10 @@ export function ActualTab({ entityId }: { entityId: string | null }) {
         return
       }
       setState("success")
-      // Default to latest month
+      // 글로벌 월이 available에 없으면 최근 월로 fallback
       if (!selectedMonth || !data.available_months.includes(selectedMonth)) {
-        setSelectedMonth(data.available_months[data.available_months.length - 1])
+        const fallback = data.available_months[data.available_months.length - 1]
+        setSelectedMonth(fallback)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "데이터를 불러올 수 없습니다.")

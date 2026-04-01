@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useCallback, useEffect, useRef, Suspense } from "react"
+import { useGlobalMonth } from "@/hooks/use-global-month"
 import { useSearchParams } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -1339,10 +1340,7 @@ function SlackMatchContent() {
   const [expandedId, setExpandedId] = useState<number | null>(null)
 
   // Month navigation
-  const [selectedMonth, setSelectedMonth] = useState<string>(() => {
-    const now = new Date()
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
-  })
+  const [selectedMonth, setSelectedMonth] = useGlobalMonth()
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending")

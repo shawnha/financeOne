@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useGlobalMonth } from "@/hooks/use-global-month"
 import { useSearchParams, useRouter } from "next/navigation"
 import { fetchAPI, APIError } from "@/lib/api"
 import { AccountCombobox } from "@/components/account-combobox"
@@ -223,7 +224,16 @@ export default function TransactionsPage() {
   const [errorMsg, setErrorMsg] = useState("")
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(50)
-  const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS)
+  const [globalMonth, setGlobalMonth] = useGlobalMonth()
+  const [filters, setFilters] = useState<Filters>(() => {
+    const [y, m] = globalMonth.split("-").map(Number)
+    const lastDay = new Date(y, m, 0).getDate()
+    return {
+      ...INITIAL_FILTERS,
+      dateFrom: `${y}-${String(m).padStart(2, "0")}-01`,
+      dateTo: `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
+    }
+  })
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [editingCell, setEditingCell] = useState<EditingCell>(null)
   const [detailTx, setDetailTx] = useState<Transaction | null>(null)
@@ -594,6 +604,7 @@ export default function TransactionsPage() {
                 const from = `${y}-${String(m).padStart(2, "0")}-01`
                 const to = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
                 setFilters(f => ({ ...f, dateFrom: from, dateTo: to }))
+                setGlobalMonth(v)
                 setPage(1)
               }
             }}

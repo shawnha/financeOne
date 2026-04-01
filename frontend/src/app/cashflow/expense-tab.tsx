@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
+import { useGlobalMonth } from "@/hooks/use-global-month"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -172,7 +173,9 @@ export function ExpenseTab({ entityId }: { entityId: string | null }) {
   const [summary, setSummary] = useState<SummaryData | null>(null)
   const [state, setState] = useState<LoadState>("loading")
   const [error, setError] = useState("")
-  const [selectedMonth, setSelectedMonth] = useState("")
+  const [globalMonth, setGlobalMonth] = useGlobalMonth()
+  const [selectedMonth, setSelectedMonthLocal] = useState(globalMonth)
+  const setSelectedMonth = useCallback((m: string) => { setSelectedMonthLocal(m); setGlobalMonth(m) }, [setGlobalMonth])
 
   const fetchSummary = useCallback(async () => {
     if (!entityId) return
@@ -183,7 +186,8 @@ export function ExpenseTab({ entityId }: { entityId: string | null }) {
       )
       setSummary(s)
       if (s.available_months.length && !selectedMonth) {
-        setSelectedMonth(s.available_months[s.available_months.length - 1])
+        const fallback = s.available_months[s.available_months.length - 1]
+        setSelectedMonth(fallback)
       }
     } catch { /* optional */ }
   }, [entityId]) // eslint-disable-line react-hooks/exhaustive-deps
