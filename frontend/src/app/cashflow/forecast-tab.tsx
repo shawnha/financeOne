@@ -28,7 +28,8 @@ import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { fetchAPI } from "@/lib/api"
 import { formatByEntity } from "@/lib/format"
-import { AlertCircle, RefreshCw, Plus, Download, Trash2, Pencil } from "lucide-react"
+import { AlertCircle, RefreshCw, Plus, Download, Trash2, Pencil, ChevronRight, ChevronDown, Link2, AlertTriangle } from "lucide-react"
+import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { MonthPicker } from "@/components/month-picker"
 import { AccountCombobox } from "@/components/account-combobox"
@@ -46,9 +47,20 @@ interface ForecastItem {
   note: string | null
   internal_account_id: number | null
   internal_account_name: string | null
+  internal_account_parent_id: number | null
+  parent_account_name: string | null
   actual_from_transactions: number | null
   expected_day: number | null
   payment_method: string
+}
+
+interface TreeNode {
+  item: ForecastItem
+  children: TreeNode[]
+  /** Sum of children forecast_amounts (only used when children exist) */
+  childrenSum: number
+  childrenActualSum: number | null
+  depth: number
 }
 
 interface CardTiming {
@@ -391,7 +403,7 @@ function ForecastModal({
       setType(editItem.type as "in" | "out")
       setCategory(editItem.category || "")
       setSelectedAccountId(editItem.internal_account_id ? String(editItem.internal_account_id) : "")
-      setAmount(String(editItem.forecast_amount))
+      setAmount(editItem.forecast_amount.toLocaleString())
       setRecurring(editItem.is_recurring)
       setExpectedDay(editItem.expected_day ? String(editItem.expected_day) : "")
       setPaymentMethod((editItem.payment_method as "bank" | "card") || "bank")
@@ -445,7 +457,8 @@ function ForecastModal({
         await fetchAPI(`/forecasts/${editItem.id}`, {
           method: "PUT",
           body: JSON.stringify({
-            forecast_amount: parseFloat(amount),
+            type,
+            forecast_amount: Number(amount.replace(/,/g, "")),
             is_recurring: recurring,
             expected_day: expectedDay ? Number(expectedDay) : null,
             payment_method: paymentMethod,
@@ -460,7 +473,7 @@ function ForecastModal({
             month,
             category: selectedAccount?.name ?? category,
             type,
-            forecast_amount: parseFloat(amount),
+            forecast_amount: Number(amount.replace(/,/g, "")),
             is_recurring: recurring,
             internal_account_id: selectedAccountId ? Number(selectedAccountId) : null,
             expected_day: expectedDay ? Number(expectedDay) : null,
@@ -539,16 +552,20 @@ function ForecastModal({
           <div>
             <label className="text-xs text-muted-foreground">금액</label>
             <Input
-              type="number"
+              type="text"
+              inputMode="numeric"
               placeholder="0"
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={(e) => {
+                const raw = e.target.value.replace(/[^\d]/g, "")
+                setAmount(raw ? Number(raw).toLocaleString() : "")
+              }}
               className="mt-1 font-mono"
             />
             {prevActual !== null && !isEdit && (
               <button
                 type="button"
-                onClick={() => setAmount(String(prevActual))}
+                onClick={() => setAmount(prevActual.toLocaleString())}
                 className="mt-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors"
               >
                 전월 실적: ₩{prevActual.toLocaleString()} ← 클릭하여 적용
@@ -610,6 +627,122 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
   const [editingItemId, setEditingItemId] = useState<number | null>(null)
   const [editingAmount, setEditingAmount] = useState("")
   const [editModalItem, setEditModalItem] = useState<ForecastItem | null>(null)
+  const [collapsedIds, setCollapsedIds] = useState<Set<number> | null>(null) // null = not yet initialized
+
+  const toggleCollapse = useCallback((accountId: number) => {
+    setCollapsedIds(prev => {
+      const next = new Set(prev ?? [])
+      if (next.has(accountId)) next.delete(accountId)
+      else next.add(accountId)
+      return next
+    })
+  }, [])
+
+  /** Build tree from flat forecast items — group siblings by shared parent_id */
+  const treeItems = useMemo(() => {
+    if (!data) return []
+    const items = data.items
+
+    // Group items by internal_account_parent_id
+    // Items with the same parent_id (and parent_id != null) become siblings under a virtual group
+    const groupMap = new Map<number, ForecastItem[]>()
+    const ungrouped: ForecastItem[] = []
+
+    for (const item of items) {
+      const parentId = item.internal_account_parent_id
+      if (parentId != null) {
+        const siblings = groupMap.get(parentId) || []
+        siblings.push(item)
+        groupMap.set(parentId, siblings)
+      } else {
+        ungrouped.push(item)
+      }
+    }
+
+    // Build tree: groups with 2+ siblings get a virtual parent node, singletons stay flat
+    const nodes: TreeNode[] = []
+
+    // Process grouped items first (by type order: in before out)
+    const processedIds = new Set<number>()
+    for (const [parentId, siblings] of Array.from(groupMap.entries())) {
+      // Always group items that share a parent — even single items get a group header
+      const parentName = siblings[0].parent_account_name ?? siblings[0].category
+      const type = siblings[0].type
+      const childrenSum = siblings.reduce((s: number, c: ForecastItem) => s + c.forecast_amount, 0)
+      const childActuals = siblings.map((c: ForecastItem) => c.actual_from_transactions)
+      const childrenActualSum: number | null = childActuals.some((a: number | null) => a != null)
+        ? childActuals.reduce((s: number, a: number | null) => s + (a ?? 0), 0)
+        : null
+
+      // Virtual parent item (not a real forecast — used for display only)
+      const virtualParent: ForecastItem = {
+        id: -parentId, // negative to avoid collision
+        category: parentName,
+        subcategory: null,
+        type,
+        forecast_amount: 0, // will show childrenSum
+        actual_amount: null,
+        is_recurring: false,
+        note: null,
+        internal_account_id: parentId,
+        internal_account_name: parentName,
+        internal_account_parent_id: null,
+        parent_account_name: null,
+        actual_from_transactions: null,
+        expected_day: null,
+        payment_method: "bank",
+      }
+
+      nodes.push({
+        item: virtualParent,
+        children: siblings.map((c: ForecastItem) => ({
+          item: c,
+          children: [],
+          childrenSum: 0,
+          childrenActualSum: null,
+          depth: 1,
+        })),
+        childrenSum,
+        childrenActualSum,
+        depth: 0,
+      })
+      siblings.forEach((s: ForecastItem) => { if (s.id) processedIds.add(s.id) })
+    }
+
+    // Add ungrouped items
+    for (const item of ungrouped) {
+      if (!processedIds.has(item.id)) {
+        nodes.push({
+          item,
+          children: [],
+          childrenSum: 0,
+          childrenActualSum: null,
+          depth: 0,
+        })
+      }
+    }
+
+    // Sort: type "in" first, then "out"
+    nodes.sort((a, b) => {
+      if (a.item.type !== b.item.type) return a.item.type === "in" ? -1 : 1
+      return 0
+    })
+
+    return nodes
+  }, [data])
+
+  // Auto-collapse groups on initial load
+  useEffect(() => {
+    if (collapsedIds === null && treeItems.length > 0) {
+      const ids = new Set<number>()
+      for (const node of treeItems) {
+        if (node.children.length > 0 && node.item.internal_account_id != null) {
+          ids.add(node.item.internal_account_id)
+        }
+      }
+      setCollapsedIds(ids)
+    }
+  }, [treeItems, collapsedIds])
 
   // Fetch summary for month navigation
   const fetchSummary = useCallback(async () => {
@@ -674,6 +807,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
 
       setData(d)
       setSchedule(s)
+      setCollapsedIds(null)
       setState("success")
     } catch (err) {
       setError(err instanceof Error ? err.message : "데이터를 불러올 수 없습니다.")
@@ -820,7 +954,32 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
       {/* Forecast items list (no chart -- table only per mockup) */}
       <Card className="overflow-hidden rounded-2xl">
         <div className="px-4 py-3 flex items-center justify-between border-b border-border">
-          <h3 className="text-sm font-semibold">{m}월 예상 항목</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold">{m}월 예상 항목</h3>
+            {data.items.filter(i => !i.internal_account_id).length > 0 && (
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await fetchAPI<{ matched: number; unmatched: string[] }>(
+                      `/forecasts/backfill-accounts?entity_id=${entityId}&year=${y}&month=${m}`,
+                      { method: "POST" },
+                    )
+                    if (res.matched > 0) {
+                      toast.success(`${res.matched}건 내부계정 자동 연결 완료`)
+                      fetchForecast()
+                    }
+                    if (res.unmatched.length > 0) {
+                      toast.info(`미연결: ${res.unmatched.join(", ")} — 내부계정을 먼저 추가해주세요`)
+                    }
+                  } catch { toast.error("자동 연결에 실패했습니다") }
+                }}
+                className="flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-1 rounded-md transition-colors"
+              >
+                <Link2 className="h-3 w-3" />
+                미연결 {data.items.filter(i => !i.internal_account_id).length}건 자동 연결
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowComparison(!showComparison)}
@@ -862,134 +1021,249 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                 <td></td>
               </tr>
 
-              {/* Forecast items */}
+              {/* Forecast items (tree view) */}
               {(() => {
                 let runningBalance = data.opening_balance
                 let runningActual = data.opening_balance
-                return data.items.map((item) => {
-                const actual = item.actual_from_transactions
-                const diff = actual != null ? actual - item.forecast_amount : null
-                const diffRatio = item.forecast_amount !== 0 && actual != null
-                  ? (actual / item.forecast_amount) * 100
-                  : null
+                const rows: React.ReactNode[] = []
 
-                // 누적 잔고 계산
-                if (item.type === "in") {
-                  runningBalance += item.forecast_amount
-                  if (actual != null) runningActual += actual
-                } else {
-                  runningBalance -= item.forecast_amount
-                  if (actual != null) runningActual -= actual
-                }
-                const itemBalance = runningBalance
-                const itemActualBalance = actual != null ? runningActual : null
+                const renderItemRow = (
+                  item: ForecastItem,
+                  depth: number,
+                  hasChildren: boolean,
+                  isCollapsed: boolean,
+                  displayAmount: number,
+                  displayActual: number | null,
+                ) => {
+                  const actual = displayActual ?? item.actual_from_transactions
+                  const effectiveAmount = hasChildren && isCollapsed ? displayAmount : item.forecast_amount
+                  const effectiveActual = hasChildren && isCollapsed ? displayActual : item.actual_from_transactions
 
-                return (
-                  <tr key={item.id} className="border-t border-border hover:bg-white/[0.02] transition-colors group">
-                    <td className="px-4 py-2.5">
-                      <Badge variant="outline" className={cn(
-                        "text-[10px] font-semibold px-2 py-0.5",
-                        item.type === "in" ? "bg-green-500/12 text-green-400" : "bg-red-500/12 text-red-400",
-                      )}>
-                        {item.type === "in" ? "입금" : "출금"}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-2.5">
-                      {item.internal_account_name ?? item.category}
-                      {item.subcategory && <span className="text-muted-foreground ml-1">({item.subcategory})</span>}
-                      {item.is_recurring && <span className="text-xs text-muted-foreground ml-2">반복</span>}
-                      {item.expected_day && <span className="text-[10px] text-muted-foreground/60 ml-1.5">{item.expected_day}일</span>}
-                      {item.payment_method === "card" && <span className="text-[10px] text-purple-400/60 ml-1">카드</span>}
-                    </td>
-                    <td className={cn(
-                      "px-4 py-2.5 text-right font-mono tabular-nums text-xs",
-                      item.type === "in" ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]",
-                    )}>
-                      {editingItemId === item.id ? (
-                        <input
-                          type="text"
-                          autoFocus
-                          className="w-28 text-right bg-transparent border-b border-foreground/30 outline-none font-mono text-xs py-0.5"
-                          value={editingAmount}
-                          onChange={(e) => {
-                            const raw = e.target.value.replace(/[^\d]/g, "")
-                            setEditingAmount(raw ? Number(raw).toLocaleString() : "")
-                          }}
-                          onBlur={async () => {
-                            const amt = Number(editingAmount.replace(/,/g, ""))
-                            if (!isNaN(amt) && amt !== item.forecast_amount) {
+                  // 누적 잔고 계산
+                  // virtual parent (id < 0): collapsed → childrenSum, expanded → skip (children count)
+                  // real item: always counts
+                  const isVirtualParent = item.id < 0
+                  const balanceAmount = (hasChildren && isCollapsed)
+                    ? displayAmount
+                    : (isVirtualParent ? 0 : item.forecast_amount) // virtual expanded parent → 0
+                  const balanceActual = (hasChildren && isCollapsed)
+                    ? displayActual
+                    : (isVirtualParent ? null : item.actual_from_transactions)
+                  if (item.type === "in") {
+                    runningBalance += balanceAmount
+                    if (balanceActual != null) runningActual += balanceActual
+                  } else {
+                    runningBalance -= balanceAmount
+                    if (balanceActual != null) runningActual -= balanceActual
+                  }
+                  const itemBalance = runningBalance
+                  const itemActualBalance = balanceActual != null ? runningActual : null
+
+                  return (
+                    <tr
+                      key={item.id}
+                      className={cn(
+                        "border-t border-border hover:bg-white/[0.02] transition-colors group",
+                        depth > 0 && "bg-muted/[0.03]",
+                        isVirtualParent && "bg-white/[0.01] cursor-pointer",
+                      )}
+                      onClick={isVirtualParent && item.internal_account_id ? () => toggleCollapse(item.internal_account_id!) : undefined}
+                    >
+                      <td className="px-4 py-2.5">
+                        {depth === 0 && !isVirtualParent && (
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px] font-semibold px-2 py-0.5 cursor-pointer hover:opacity-80 transition-opacity",
+                              item.type === "in" ? "bg-green-500/12 text-green-400" : "bg-red-500/12 text-red-400",
+                            )}
+                            onClick={async () => {
+                              const newType = item.type === "in" ? "out" : "in"
                               try {
                                 await fetchAPI(`/forecasts/${item.id}`, {
                                   method: "PUT",
-                                  body: JSON.stringify({ forecast_amount: amt }),
+                                  body: JSON.stringify({ type: newType }),
                                 })
                                 fetchForecast()
                               } catch { /* error */ }
-                            }
-                            setEditingItemId(null)
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") (e.target as HTMLInputElement).blur()
-                            if (e.key === "Escape") setEditingItemId(null)
-                          }}
-                        />
-                      ) : (
-                        <span
-                          className="cursor-pointer hover:underline decoration-dotted"
-                          onClick={() => {
-                            setEditingItemId(item.id)
-                            setEditingAmount(item.forecast_amount.toLocaleString())
-                          }}
-                          title="클릭하여 수정"
-                        >
-                          {item.type === "in" ? "+" : "-"}{formatByEntity(item.forecast_amount, entityId)}
-                        </span>
-                      )}
-                    </td>
-                    {showComparison && (
-                      <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs">
-                        {actual != null
-                          ? <span className={item.type === "in" ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]"}>
-                              {item.type === "in" ? "+" : "-"}{formatByEntity(actual, entityId)}
+                            }}
+                            title="클릭하여 입금/출금 전환"
+                          >
+                            {item.type === "in" ? "입금" : "출금"}
+                          </Badge>
+                        )}
+                        {isVirtualParent && (
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px] font-semibold px-2 py-0.5",
+                              item.type === "in" ? "bg-green-500/12 text-green-400" : "bg-red-500/12 text-red-400",
+                            )}
+                          >
+                            {item.type === "in" ? "입금" : "출금"}
+                          </Badge>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center" style={depth > 0 ? { paddingLeft: `${depth * 20}px` } : undefined}>
+                          {hasChildren && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); item.internal_account_id && toggleCollapse(item.internal_account_id) }}
+                              className="mr-1.5 p-1 -ml-1 text-muted-foreground hover:text-foreground transition-colors rounded hover:bg-white/[0.05]"
+                            >
+                              {isCollapsed
+                                ? <ChevronRight className="h-4 w-4" />
+                                : <ChevronDown className="h-4 w-4" />}
+                            </button>
+                          )}
+                          {depth > 0 && <span className="text-muted-foreground/30 mr-1.5">└</span>}
+                          <span className={cn(hasChildren && "font-medium")}>
+                            {item.internal_account_name ?? item.category}
+                          </span>
+                          {!isVirtualParent && !item.internal_account_id && (
+                            <span className="ml-1.5 text-amber-400" title="내부계정 미연결 — 자동 연결 버튼을 눌러주세요">
+                              <AlertTriangle className="h-3 w-3 inline" />
                             </span>
-                          : <span className="text-muted-foreground">--</span>}
+                          )}
+                          {item.subcategory && <span className="text-muted-foreground ml-1">({item.subcategory})</span>}
+                          {item.is_recurring && <span className="text-xs text-muted-foreground ml-2">반복</span>}
+                          {item.expected_day && <span className="text-[10px] text-muted-foreground/60 ml-1.5">{item.expected_day}일</span>}
+                          {item.payment_method === "card" && <span className="text-[10px] text-purple-400/60 ml-1">카드</span>}
+                          {hasChildren && isCollapsed && (
+                            <span className="text-[10px] text-muted-foreground ml-2">({displayAmount === item.forecast_amount ? "" : "하위 합산"})</span>
+                          )}
+                        </div>
                       </td>
-                    )}
-                    <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-[hsl(var(--warning))]">
-                      {formatByEntity(itemBalance, entityId)}
-                    </td>
-                    {showComparison && (
-                      <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-[hsl(var(--profit))]">
-                        {itemActualBalance != null ? formatByEntity(itemActualBalance, entityId) : "--"}
+                      <td className={cn(
+                        "px-4 py-2.5 text-right font-mono tabular-nums text-xs",
+                        item.type === "in" ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]",
+                      )}>
+                        {(hasChildren && isCollapsed) || isVirtualParent ? (
+                          <span className={cn(isVirtualParent && !isCollapsed && "text-muted-foreground")}>
+                            {item.type === "in" ? "+" : "-"}{formatByEntity(displayAmount, entityId)}
+                          </span>
+                        ) : editingItemId === item.id ? (
+                          <input
+                            type="text"
+                            autoFocus
+                            className="w-28 text-right bg-transparent border-b border-foreground/30 outline-none font-mono text-xs py-0.5"
+                            value={editingAmount}
+                            onChange={(e) => {
+                              const raw = e.target.value.replace(/[^\d]/g, "")
+                              setEditingAmount(raw ? Number(raw).toLocaleString() : "")
+                            }}
+                            onBlur={async () => {
+                              const amt = Number(editingAmount.replace(/,/g, ""))
+                              if (!isNaN(amt) && amt !== item.forecast_amount) {
+                                try {
+                                  await fetchAPI(`/forecasts/${item.id}`, {
+                                    method: "PUT",
+                                    body: JSON.stringify({ forecast_amount: amt }),
+                                  })
+                                  fetchForecast()
+                                } catch { /* error */ }
+                              }
+                              setEditingItemId(null)
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") (e.target as HTMLInputElement).blur()
+                              if (e.key === "Escape") setEditingItemId(null)
+                            }}
+                          />
+                        ) : (
+                          <span
+                            className="cursor-pointer hover:underline decoration-dotted"
+                            onClick={() => {
+                              setEditingItemId(item.id)
+                              setEditingAmount(item.forecast_amount.toLocaleString())
+                            }}
+                            title="클릭하여 수정"
+                          >
+                            {item.type === "in" ? "+" : "-"}{formatByEntity(item.forecast_amount, entityId)}
+                          </span>
+                        )}
                       </td>
-                    )}
-                    <td className="px-2 py-2.5">
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => setEditModalItem(item)}
-                          className="text-muted-foreground hover:text-foreground"
-                          title="수정"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          onClick={async () => {
-                            if (!confirm(`"${item.internal_account_name ?? item.category}" 항목을 삭제하시겠습니까?`)) return
-                            try {
-                              await fetchAPI(`/forecasts/${item.id}`, { method: "DELETE" })
-                              fetchForecast()
-                            } catch { /* toast handled by fetchAPI */ }
-                          }}
-                          className="text-muted-foreground hover:text-destructive"
-                          title="삭제"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })
+                      {showComparison && (
+                        <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs">
+                          {(hasChildren && isCollapsed ? displayActual : item.actual_from_transactions) != null
+                            ? <span className={item.type === "in" ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]"}>
+                                {item.type === "in" ? "+" : "-"}{formatByEntity((hasChildren && isCollapsed ? displayActual : item.actual_from_transactions)!, entityId)}
+                              </span>
+                            : <span className="text-muted-foreground">--</span>}
+                        </td>
+                      )}
+                      <td className={cn(
+                        "px-4 py-2.5 text-right font-mono tabular-nums text-xs",
+                        depth > 0 ? "text-muted-foreground/60" : "text-[hsl(var(--warning))]",
+                      )}>
+                        {formatByEntity(itemBalance, entityId)}
+                      </td>
+                      {showComparison && (
+                        <td className={cn(
+                          "px-4 py-2.5 text-right font-mono tabular-nums text-xs",
+                          depth > 0 ? "text-muted-foreground/60" : "text-[hsl(var(--profit))]",
+                        )}>
+                          {itemActualBalance != null ? formatByEntity(itemActualBalance, entityId) : "--"}
+                        </td>
+                      )}
+                      <td className="px-2 py-2.5">
+                        {!isVirtualParent && (
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => setEditModalItem(item)}
+                              className="text-muted-foreground hover:text-foreground"
+                              title="수정"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (!confirm(`"${item.internal_account_name ?? item.category}" 항목을 삭제하시겠습니까?`)) return
+                                try {
+                                  await fetchAPI(`/forecasts/${item.id}`, { method: "DELETE" })
+                                  fetchForecast()
+                                } catch { /* toast handled by fetchAPI */ }
+                              }}
+                              className="text-muted-foreground hover:text-destructive"
+                              title="삭제"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                }
+
+                for (const node of treeItems) {
+                  const hasChildren = node.children.length > 0
+                  const isCollapsed = hasChildren && node.item.internal_account_id != null && (collapsedIds ?? new Set()).has(node.item.internal_account_id)
+                  const displayAmount = hasChildren
+                    ? node.item.forecast_amount + node.childrenSum
+                    : node.item.forecast_amount
+                  const displayActual = hasChildren
+                    ? (node.childrenActualSum != null
+                        ? (node.item.actual_from_transactions ?? 0) + node.childrenActualSum
+                        : node.item.actual_from_transactions)
+                    : node.item.actual_from_transactions
+
+                  if (hasChildren && isCollapsed) {
+                    // Collapsed: show parent with summed amounts, skip children
+                    rows.push(renderItemRow(node.item, 0, true, true, displayAmount, displayActual))
+                  } else {
+                    // Parent row
+                    rows.push(renderItemRow(node.item, 0, hasChildren, false, displayAmount, displayActual))
+                    // Children
+                    if (hasChildren) {
+                      for (const child of node.children) {
+                        // Children don't affect running balance (parent already counted)
+                        rows.push(renderItemRow(child.item, 1, false, false, child.item.forecast_amount, child.item.actual_from_transactions))
+                      }
+                    }
+                  }
+                }
+                return rows
               })()}
 
               {/* Timing adjustment row */}
@@ -1047,7 +1321,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
         <p className="ml-4">+ {m}월 예상 입금</p>
         <p className="ml-4">- {m}월 예상 출금</p>
         <p className="ml-4">- {m}월 예상 카드 사용액</p>
-        <p className="ml-4 text-amber-400">+ ({m - 1 || 12}월 카드 사용액 - {m}월 예상 카드 사용액) &larr; 시차 보정</p>
+        <p className="ml-4 text-amber-400">+ ({m}월 예상 카드 사용액 - {m - 1 || 12}월 카드 사용액) &larr; 시차 보정</p>
       </Card>
 
       {/* Comparison boxes */}

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { fetchAPI, APIError } from "@/lib/api"
 import { AccountCombobox } from "@/components/account-combobox"
+import { SearchableSelect } from "@/components/searchable-select"
 import { formatKRW, formatByEntity } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { EntityTabs } from "@/components/entity-tabs"
@@ -24,7 +25,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
 import {
-  Search, Download, ChevronLeft, ChevronRight, X, AlertTriangle, Upload, RotateCw, Wand2,
+  Search, Download, ChevronLeft, ChevronRight, X, AlertTriangle, Upload, RotateCw, Wand2, MessageSquare,
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -87,6 +88,21 @@ interface Member {
   id: number
   name: string
   role: string
+}
+
+interface SlackMatchInfo {
+  slack_message_id: number
+  message_text: string | null
+  message_date: string | null
+  message_type: string | null
+  sender_name: string | null
+  matched_at: string | null
+  item_index: number | null
+  item_description: string | null
+  match_type: "auto" | "manual"
+  match_confidence: number | null
+  ai_reasoning: string | null
+  note: string | null
 }
 
 interface Filters {
@@ -164,6 +180,21 @@ function sourceLabel(sourceType: string | null) {
   )
 }
 
+function slackTypeBadge(type: string | null) {
+  if (!type) return null
+  const typeMap: Record<string, { label: string; className: string }> = {
+    card_payment: { label: "법카결제", className: "bg-purple-500/20 text-purple-400 border-purple-500/30" },
+    deposit_request: { label: "입금요청", className: "bg-blue-500/20 text-blue-400 border-blue-500/30" },
+    tax_invoice: { label: "세금계산서", className: "bg-teal-500/20 text-teal-400 border-teal-500/30" },
+  }
+  const info = typeMap[type] || { label: type, className: "bg-gray-500/20 text-gray-400 border-gray-500/30" }
+  return (
+    <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0", info.className)}>
+      {info.label}
+    </Badge>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -197,6 +228,8 @@ export default function TransactionsPage() {
   const [bulkMapping, setBulkMapping] = useState(false)
   const [bulkMapOpen, setBulkMapOpen] = useState(false)
   const [bulkMapAccountId, setBulkMapAccountId] = useState("")
+  const [slackMatch, setSlackMatch] = useState<SlackMatchInfo | null>(null)
+  const [slackMatchLoading, setSlackMatchLoading] = useState(false)
 
   // Debounce search
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -387,6 +420,13 @@ export default function TransactionsPage() {
       standard_account_id: tx.standard_account_id ? String(tx.standard_account_id) : "",
       note: tx.note || "",
     })
+    // Fetch slack match info
+    setSlackMatch(null)
+    setSlackMatchLoading(true)
+    fetchAPI<SlackMatchInfo | null>(`/transactions/${tx.id}/slack-match`)
+      .then(data => setSlackMatch(data))
+      .catch(() => setSlackMatch(null))
+      .finally(() => setSlackMatchLoading(false))
   }, [])
 
   const saveDetail = useCallback(async () => {
@@ -430,7 +470,7 @@ export default function TransactionsPage() {
     if (!entityId) return
     setAutoMapping(true)
     try {
-      const result = await fetchAPI(`/transactions/auto-map?entity_id=${entityId}`, { method: "POST" })
+      const result = await fetchAPI<{ mapped: number; total_unmapped: number }>(`/transactions/auto-map?entity_id=${entityId}`, { method: "POST" })
       if (result.mapped > 0) {
         toast.success(`${result.mapped}건 자동 매핑 완료 (미분류 ${result.total_unmapped}건 중)`)
         fetchTransactions(true)
@@ -480,7 +520,7 @@ export default function TransactionsPage() {
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="내역, 거래처, 금액 검색..."
+              placeholder="내역, 거래처, 내부계정, 날짜, 금액 검색..."
               value={filters.search}
               onChange={e => updateFilter("search", e.target.value)}
               className="pl-8 h-9 w-56 text-sm"
@@ -505,43 +545,38 @@ export default function TransactionsPage() {
           />
 
           {/* Member */}
-          <Select value={filters.memberId} onValueChange={v => updateFilter("memberId", v === "__all__" ? "" : v)}>
-            <SelectTrigger className="h-9 w-32 text-sm">
-              <SelectValue placeholder="회원" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">전체</SelectItem>
-              {members.map(m => (
-                <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <SearchableSelect
+            value={filters.memberId}
+            onChange={v => updateFilter("memberId", v)}
+            options={members.map(m => ({ value: String(m.id), label: m.name }))}
+            placeholder="회원"
+            searchPlaceholder="회원 검색..."
+            className="w-32"
+          />
 
           {/* Standard Account */}
-          <Select value={filters.standardAccountId} onValueChange={v => updateFilter("standardAccountId", v === "__all__" ? "" : v)}>
-            <SelectTrigger className="h-9 w-36 text-sm">
-              <SelectValue placeholder="표준 계정" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">전체</SelectItem>
-              {standardAccounts.map(a => (
-                <SelectItem key={a.id} value={String(a.id)}>{a.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <SearchableSelect
+            value={filters.standardAccountId}
+            onChange={v => updateFilter("standardAccountId", v)}
+            options={standardAccounts.map(a => ({ value: String(a.id), label: a.name }))}
+            placeholder="표준 계정"
+            searchPlaceholder="표준 계정 검색..."
+            className="w-36"
+          />
 
           {/* Source Type */}
-          <Select value={filters.sourceType} onValueChange={v => updateFilter("sourceType", v === "__all__" ? "" : v)}>
-            <SelectTrigger className="h-9 w-32 text-sm">
-              <SelectValue placeholder="출처" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">전체</SelectItem>
-              <SelectItem value="lotte_card">롯데카드</SelectItem>
-              <SelectItem value="woori_card">우리카드</SelectItem>
-              <SelectItem value="woori_bank">우리은행</SelectItem>
-            </SelectContent>
-          </Select>
+          <SearchableSelect
+            value={filters.sourceType}
+            onChange={v => updateFilter("sourceType", v)}
+            options={[
+              { value: "lotte_card", label: "롯데카드" },
+              { value: "woori_card", label: "우리카드" },
+              { value: "woori_bank", label: "우리은행" },
+            ]}
+            placeholder="출처"
+            searchPlaceholder="출처 검색..."
+            className="w-32"
+          />
 
           {/* Unclassified */}
           <label className="flex items-center gap-1.5 text-sm cursor-pointer select-none">
@@ -862,6 +897,40 @@ export default function TransactionsPage() {
                   </div>
                 )}
               </div>
+
+              {/* Slack match info */}
+              {!slackMatchLoading && slackMatch && (
+                <div className="rounded-lg border border-indigo-500/20 bg-indigo-500/5 p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <MessageSquare className="h-3.5 w-3.5 text-indigo-400" />
+                    <span className="text-xs font-medium text-indigo-400">Slack 매칭</span>
+                    {slackTypeBadge(slackMatch.message_type)}
+                    <Badge variant="outline" className={cn(
+                      "text-[10px] px-1.5 py-0 ml-auto",
+                      slackMatch.match_type === "auto"
+                        ? "bg-green-500/15 text-green-400 border-green-500/30"
+                        : "bg-orange-500/15 text-orange-400 border-orange-500/30"
+                    )}>
+                      {slackMatch.match_type === "auto" ? "자동" : "수동"}
+                    </Badge>
+                  </div>
+                  {slackMatch.message_text && (
+                    <p className="text-xs text-muted-foreground line-clamp-2">{slackMatch.message_text}</p>
+                  )}
+                  <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                    {slackMatch.message_date && <span>{slackMatch.message_date}</span>}
+                    {slackMatch.sender_name && <span>{slackMatch.sender_name}</span>}
+                    {slackMatch.item_description && (
+                      <span className="truncate max-w-[150px]" title={slackMatch.item_description}>
+                        {slackMatch.item_description}
+                      </span>
+                    )}
+                    {slackMatch.match_confidence != null && (
+                      <span className="ml-auto font-mono">{Math.round(slackMatch.match_confidence * 100)}%</span>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Editable fields */}
               <div className="space-y-3 pt-2 border-t">

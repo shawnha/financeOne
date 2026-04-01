@@ -101,12 +101,12 @@ def calc_card_timing_adjustment(
     prev_month_card: Decimal,
     curr_month_card: Decimal,
 ) -> Decimal:
-    """카드 시차 보정 = 전월 카드 사용(확정) - 당월 카드 사용(예상).
+    """카드 시차 보정 = 당월 카드 예상 - 전월 카드 사용(확정).
 
-    양수 → 전월 사용이 더 많아 카드대금 결제 부담 증가.
-    음수 → 당월 사용이 더 많아 카드대금 결제 부담 감소.
+    음수 → 전월 사용이 더 많아 카드대금 결제 부담 증가 (통장에서 더 빠짐).
+    양수 → 당월 사용이 더 많아 카드대금 결제 부담 감소 (통장에서 덜 빠짐).
     """
-    return prev_month_card - curr_month_card
+    return curr_month_card - prev_month_card
 
 
 def calc_forecast_closing(
@@ -438,8 +438,12 @@ def get_forecast_cashflow(
     cur.execute(
         """
         SELECT f.id, f.category, f.subcategory, f.type, f.forecast_amount, f.actual_amount,
-               f.is_recurring, f.note, f.internal_account_id, f.expected_day, f.payment_method
+               f.is_recurring, f.note, f.internal_account_id, f.expected_day, f.payment_method,
+               ia.name AS internal_account_name, ia.parent_id AS internal_account_parent_id,
+               parent_ia.name AS parent_account_name
         FROM forecasts f
+        LEFT JOIN internal_accounts ia ON f.internal_account_id = ia.id
+        LEFT JOIN internal_accounts parent_ia ON ia.parent_id = parent_ia.id
         WHERE f.entity_id = %s AND f.year = %s AND f.month = %s
         ORDER BY f.type, f.category
         """,
@@ -600,6 +604,9 @@ def get_forecast_cashflow(
                 "is_recurring": i["is_recurring"],
                 "note": i["note"],
                 "internal_account_id": i.get("internal_account_id"),
+                "internal_account_name": i.get("internal_account_name"),
+                "internal_account_parent_id": i.get("internal_account_parent_id"),
+                "parent_account_name": i.get("parent_account_name"),
                 "expected_day": i.get("expected_day"),
                 "payment_method": i.get("payment_method", "bank"),
                 "actual_from_transactions": actual_by_account.get(

@@ -197,10 +197,10 @@ function getMessageStatus(msg: SlackMessage): "confirmed" | "ignored" | "pending
 }
 
 function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString("ko-KR", {
-    month: "2-digit",
-    day: "2-digit",
-  })
+  const d = new Date(dateStr)
+  const m = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${m}.${day}.`
 }
 
 function getTypeBadge(type: string | null) {
@@ -685,7 +685,7 @@ function CandidatesList({
   }
 
   return (
-    <div className="space-y-1.5" role="listbox" aria-label="매칭 후보 목록">
+    <div className="space-y-1.5 max-h-[320px] overflow-y-auto scrollbar-thin" role="listbox" aria-label="매칭 후보 목록">
       {candidates.map((candidate) => {
         const isSelected = selectedId === candidate.id
         return (
@@ -706,7 +706,7 @@ function CandidatesList({
             <div className="flex items-center gap-3">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 text-sm">
-                  <span className="text-muted-foreground">
+                  <span className="text-muted-foreground whitespace-nowrap shrink-0">
                     {formatDate(candidate.date)}
                   </span>
                   {candidate.member_name && (

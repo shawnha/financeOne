@@ -72,26 +72,29 @@ def list_transactions(
         params.append(internal_account_id)
     if unclassified:
         where.append("t.is_confirmed = false AND t.standard_account_id IS NULL")
+    need_join_for_search = False
     if search:
-        # 숫자만이면 금액 검색 (±3%), 아니면 텍스트 검색, 혼합이면 둘 다
+        # 숫자만이면 금액 검색 (±3%), 아니면 텍스트 검색 (내역/거래처/메모/내부계정명/날짜)
         clean = search.replace(",", "").strip()
+        need_join_for_search = True
         try:
             amount_val = float(clean)
             lo = round(amount_val * 0.97, 2)
             hi = round(amount_val * 1.03, 2)
-            where.append("(t.amount BETWEEN %s AND %s OR t.description ILIKE %s OR t.counterparty ILIKE %s OR t.note ILIKE %s)")
+            where.append("(t.amount BETWEEN %s AND %s OR t.description ILIKE %s OR t.counterparty ILIKE %s OR t.note ILIKE %s OR ia.name ILIKE %s OR CAST(t.date AS TEXT) ILIKE %s)")
             q = f"%{search}%"
-            params.extend([lo, hi, q, q, q])
+            params.extend([lo, hi, q, q, q, q, q])
         except ValueError:
-            where.append("(t.description ILIKE %s OR t.counterparty ILIKE %s OR t.note ILIKE %s)")
+            where.append("(t.description ILIKE %s OR t.counterparty ILIKE %s OR t.note ILIKE %s OR ia.name ILIKE %s OR CAST(t.date AS TEXT) ILIKE %s)")
             q = f"%{search}%"
-            params.extend([q, q, q])
+            params.extend([q, q, q, q, q])
 
     where_clause = " AND ".join(where)
     offset = (page - 1) * per_page
 
     # Count
-    cur.execute(f"SELECT COUNT(*) FROM transactions t WHERE {where_clause}", params)
+    count_from = "transactions t LEFT JOIN internal_accounts ia ON t.internal_account_id = ia.id" if need_join_for_search else "transactions t"
+    cur.execute(f"SELECT COUNT(*) FROM {count_from} WHERE {where_clause}", params)
     total = cur.fetchone()[0]
 
     # Data with JOINs
@@ -347,6 +350,58 @@ def bulk_confirm(body: BulkConfirm, conn: PgConnection = Depends(get_db)):
     except Exception:
         conn.rollback()
         raise
+
+
+@router.get("/{tx_id}/slack-match")
+def get_slack_match(
+    tx_id: int,
+    conn: PgConnection = Depends(get_db),
+):
+    """거래에 연결된 Slack 매칭 정보 조회"""
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT
+            tsm.slack_message_id,
+            sm.message_text,
+            sm.message_date,
+            sm.message_type,
+            sm.sender_name,
+            tsm.created_at AS matched_at,
+            tsm.item_index,
+            tsm.item_description,
+            tsm.is_manual,
+            tsm.match_confidence,
+            tsm.ai_reasoning,
+            tsm.note
+        FROM transaction_slack_match tsm
+        JOIN slack_messages sm ON sm.id = tsm.slack_message_id
+        WHERE tsm.transaction_id = %s
+        ORDER BY tsm.created_at DESC
+        LIMIT 1
+        """,
+        [tx_id],
+    )
+    row = cur.fetchone()
+    cur.close()
+
+    if not row:
+        return None
+
+    return {
+        "slack_message_id": row[0],
+        "message_text": row[1],
+        "message_date": str(row[2]) if row[2] else None,
+        "message_type": row[3],
+        "sender_name": row[4],
+        "matched_at": str(row[5]) if row[5] else None,
+        "item_index": row[6],
+        "item_description": row[7],
+        "match_type": "manual" if row[8] else "auto",
+        "match_confidence": float(row[9]) if row[9] is not None else None,
+        "ai_reasoning": row[10],
+        "note": row[11],
+    }
 
 
 @router.post("/remap")

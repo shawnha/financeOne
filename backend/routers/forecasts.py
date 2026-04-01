@@ -30,6 +30,7 @@ class ForecastCreate(BaseModel):
 
 
 class ForecastUpdate(BaseModel):
+    type: Optional[str] = Field(None, pattern="^(in|out)$")
     forecast_amount: Optional[float] = None
     actual_amount: Optional[float] = None
     is_recurring: Optional[bool] = None
@@ -133,6 +134,9 @@ def update_forecast(
     # Build dynamic SET clause
     updates = []
     params = []
+    if body.type is not None:
+        updates.append("type = %s")
+        params.append(body.type)
     if body.forecast_amount is not None:
         updates.append("forecast_amount = %s")
         params.append(body.forecast_amount)
@@ -192,6 +196,75 @@ def delete_forecast(
     return {"id": forecast_id, "status": "deleted"}
 
 
+@router.post("/backfill-accounts")
+def backfill_forecast_accounts(
+    entity_id: int = Query(...),
+    year: int = Query(...),
+    month: int = Query(...),
+    conn: PgConnection = Depends(get_db),
+):
+    """내부계정 미연결 예상항목을 이름 매칭으로 자동 연결."""
+    cur = conn.cursor()
+
+    # 1. 미연결 항목 조회
+    cur.execute(
+        """
+        SELECT id, category FROM forecasts
+        WHERE entity_id = %s AND year = %s AND month = %s
+          AND internal_account_id IS NULL
+        """,
+        [entity_id, year, month],
+    )
+    unlinked = fetch_all(cur)
+
+    if not unlinked:
+        cur.close()
+        return {"matched": 0, "unmatched": []}
+
+    # 2. 해당 법인의 내부계정 전체 조회
+    cur.execute(
+        """
+        SELECT id, name, parent_id
+        FROM internal_accounts
+        WHERE entity_id = %s AND is_active = true
+        """,
+        [entity_id],
+    )
+    accounts = fetch_all(cur)
+
+    # 부모 계정 ID 집합 (리프 계정 우선을 위해)
+    parent_ids = {a["parent_id"] for a in accounts if a["parent_id"]}
+    # 이름 → 계정 매핑 (리프 계정 우선)
+    name_map: dict[str, dict] = {}
+    for a in accounts:
+        key = a["name"].strip()
+        if key not in name_map:
+            name_map[key] = a
+        elif a["id"] not in parent_ids and name_map[key]["id"] in parent_ids:
+            # 기존이 부모고 새 것이 리프면 교체
+            name_map[key] = a
+
+    # 3. 매칭 및 업데이트
+    matched = 0
+    unmatched_names = []
+    for item in unlinked:
+        cat = item["category"].strip()
+        account = name_map.get(cat)
+        if account:
+            cur.execute(
+                "UPDATE forecasts SET internal_account_id = %s, updated_at = NOW() WHERE id = %s",
+                [account["id"], item["id"]],
+            )
+            matched += 1
+        else:
+            unmatched_names.append(cat)
+
+    conn.commit()
+    cur.close()
+
+    return {"matched": matched, "unmatched": unmatched_names}
+
+
 @router.post("/copy-recurring", status_code=201)
 def copy_recurring_forecasts(
     entity_id: int = Query(...),
@@ -238,6 +311,93 @@ def copy_recurring_forecasts(
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/backfill-accounts")
+def backfill_accounts(
+    entity_id: int = Query(...),
+    year: int = Query(...),
+    month: int = Query(...),
+    conn: PgConnection = Depends(get_db),
+):
+    """internal_account_id가 NULL인 forecast 항목에 대해 category 이름으로 내부계정 매칭."""
+    cur = conn.cursor()
+
+    # 1) Find forecasts with NULL internal_account_id
+    cur.execute(
+        """
+        SELECT id, category
+        FROM forecasts
+        WHERE entity_id = %s AND year = %s AND month = %s
+          AND internal_account_id IS NULL
+        """,
+        [entity_id, year, month],
+    )
+    null_forecasts = fetch_all(cur)
+
+    if not null_forecasts:
+        cur.close()
+        return {"matched": 0, "unmatched": []}
+
+    # 2) Load all internal_accounts for the entity, marking which are leaves
+    cur.execute(
+        """
+        SELECT ia.id, ia.name, ia.parent_id,
+               NOT EXISTS (
+                   SELECT 1 FROM internal_accounts child
+                   WHERE child.parent_id = ia.id
+               ) AS is_leaf
+        FROM internal_accounts ia
+        WHERE ia.entity_id = %s
+        """,
+        [entity_id],
+    )
+    accounts = fetch_all(cur)
+
+    # Build lookup: name -> list of matching accounts
+    from collections import defaultdict
+    name_to_accounts: dict[str, list[dict]] = defaultdict(list)
+    for acc in accounts:
+        name_to_accounts[acc["name"]].append(acc)
+
+    matched = 0
+    unmatched = []
+
+    for fc in null_forecasts:
+        category = fc["category"]
+        candidates = name_to_accounts.get(category, [])
+
+        if not candidates:
+            unmatched.append(category)
+            continue
+
+        if len(candidates) == 1:
+            chosen = candidates[0]
+        else:
+            # Prefer leaf accounts (not parents of other accounts)
+            leaves = [c for c in candidates if c["is_leaf"]]
+            if len(leaves) == 1:
+                chosen = leaves[0]
+            elif leaves:
+                # Multiple leaves — pick the one whose parent_id is set
+                # (more specific, under a category group)
+                with_parent = [c for c in leaves if c["parent_id"] is not None]
+                chosen = with_parent[0] if with_parent else leaves[0]
+            else:
+                # No leaves — pick first with a parent
+                with_parent = [c for c in candidates if c["parent_id"] is not None]
+                chosen = with_parent[0] if with_parent else candidates[0]
+
+        cur.execute(
+            "UPDATE forecasts SET internal_account_id = %s, updated_at = NOW() WHERE id = %s",
+            [chosen["id"], fc["id"]],
+        )
+        matched += 1
+
+    conn.commit()
+    cur.close()
+
+    return {"matched": matched, "unmatched": unmatched}
 
 
 @router.get("/suggest-from-actuals")
