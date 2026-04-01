@@ -28,7 +28,7 @@ import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { fetchAPI } from "@/lib/api"
 import { formatByEntity } from "@/lib/format"
-import { AlertCircle, RefreshCw, Plus, Download, Trash2 } from "lucide-react"
+import { AlertCircle, RefreshCw, Plus, Download, Trash2, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MonthPicker } from "@/components/month-picker"
 import { AccountCombobox } from "@/components/account-combobox"
@@ -357,22 +357,45 @@ function ForecastModal({
   year,
   month,
   onSaved,
+  editItem,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
 }: {
   entityId: string
   year: number
   month: number
   onSaved: () => void
+  editItem?: ForecastItem | null
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }) {
-  const [open, setOpen] = useState(false)
-  const [type, setType] = useState<"in" | "out">("in")
-  const [category, setCategory] = useState("")
-  const [selectedAccountId, setSelectedAccountId] = useState("")
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = controlledOpen ?? internalOpen
+  const setOpen = controlledOnOpenChange ?? setInternalOpen
+
+  const isEdit = !!editItem
+  const [type, setType] = useState<"in" | "out">(editItem?.type as "in" | "out" || "in")
+  const [category, setCategory] = useState(editItem?.category || "")
+  const [selectedAccountId, setSelectedAccountId] = useState(editItem?.internal_account_id ? String(editItem.internal_account_id) : "")
   const [internalAccounts, setInternalAccounts] = useState<InternalAccount[]>([])
-  const [amount, setAmount] = useState("")
-  const [recurring, setRecurring] = useState(false)
-  const [expectedDay, setExpectedDay] = useState("")
-  const [paymentMethod, setPaymentMethod] = useState<"bank" | "card">("bank")
+  const [amount, setAmount] = useState(editItem ? String(editItem.forecast_amount) : "")
+  const [recurring, setRecurring] = useState(editItem?.is_recurring || false)
+  const [expectedDay, setExpectedDay] = useState(editItem?.expected_day ? String(editItem.expected_day) : "")
+  const [paymentMethod, setPaymentMethod] = useState<"bank" | "card">((editItem?.payment_method as "bank" | "card") || "bank")
   const [saving, setSaving] = useState(false)
+
+  // Sync state when editItem changes
+  useEffect(() => {
+    if (editItem) {
+      setType(editItem.type as "in" | "out")
+      setCategory(editItem.category || "")
+      setSelectedAccountId(editItem.internal_account_id ? String(editItem.internal_account_id) : "")
+      setAmount(String(editItem.forecast_amount))
+      setRecurring(editItem.is_recurring)
+      setExpectedDay(editItem.expected_day ? String(editItem.expected_day) : "")
+      setPaymentMethod((editItem.payment_method as "bank" | "card") || "bank")
+    }
+  }, [editItem])
 
   // Fetch internal accounts on mount
   useEffect(() => {
@@ -385,32 +408,48 @@ function ForecastModal({
 
   const selectedAccount = internalAccounts.find((a) => String(a.id) === selectedAccountId)
 
+  const resetForm = () => {
+    setCategory("")
+    setSelectedAccountId("")
+    setAmount("")
+    setRecurring(false)
+    setExpectedDay("")
+    setPaymentMethod("bank")
+  }
+
   const handleSave = async () => {
     if ((!category && !selectedAccountId) || !amount) return
     setSaving(true)
     try {
-      await fetchAPI("/forecasts", {
-        method: "POST",
-        body: JSON.stringify({
-          entity_id: Number(entityId),
-          year,
-          month,
-          category: selectedAccount?.name ?? category,
-          type,
-          forecast_amount: parseFloat(amount),
-          is_recurring: recurring,
-          internal_account_id: selectedAccountId ? Number(selectedAccountId) : null,
-          expected_day: expectedDay ? Number(expectedDay) : null,
-          payment_method: paymentMethod,
-        }),
-      })
+      if (isEdit && editItem) {
+        await fetchAPI(`/forecasts/${editItem.id}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            forecast_amount: parseFloat(amount),
+            is_recurring: recurring,
+            expected_day: expectedDay ? Number(expectedDay) : null,
+            payment_method: paymentMethod,
+          }),
+        })
+      } else {
+        await fetchAPI("/forecasts", {
+          method: "POST",
+          body: JSON.stringify({
+            entity_id: Number(entityId),
+            year,
+            month,
+            category: selectedAccount?.name ?? category,
+            type,
+            forecast_amount: parseFloat(amount),
+            is_recurring: recurring,
+            internal_account_id: selectedAccountId ? Number(selectedAccountId) : null,
+            expected_day: expectedDay ? Number(expectedDay) : null,
+            payment_method: paymentMethod,
+          }),
+        })
+      }
       setOpen(false)
-      setCategory("")
-      setSelectedAccountId("")
-      setAmount("")
-      setRecurring(false)
-      setExpectedDay("")
-      setPaymentMethod("bank")
+      if (!isEdit) resetForm()
       onSaved()
     } finally {
       setSaving(false)
@@ -418,49 +457,65 @@ function ForecastModal({
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-2">
-          <Plus className="h-4 w-4" /> 항목 추가
-        </Button>
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v && !isEdit) resetForm() }}>
+      {!isEdit && (
+        <DialogTrigger asChild>
+          <Button variant="outline" size="sm" className="gap-2">
+            <Plus className="h-4 w-4" /> 항목 추가
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="max-w-[400px]">
         <DialogHeader>
-          <DialogTitle>예상 항목 추가</DialogTitle>
+          <DialogTitle>{isEdit ? "예상 항목 수정" : "예상 항목 추가"}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 mt-2">
           <div>
             <label className="text-xs text-muted-foreground">월</label>
             <p className="font-medium">{year}년 {month}월</p>
           </div>
-          <div>
-            <label className="text-xs text-muted-foreground">유형</label>
-            <div className="flex gap-4 mt-1">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="radio" checked={type === "in"} onChange={() => { setType("in"); setCategory(""); setSelectedAccountId("") }} className="accent-[hsl(var(--profit))]" />
-                <span className="text-sm">입금</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="radio" checked={type === "out"} onChange={() => { setType("out"); setCategory(""); setSelectedAccountId("") }} className="accent-[hsl(var(--loss))]" />
-                <span className="text-sm">출금</span>
-              </label>
+          {isEdit ? (
+            <div>
+              <label className="text-xs text-muted-foreground">항목</label>
+              <p className="font-medium mt-1">
+                <Badge variant="outline" className={cn("text-[10px] mr-2", type === "in" ? "text-green-400" : "text-red-400")}>
+                  {type === "in" ? "입금" : "출금"}
+                </Badge>
+                {editItem?.internal_account_name ?? editItem?.category}
+              </p>
             </div>
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground">내부계정</label>
-            <div className="mt-1">
-              <AccountCombobox
-                options={internalAccounts}
-                value={selectedAccountId}
-                onChange={(v) => {
-                  setSelectedAccountId(v)
-                  if (v) setCategory("")
-                }}
-                placeholder="계정 선택"
-                showCode
-              />
-            </div>
-          </div>
+          ) : (
+            <>
+              <div>
+                <label className="text-xs text-muted-foreground">유형</label>
+                <div className="flex gap-4 mt-1">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" checked={type === "in"} onChange={() => { setType("in"); setCategory(""); setSelectedAccountId("") }} className="accent-[hsl(var(--profit))]" />
+                    <span className="text-sm">입금</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" checked={type === "out"} onChange={() => { setType("out"); setCategory(""); setSelectedAccountId("") }} className="accent-[hsl(var(--loss))]" />
+                    <span className="text-sm">출금</span>
+                  </label>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">내부계정</label>
+                <div className="mt-1">
+                  <AccountCombobox
+                    options={internalAccounts}
+                    value={selectedAccountId}
+                    onChange={(v) => {
+                      setSelectedAccountId(v)
+                      if (v) setCategory("")
+                    }}
+                    placeholder="계정 선택"
+                    showCode
+                  />
+                </div>
+              </div>
+            </>
+          )}
           <div>
             <label className="text-xs text-muted-foreground">금액</label>
             <Input
@@ -525,6 +580,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
   const [showComparison, setShowComparison] = useState(false)
   const [editingItemId, setEditingItemId] = useState<number | null>(null)
   const [editingAmount, setEditingAmount] = useState("")
+  const [editModalItem, setEditModalItem] = useState<ForecastItem | null>(null)
 
   // Fetch summary for month navigation
   const fetchSummary = useCallback(async () => {
@@ -859,19 +915,28 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                     <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-[hsl(var(--warning))]">--</td>
                     {showComparison && <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs"></td>}
                     <td className="px-2 py-2.5">
-                      <button
-                        onClick={async () => {
-                          if (!confirm(`"${item.internal_account_name ?? item.category}" 항목을 삭제하시겠습니까?`)) return
-                          try {
-                            await fetchAPI(`/forecasts/${item.id}`, { method: "DELETE" })
-                            fetchForecast()
-                          } catch { /* toast handled by fetchAPI */ }
-                        }}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
-                        title="삭제"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => setEditModalItem(item)}
+                          className="text-muted-foreground hover:text-foreground"
+                          title="수정"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`"${item.internal_account_name ?? item.category}" 항목을 삭제하시겠습니까?`)) return
+                            try {
+                              await fetchAPI(`/forecasts/${item.id}`, { method: "DELETE" })
+                              fetchForecast()
+                            } catch { /* toast handled by fetchAPI */ }
+                          }}
+                          className="text-muted-foreground hover:text-destructive"
+                          title="삭제"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )
@@ -991,6 +1056,19 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
           </div>
         </Card>
       </div>
+
+      {/* Edit Modal */}
+      {editModalItem && (
+        <ForecastModal
+          entityId={entityId!}
+          year={y}
+          month={m}
+          onSaved={() => { setEditModalItem(null); fetchForecast() }}
+          editItem={editModalItem}
+          open={!!editModalItem}
+          onOpenChange={(v) => { if (!v) setEditModalItem(null) }}
+        />
+      )}
     </div>
   )
 }
