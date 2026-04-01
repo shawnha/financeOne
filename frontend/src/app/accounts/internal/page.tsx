@@ -259,15 +259,16 @@ function InternalAccountsContent() {
     let code = ""
     if (!editingId) {
       if (parent) {
-        const childCodes = siblings
-          .map((s) => s.code)
+        // Check ALL accounts with this prefix to avoid code collision
+        const allWithPrefix = accounts
+          .map((a) => a.code)
           .filter((c) => c.startsWith(parent.code + "-"))
           .map((c) => {
-            const suffix = c.slice(parent.code.length + 1)
+            const suffix = c.slice(parent.code.length + 1).split("-")[0]
             return parseInt(suffix, 10)
           })
           .filter((n) => !isNaN(n))
-        const nextNum = childCodes.length > 0 ? Math.max(...childCodes) + 1 : 1
+        const nextNum = allWithPrefix.length > 0 ? Math.max(...allWithPrefix) + 1 : 1
         code = `${parent.code}-${String(nextNum).padStart(3, "0")}`
       } else {
         code = `MISC-${Date.now()}`

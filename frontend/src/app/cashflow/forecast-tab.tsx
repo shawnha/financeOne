@@ -433,12 +433,28 @@ function ForecastModal({
     }).catch(() => setPrevSuggestions([]))
   }, [entityId, year, month, isEdit])
 
-  // 선택된 계정의 전월 실적
+  // 선택된 계정의 전월 실적 (상위 항목이면 하위 합산)
+  const childAccounts = useMemo(() => {
+    if (!selectedAccountId) return []
+    return internalAccounts.filter(a => a.parent_id === Number(selectedAccountId))
+  }, [selectedAccountId, internalAccounts])
+
+  const isParentAccount = childAccounts.length > 0
+
   useEffect(() => {
     if (!selectedAccountId || isEdit) { setPrevActual(null); return }
-    const match = prevSuggestions.find((s) => String(s.internal_account_id) === selectedAccountId)
-    setPrevActual(match ? match.total : null)
-  }, [selectedAccountId, prevSuggestions, isEdit])
+    if (isParentAccount) {
+      // Sum children's prev actuals
+      const childIds = new Set(childAccounts.map(c => c.id))
+      const childTotal = prevSuggestions
+        .filter(s => childIds.has(s.internal_account_id))
+        .reduce((sum, s) => sum + s.total, 0)
+      setPrevActual(childTotal > 0 ? childTotal : null)
+    } else {
+      const match = prevSuggestions.find((s) => String(s.internal_account_id) === selectedAccountId)
+      setPrevActual(match ? match.total : null)
+    }
+  }, [selectedAccountId, prevSuggestions, isEdit, isParentAccount, childAccounts])
 
   const resetForm = () => {
     setCategory("")
@@ -464,6 +480,32 @@ function ForecastModal({
             payment_method: paymentMethod,
           }),
         })
+      } else if (isParentAccount && childAccounts.length > 0) {
+        // 상위 항목 선택 → 하위 항목들을 각각 자동 생성
+        const totalAmount = Number(amount.replace(/,/g, ""))
+        for (const child of childAccounts) {
+          // 하위 계정별 전월 실적 비율로 금액 분배
+          const childPrev = prevSuggestions.find(s => s.internal_account_id === child.id)
+          const childAmount = prevActual && prevActual > 0 && childPrev
+            ? Math.round(totalAmount * (childPrev.total / prevActual))
+            : Math.round(totalAmount / childAccounts.length)
+          await fetchAPI("/forecasts", {
+            method: "POST",
+            body: JSON.stringify({
+              entity_id: Number(entityId),
+              year,
+              month,
+              category: child.name,
+              type,
+              forecast_amount: childAmount,
+              is_recurring: recurring,
+              internal_account_id: child.id,
+              expected_day: expectedDay ? Number(expectedDay) : null,
+              payment_method: paymentMethod,
+            }),
+          })
+        }
+        toast.success(`${childAccounts.length}개 하위 항목이 자동 생성되었습니다`)
       } else {
         await fetchAPI("/forecasts", {
           method: "POST",
@@ -546,6 +588,22 @@ function ForecastModal({
                     showCode
                   />
                 </div>
+                {isParentAccount && !isEdit && (
+                  <div className="mt-2 p-2 rounded-md bg-blue-500/10 border border-blue-500/20 text-xs">
+                    <p className="text-blue-400 font-medium mb-1">상위 항목 — 하위 {childAccounts.length}개 자동 생성</p>
+                    <div className="text-blue-300/70 space-y-0.5">
+                      {childAccounts.map(c => {
+                        const prev = prevSuggestions.find(s => s.internal_account_id === c.id)
+                        return (
+                          <div key={c.id} className="flex justify-between">
+                            <span>└ {c.name}</span>
+                            {prev && <span className="font-mono">₩{prev.total.toLocaleString()}</span>}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -568,7 +626,7 @@ function ForecastModal({
                 onClick={() => setAmount(prevActual.toLocaleString())}
                 className="mt-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors"
               >
-                전월 실적: ₩{prevActual.toLocaleString()} ← 클릭하여 적용
+                전월 {isParentAccount ? "하위 합계" : "실적"}: ₩{prevActual.toLocaleString()} ← 클릭하여 적용
               </button>
             )}
           </div>
@@ -754,7 +812,13 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
       )
       setSummary(s)
       if (s.available_months.length && !selectedMonth) {
-        setSelectedMonth(s.available_months[s.available_months.length - 1])
+        // 예상 현금흐름: 마지막 데이터 월의 다음 달을 기본 선택
+        const lastMonth = s.available_months[s.available_months.length - 1]
+        const [ly, lm] = lastMonth.split("-").map(Number)
+        const nextMonth = lm === 12
+          ? `${ly + 1}-01`
+          : `${ly}-${String(lm + 1).padStart(2, "0")}`
+        setSelectedMonth(nextMonth)
       }
     } catch {
       // Summary is optional, forecast still works
