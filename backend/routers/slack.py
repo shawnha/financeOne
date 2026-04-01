@@ -1034,6 +1034,11 @@ def sync_slack_channel(
                 stats["updated"] += 1
 
         conn.commit()
+
+        # 동기화 후 자동 매칭 실행
+        auto_result = _auto_match_slack(conn, entity_id)
+        stats["auto_matched"] = auto_result["matched"]
+
         cur.close()
         return stats
     except RuntimeError as e:
@@ -1042,3 +1047,237 @@ def sync_slack_channel(
     except Exception:
         conn.rollback()
         raise
+
+
+AUTO_MATCH_THRESHOLD = 0.70
+
+
+def _auto_match_slack(conn: PgConnection, entity_id: int) -> dict:
+    """미매칭 Slack 메시지에 대해 후보가 1개이고 confidence >= threshold이면 자동 확정."""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    cur = conn.cursor()
+
+    # 미매칭 + 미완료 + 미무시 Slack 메시지 조회
+    cur.execute(
+        """
+        SELECT sm.id, sm.parsed_amount, sm.parsed_amount_vat_included,
+               COALESCE(sm.date_override, to_timestamp(CAST(sm.ts AS DOUBLE PRECISION))::date) AS msg_date,
+               sm.parsed_structured, sm.message_type, sm.member_id, sm.text
+        FROM slack_messages sm
+        WHERE sm.entity_id = %s
+          AND sm.is_completed = false
+          AND (sm.is_cancelled IS NULL OR sm.is_cancelled = false)
+          AND sm.parsed_amount IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM transaction_slack_match tsm
+              WHERE tsm.slack_message_id = sm.id AND tsm.is_confirmed = true
+          )
+        """,
+        [entity_id],
+    )
+    unmatched = fetch_all(cur)
+
+    matched = 0
+    details = []
+
+    for msg in unmatched:
+        msg_id = msg["id"]
+        parsed_amount = float(msg["parsed_amount"])
+        msg_date = msg["msg_date"]
+        ps = msg["parsed_structured"] if isinstance(msg["parsed_structured"], dict) else {}
+        vendor = ps.get("vendor")
+        message_type = msg["message_type"]
+        slack_member_id = msg["member_id"]
+
+        # 다중 항목 메시지는 스킵 (항목별 매칭 필요)
+        items = ps.get("items") or []
+        if len(items) >= 2:
+            continue
+
+        search_amounts = _build_search_amounts(ps, parsed_amount, None)
+        if not search_amounts:
+            continue
+
+        # 외화 → KRW 변환
+        msg_currency = ps.get("currency") or "KRW"
+        if message_type == "deposit_request" and msg_currency != "KRW":
+            try:
+                from backend.services.exchange_rate_service import get_closing_rate
+                from datetime import date as date_type
+                d = date_type.fromisoformat(str(msg_date)) if isinstance(msg_date, str) else msg_date
+                rate = float(get_closing_rate(conn, msg_currency, "KRW", d))
+                search_amounts = [
+                    {"amount": round(sa["amount"] * rate, 0), "label": f'{sa["label"]} (KRW)'}
+                    for sa in search_amounts
+                ]
+            except Exception:
+                pass
+
+        primary_amount = search_amounts[0]["amount"]
+
+        # 금액 조건
+        amount_conditions = []
+        amount_params: list = []
+        for sa in search_amounts:
+            amt = sa["amount"]
+            lo = round(amt * 0.97, 2)
+            hi = round(amt * 1.03, 2)
+            vat_amt = round(amt * 1.1, 2)
+            vat_lo = round(vat_amt * 0.97, 2)
+            vat_hi = round(vat_amt * 1.03, 2)
+            amount_conditions.append("(t.amount BETWEEN %s AND %s OR t.amount BETWEEN %s AND %s)")
+            amount_params.extend([lo, hi, vat_lo, vat_hi])
+
+        where_parts = ["t.entity_id = %s", "(t.is_cancel IS NOT TRUE)"]
+        params: list = [entity_id]
+
+        if slack_member_id and message_type == "card_payment":
+            where_parts.append("(t.source_type NOT LIKE '%%card%%' OR t.member_id = %s)")
+            params.append(slack_member_id)
+
+        where_parts.append("(" + " OR ".join(amount_conditions) + ")")
+        params.extend(amount_params)
+
+        if msg_date:
+            where_parts.append("t.date BETWEEN %s - interval '30 days' AND %s + interval '30 days'")
+            params.extend([msg_date, msg_date])
+
+        # 이미 매칭된 거래 제외
+        excluded_ids = _get_excluded_transaction_ids(cur, msg_id)
+        if excluded_ids:
+            placeholders = ",".join(["%s"] * len(excluded_ids))
+            where_parts.append(f"t.id NOT IN ({placeholders})")
+            params.extend(list(excluded_ids))
+
+        # 이미 다른 Slack 매칭에 확정된 거래도 제외
+        where_parts.append("""
+            NOT EXISTS (
+                SELECT 1 FROM transaction_slack_match tsm2
+                WHERE tsm2.transaction_id = t.id AND tsm2.is_confirmed = true
+            )
+        """)
+
+        where_clause = " AND ".join(where_parts)
+
+        # 점수 계산
+        best_amount_cases = []
+        best_amount_params: list = []
+        for sa in search_amounts:
+            amt = sa["amount"]
+            lo = round(amt * 0.97, 2)
+            hi = round(amt * 1.03, 2)
+            vat_amt = round(amt * 1.1, 2)
+            vat_lo = round(vat_amt * 0.97, 2)
+            vat_hi = round(vat_amt * 1.03, 2)
+            best_amount_cases.append(
+                "CASE WHEN ABS(t.amount - %s) <= 1 THEN 0.40"
+                " WHEN t.amount BETWEEN %s AND %s THEN 0.30"
+                " WHEN t.amount BETWEEN %s AND %s THEN 0.25"
+                " ELSE 0 END"
+            )
+            best_amount_params.extend([amt, lo, hi, vat_lo, vat_hi])
+
+        amount_score_expr = "GREATEST(" + ", ".join(best_amount_cases) + ")"
+
+        source_type_case = "0"
+        if message_type == "deposit_request":
+            source_type_case = "CASE WHEN t.source_type LIKE '%%bank%%' THEN 0.20 ELSE 0 END"
+
+        vendor_case = "0"
+        vendor_params: list = []
+        if vendor:
+            vendor_case = """
+                CASE
+                    WHEN t.counterparty ILIKE %s THEN 0.30
+                    WHEN t.counterparty ILIKE %s THEN 0.15
+                    WHEN t.description ILIKE %s THEN 0.15
+                    ELSE 0
+                END"""
+            vendor_params = [vendor, f"%{vendor}%", f"%{vendor}%"]
+
+        date_case = "0"
+        date_params_score: list = []
+        if msg_date:
+            date_case = """
+                CASE
+                    WHEN t.date = %s THEN 0.30
+                    WHEN ABS(t.date - %s) <= 3 THEN 0.25
+                    WHEN ABS(t.date - %s) <= 7 THEN 0.15
+                    WHEN ABS(t.date - %s) <= 14 THEN 0.10
+                    ELSE 0.05
+                END"""
+            date_params_score = [msg_date, msg_date, msg_date, msg_date]
+
+        cur.execute(
+            f"""
+            SELECT t.id,
+                   ROUND((
+                       {amount_score_expr}
+                       + {date_case}
+                       + {vendor_case}
+                       + {source_type_case}
+                   )::numeric, 2) AS confidence
+            FROM transactions t
+            WHERE {where_clause}
+            ORDER BY confidence DESC
+            LIMIT 5
+            """,
+            best_amount_params + date_params_score + vendor_params + params,
+        )
+        candidates = cur.fetchall()
+
+        if not candidates:
+            continue
+
+        top_confidence = float(candidates[0][1])
+        top_tx_id = candidates[0][0]
+
+        # 조건: confidence >= threshold AND (후보 1개 OR 2위와 차이 >= 0.15)
+        if top_confidence < AUTO_MATCH_THRESHOLD:
+            continue
+
+        if len(candidates) >= 2:
+            second_confidence = float(candidates[1][1])
+            if top_confidence - second_confidence < 0.15:
+                continue
+
+        # 자동 확정
+        cur.execute(
+            """
+            INSERT INTO transaction_slack_match
+                (transaction_id, slack_message_id, match_confidence, is_manual, is_confirmed, ai_reasoning)
+            VALUES (%s, %s, %s, false, true, %s)
+            ON CONFLICT DO NOTHING
+            RETURNING id
+            """,
+            [top_tx_id, msg_id, top_confidence, "auto-match: confidence >= threshold, unique candidate"],
+        )
+        match_row = cur.fetchone()
+        if not match_row:
+            continue
+
+        cur.execute(
+            "UPDATE slack_messages SET is_completed = true WHERE id = %s",
+            [msg_id],
+        )
+
+        matched += 1
+        details.append({"message_id": msg_id, "transaction_id": top_tx_id, "confidence": top_confidence})
+
+    if matched > 0:
+        conn.commit()
+        logger.info("Slack auto-match: %d confirmed for entity %d", matched, entity_id)
+
+    cur.close()
+    return {"matched": matched, "details": details}
+
+
+@router.post("/auto-match")
+def auto_match_slack(
+    entity_id: int = Query(...),
+    conn: PgConnection = Depends(get_db),
+):
+    """미매칭 Slack 메시지에 대해 자동 매칭 실행 (confidence >= 0.7 + 유일 후보)"""
+    return _auto_match_slack(conn, entity_id)
