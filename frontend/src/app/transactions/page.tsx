@@ -569,12 +569,53 @@ export default function TransactionsPage() {
             />
           </div>
 
-          {/* Date from */}
+          {/* Month quick select */}
+          <Select
+            value={
+              filters.dateFrom && filters.dateTo
+              && filters.dateFrom.slice(0, 7) === filters.dateTo.slice(0, 7)
+                ? filters.dateFrom.slice(0, 7)
+                : "custom"
+            }
+            onValueChange={(v) => {
+              if (v === "custom") {
+                updateFilter("dateFrom", "")
+                updateFilter("dateTo", "")
+              } else if (v === "all") {
+                setFilters(f => ({ ...f, dateFrom: "", dateTo: "" }))
+                setPage(1)
+              } else {
+                const [y, m] = v.split("-").map(Number)
+                const lastDay = new Date(y, m, 0).getDate()
+                const from = `${y}-${String(m).padStart(2, "0")}-01`
+                const to = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
+                setFilters(f => ({ ...f, dateFrom: from, dateTo: to }))
+                setPage(1)
+              }
+            }}
+          >
+            <SelectTrigger className="h-9 w-[130px] text-sm">
+              <SelectValue placeholder="월 선택" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">전체 기간</SelectItem>
+              {Array.from({ length: 12 }, (_, i) => {
+                const d = new Date()
+                d.setMonth(d.getMonth() - i)
+                const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+                const label = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}`
+                return <SelectItem key={key} value={key}>{label}</SelectItem>
+              })}
+              <SelectItem value="custom">직접 입력</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* Date range (shown when custom or for fine-tuning) */}
           <Input
             type="date"
             value={filters.dateFrom}
             onChange={e => updateFilter("dateFrom", e.target.value)}
-            className="h-9 w-36 text-sm"
+            className="h-9 w-32 text-xs"
             aria-label="시작일"
           />
           <span className="text-muted-foreground text-sm">~</span>
@@ -582,7 +623,7 @@ export default function TransactionsPage() {
             type="date"
             value={filters.dateTo}
             onChange={e => updateFilter("dateTo", e.target.value)}
-            className="h-9 w-36 text-sm"
+            className="h-9 w-32 text-xs"
             aria-label="종료일"
           />
 
