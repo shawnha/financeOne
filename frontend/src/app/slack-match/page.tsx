@@ -686,12 +686,13 @@ function CandidatesList({
   }
 
   return (
-    <div className="space-y-1.5 max-h-[320px] overflow-y-auto scrollbar-thin" role="listbox" aria-label="매칭 후보 목록">
+    <div className="space-y-1.5 max-h-[400px] overflow-y-auto scrollbar-thin" role="listbox" aria-label="매칭 후보 목록">
       {candidates.map((candidate) => {
         const isSelected = selectedId === candidate.id
         return (
           <div
             key={candidate.id}
+            ref={el => { if (isSelected && el) el.scrollIntoView({ block: "nearest", behavior: "smooth" }) }}
             role="option"
             aria-selected={isSelected}
             tabIndex={0}

@@ -151,6 +151,22 @@ def _build_search_amounts(
     if parsed_amount is not None and not search_amounts:
         search_amounts.append({"amount": float(parsed_amount), "label": "파싱금액"})
 
+    # 결제조건 분할 시 분할 금액도 추가 (선금 50%, 30/70 등)
+    payment_terms = ps.get("payment_terms") or {}
+    ratio = payment_terms.get("ratio", "")
+    if ratio and "/" in ratio and search_amounts:
+        try:
+            parts = [int(r) for r in ratio.split("/") if r.strip().isdigit()]
+            total_amt = search_amounts[0]["amount"]
+            for i, part in enumerate(parts):
+                pct = part / 100
+                split_amt = round(total_amt * pct, 0)
+                if split_amt > 0 and not any(abs(sa["amount"] - split_amt) < 10 for sa in search_amounts):
+                    label = f"{'선금' if i == 0 else '잔금'} {part}%"
+                    search_amounts.append({"amount": split_amt, "label": label})
+        except (ValueError, ZeroDivisionError):
+            pass
+
     return search_amounts
 
 
