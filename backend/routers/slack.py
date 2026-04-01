@@ -491,7 +491,11 @@ def get_candidates(
         amount_conditions.append("(t.amount BETWEEN %s AND %s OR t.amount BETWEEN %s AND %s)")
         amount_params.extend([lo, hi, vat_lo, vat_hi])
 
-    where_parts = ["t.entity_id = %s", "(t.is_cancel IS NOT TRUE)"]
+    # USD 메시지면 HOI(entity=1)도 검색 (크로스 엔티티)
+    if msg_currency and msg_currency != "KRW":
+        where_parts = ["t.entity_id IN (%s, 1)", "(t.is_cancel IS NOT TRUE)"]
+    else:
+        where_parts = ["t.entity_id = %s", "(t.is_cancel IS NOT TRUE)"]
     params: list = [entity_id]
 
     # 법카결제 메시지만: 같은 멤버 카드 거래로 필터 (다른 사람 카드 제외)
