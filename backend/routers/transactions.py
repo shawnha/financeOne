@@ -37,6 +37,7 @@ def list_transactions(
     standard_account_id: Optional[int] = None,
     internal_account_id: Optional[int] = None,
     unclassified: Optional[bool] = None,
+    unconfirmed: Optional[bool] = None,
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     conn: PgConnection = Depends(get_db),
@@ -71,7 +72,9 @@ def list_transactions(
         where.append("t.internal_account_id = %s")
         params.append(internal_account_id)
     if unclassified:
-        where.append("t.is_confirmed = false AND t.standard_account_id IS NULL")
+        where.append("t.is_confirmed = false AND t.internal_account_id IS NULL")
+    if unconfirmed:
+        where.append("t.is_confirmed = false AND t.internal_account_id IS NOT NULL")
     need_join_for_search = False
     if search:
         # 숫자만이면 금액 검색 (±3%), 아니면 텍스트 검색 (내역/거래처/메모/내부계정명/날짜)
@@ -107,11 +110,13 @@ def list_transactions(
                t.internal_account_id, t.standard_account_id, t.is_cancel, t.card_number,
                m.name AS member_name,
                ia.code AS internal_account_code, ia.name AS internal_account_name,
+               pia.name AS internal_account_parent_name,
                sa.code AS standard_account_code, sa.name AS standard_account_name,
                EXISTS(SELECT 1 FROM transaction_slack_match tsm WHERE tsm.transaction_id = t.id) AS has_slack_match
         FROM transactions t
         LEFT JOIN members m ON t.member_id = m.id
         LEFT JOIN internal_accounts ia ON t.internal_account_id = ia.id
+        LEFT JOIN internal_accounts pia ON pia.id = ia.parent_id
         LEFT JOIN standard_accounts sa ON t.standard_account_id = sa.id
         WHERE {where_clause}
         ORDER BY t.date DESC, t.id DESC
@@ -148,6 +153,15 @@ def update_transaction(
         for key, val in data.items():
             sets.append(f"{key} = %s")
             params.append(val)
+
+        # 내부계정 직접 변경 시 mapping_source='manual'로 보호
+        if body.internal_account_id is not None:
+            if "mapping_source" not in data:
+                sets.append("mapping_source = %s")
+                params.append("manual")
+            if "mapping_confidence" not in data:
+                sets.append("mapping_confidence = %s")
+                params.append(1.0)
 
         sets.append("updated_at = NOW()")
         params.append(tx_id)
@@ -212,19 +226,28 @@ def update_transaction(
 @router.post("/auto-map")
 def auto_map_unmapped(
     entity_id: int = Query(...),
+    year: int = Query(None),
+    month: int = Query(None),
     enable_ai: bool = Query(False),
     conn: PgConnection = Depends(get_db),
 ):
-    """자동 매핑: manual/confirmed 제외 전체 거래에 5단계 캐스케이드 적용.
+    """자동 매핑: manual/confirmed 제외 거래에 5단계 캐스케이드 적용.
 
+    year/month가 주어지면 해당 월만, 없으면 전체 대상.
     Slack 매칭이 확정된 거래는 item_description을 description에 합쳐서
     키워드/유사 매칭 정확도를 높인다.
     """
     cur = conn.cursor()
     try:
-        # manual/confirmed 제외, 나머지 전체 대상
+        # manual/confirmed 제외
+        month_filter = ""
+        params = [entity_id]
+        if year and month:
+            month_filter = "AND date_trunc('month', t.date) = %s::date"
+            params.append(f"{year}-{month:02d}-01")
+
         cur.execute(
-            """
+            f"""
             SELECT t.id, t.counterparty, t.description, t.internal_account_id,
                    (
                        SELECT string_agg(
@@ -239,8 +262,9 @@ def auto_map_unmapped(
               AND (t.counterparty IS NOT NULL OR t.description IS NOT NULL)
               AND (t.mapping_source IS NULL OR t.mapping_source NOT IN ('manual', 'confirmed'))
               AND t.is_duplicate = false
+              {month_filter}
             """,
-            [entity_id],
+            params,
         )
         targets = cur.fetchall()
 
@@ -370,6 +394,20 @@ def bulk_confirm(body: BulkConfirm, conn: PgConnection = Depends(get_db)):
         )
         updated = [r[0] for r in cur.fetchall()]
 
+        # 벌크 확정 → 매핑 규칙 학습 (UPSERT)
+        if updated:
+            placeholders2 = ",".join(["%s"] * len(updated))
+            cur.execute(
+                f"""SELECT id, entity_id, counterparty, internal_account_id
+                    FROM transactions WHERE id IN ({placeholders2})""",
+                updated,
+            )
+            rules_learned = 0
+            for tx_id, eid, cp, ia_id in cur.fetchall():
+                if cp and ia_id:
+                    learn_mapping_rule(cur, entity_id=eid, counterparty=cp, internal_account_id=ia_id)
+                    rules_learned += 1
+
         # 벌크 확정 → 자동 분개 생성
         journal_created = 0
         journal_skipped = []
@@ -383,6 +421,61 @@ def bulk_confirm(body: BulkConfirm, conn: PgConnection = Depends(get_db)):
         conn.commit()
         cur.close()
         return {"confirmed": len(updated), "ids": updated, "journals_created": journal_created, "journal_skipped": journal_skipped}
+    except Exception:
+        conn.rollback()
+        raise
+
+
+@router.post("/bulk-confirm-month")
+def bulk_confirm_month(
+    entity_id: int = Query(...),
+    year: int = Query(...),
+    month: int = Query(...),
+    conn: PgConnection = Depends(get_db),
+):
+    """해당 월의 매핑된 미확정 거래 전체 확정 (manual/exact/similar/keyword/ai/rule)"""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            UPDATE transactions
+            SET is_confirmed = true, mapping_source = 'confirmed', updated_at = NOW()
+            WHERE entity_id = %s
+              AND date_trunc('month', date) = %s::date
+              AND internal_account_id IS NOT NULL
+              AND is_confirmed = false
+              AND (mapping_source IS NULL OR mapping_source NOT IN ('confirmed'))
+            RETURNING id
+            """,
+            [entity_id, f"{year}-{month:02d}-01"],
+        )
+        updated = [r[0] for r in cur.fetchall()]
+
+        # 매핑 규칙 학습
+        if updated:
+            placeholders = ",".join(["%s"] * len(updated))
+            cur.execute(
+                f"""SELECT id, entity_id, counterparty, internal_account_id
+                    FROM transactions WHERE id IN ({placeholders})""",
+                updated,
+            )
+            for _, eid, cp, ia_id in cur.fetchall():
+                if cp and ia_id:
+                    learn_mapping_rule(cur, entity_id=eid, counterparty=cp, internal_account_id=ia_id)
+
+        # 자동 분개 생성
+        journal_created = 0
+        journal_skipped = []
+        for tx_id in updated:
+            try:
+                create_journal_from_transaction(conn, tx_id)
+                journal_created += 1
+            except ValueError as e:
+                journal_skipped.append({"id": tx_id, "reason": str(e)})
+
+        conn.commit()
+        cur.close()
+        return {"confirmed": len(updated), "journals_created": journal_created, "journal_skipped": journal_skipped}
     except Exception:
         conn.rollback()
         raise

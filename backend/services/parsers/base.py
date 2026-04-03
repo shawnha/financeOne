@@ -19,6 +19,9 @@ class ParsedTransaction:
     card_number: Optional[str] = None  # 카드번호 (마스킹)
     is_check_card: bool = False  # for dedup marking
     is_cancel: bool = False  # 취소 건 (환불로 INSERT)
+    raw_data: Optional[dict] = None  # 원본 Excel 행 데이터
+    row_number: Optional[int] = None  # Excel 행 번호
+    balance_after: Optional[float] = None  # 거래후잔액 (은행만)
 
 
 @dataclass

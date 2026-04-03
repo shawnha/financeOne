@@ -93,10 +93,20 @@ def _add_krw_conversion(rows: list[dict], conn: PgConnection) -> None:
 
         row["exchange_rate"] = rate
 
-        # parsed_amount는 이미 KRW → parsed_amount_krw = parsed_amount 그대로
+        # parsed_amount가 외화 금액이면 환율 적용, 이미 KRW 변환된 큰 값이면 그대로
         parsed_amt = row.get("parsed_amount")
         if parsed_amt is not None:
-            row["parsed_amount_krw"] = round(float(parsed_amt), 0)
+            amt = float(parsed_amt)
+            struct_total = (row.get("parsed_structured") or {}).get("total_amount")
+            # parsed_amount가 구조화 금액과 비슷하면 외화 그대로 → 환율 적용
+            if struct_total and abs(amt - float(struct_total)) < float(struct_total) * 0.5:
+                row["parsed_amount_krw"] = round(amt * rate, 0)
+            elif amt < 100000 and rate > 100:
+                # 소액이고 환율이 큰 경우 외화 금액으로 판단
+                row["parsed_amount_krw"] = round(amt * rate, 0)
+            else:
+                # 이미 KRW 변환된 값
+                row["parsed_amount_krw"] = round(amt, 0)
 
         # parsed_structured items/total은 원래 통화 → KRW 환산
         ps = row.get("parsed_structured")

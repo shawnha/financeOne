@@ -73,6 +73,13 @@ class LotteCardParser(BaseParser):
                 # Col 15: 화폐단위
                 currency = str(sheet.cell_value(row_idx, 15)).strip() or "KRW"
 
+                # 원본 행 보존
+                raw = {}
+                for ci in range(sheet.ncols):
+                    val = sheet.cell_value(row_idx, ci)
+                    if val is not None and str(val).strip():
+                        raw[f"col_{ci}"] = str(val).strip()
+
                 results.append(ParsedTransaction(
                     date=tx_date,
                     amount=abs(amount),
@@ -84,6 +91,8 @@ class LotteCardParser(BaseParser):
                     member_name=member_name,
                     card_number=card_number,
                     is_cancel=is_cancel,
+                    raw_data=raw,
+                    row_number=row_idx + 1,
                 ))
             except Exception as e:
                 # Skip malformed rows

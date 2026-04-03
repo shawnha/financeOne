@@ -24,4 +24,4 @@ def is_file_duplicate(tx_index: int, cumulative: dict, db_count: int) -> bool:
 
 def _make_key(tx) -> tuple:
     """거래의 중복 감지 키 생성."""
-    return (str(tx.date), tx.amount, tx.counterparty, tx.description, tx.source_type)
+    return (str(tx.date), tx.amount, tx.type, tx.counterparty, tx.description, tx.source_type)

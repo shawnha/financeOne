@@ -723,9 +723,13 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
   const [summary, setSummary] = useState<SummaryData | null>(null)
   const [state, setState] = useState<LoadState>("loading")
   const [error, setError] = useState("")
-  const [globalMonth, setGlobalMonth] = useGlobalMonth()
+  const [globalMonth, setGlobalMonth, monthReady] = useGlobalMonth()
   const [selectedMonth, setSelectedMonthLocal] = useState(globalMonth)
   const setSelectedMonth = useCallback((m: string) => { setSelectedMonthLocal(m); setGlobalMonth(m) }, [setGlobalMonth])
+
+  // globalMonth가 localStorage에서 복원되면 동기화
+  useEffect(() => { setSelectedMonthLocal(globalMonth) }, [globalMonth])
+
   const [showComparison, setShowComparison] = useState(false)
   const [editingItemId, setEditingItemId] = useState<number | null>(null)
   const [editingAmount, setEditingAmount] = useState("")
@@ -871,7 +875,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
   }, [entityId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchForecast = useCallback(async () => {
-    if (!entityId || !selectedMonth) return
+    if (!entityId || !selectedMonth || !monthReady) return
     setState("loading")
     const [y, m] = selectedMonth.split("-").map(Number)
     try {
@@ -922,7 +926,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
       setError(err instanceof Error ? err.message : "데이터를 불러올 수 없습니다.")
       setState("error")
     }
-  }, [entityId, selectedMonth])
+  }, [entityId, selectedMonth, monthReady])
 
   useEffect(() => { fetchSummary() }, [fetchSummary])
   useEffect(() => { fetchForecast() }, [fetchForecast])

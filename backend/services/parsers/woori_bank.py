@@ -111,6 +111,22 @@ class WooriBankParser(BaseParser):
                 counterparty = description_detail
                 description = f"{memo} {description_detail}".strip()
 
+                # 원본 데이터 보존
+                raw = {
+                    "번호": str(row[0].value or ""),
+                    "거래일시": str(date_cell),
+                    "적요": memo,
+                    "기재내용": description_detail,
+                    "찾으신금액": float(withdrawal) if withdrawal else 0,
+                    "맡기신금액": float(deposit) if deposit else 0,
+                    "거래후잔액": float(bal) if balance_raw is not None and bal is not None else None,
+                }
+                # 나머지 컬럼도 보존
+                for ci in range(7, len(row)):
+                    cell = row[ci]
+                    if cell.value is not None:
+                        raw[f"col_{ci}"] = str(cell.value)
+
                 results.append(ParsedTransaction(
                     date=tx_date,
                     amount=amount,
@@ -120,6 +136,9 @@ class WooriBankParser(BaseParser):
                     counterparty=counterparty,
                     source_type="woori_bank",
                     is_check_card=is_check_card,
+                    raw_data=raw,
+                    row_number=row[0].row,
+                    balance_after=float(bal) if balance_raw is not None and bal is not None else None,
                 ))
             except Exception as e:
                 logger.warning("Parse row failed: %s", e)

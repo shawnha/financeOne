@@ -173,9 +173,12 @@ export function ExpenseTab({ entityId }: { entityId: string | null }) {
   const [summary, setSummary] = useState<SummaryData | null>(null)
   const [state, setState] = useState<LoadState>("loading")
   const [error, setError] = useState("")
-  const [globalMonth, setGlobalMonth] = useGlobalMonth()
+  const [globalMonth, setGlobalMonth, monthReady] = useGlobalMonth()
   const [selectedMonth, setSelectedMonthLocal] = useState(globalMonth)
   const setSelectedMonth = useCallback((m: string) => { setSelectedMonthLocal(m); setGlobalMonth(m) }, [setGlobalMonth])
+
+  // globalMonth가 localStorage에서 복원되면 동기화
+  useEffect(() => { setSelectedMonthLocal(globalMonth) }, [globalMonth])
 
   const fetchSummary = useCallback(async () => {
     if (!entityId) return

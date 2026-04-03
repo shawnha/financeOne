@@ -56,6 +56,7 @@ interface Transaction {
   internal_account_id: number | null
   internal_account_code: string | null
   internal_account_name: string | null
+  internal_account_parent_name: string | null
   standard_account_id: number | null
   standard_account_code: string | null
   standard_account_name: string | null
@@ -116,6 +117,7 @@ interface Filters {
   standardAccountId: string
   sourceType: string
   unclassified: boolean
+  unconfirmed: boolean
 }
 
 type EditingCell = {
@@ -153,6 +155,7 @@ const INITIAL_FILTERS: Filters = {
   standardAccountId: "",
   sourceType: "",
   unclassified: false,
+  unconfirmed: false,
 }
 
 // ---------------------------------------------------------------------------
@@ -225,7 +228,7 @@ export default function TransactionsPage() {
   const [errorMsg, setErrorMsg] = useState("")
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(50)
-  const [globalMonth, setGlobalMonth] = useGlobalMonth()
+  const [globalMonth, setGlobalMonth] = useGlobalMonth() // ready handled via globalMonth sync effect
   const [filters, setFilters] = useState<Filters>(() => {
     const [y, m] = globalMonth.split("-").map(Number)
     const lastDay = new Date(y, m, 0).getDate()
@@ -250,6 +253,19 @@ export default function TransactionsPage() {
   const [bulkMapAccountId, setBulkMapAccountId] = useState("")
   const [slackMatch, setSlackMatch] = useState<SlackMatchInfo | null>(null)
   const [slackMatchLoading, setSlackMatchLoading] = useState(false)
+
+  // globalMonth 변경 시 filters 동기화 (localStorage 복원 포함)
+  useEffect(() => {
+    const [y, m] = globalMonth.split("-").map(Number)
+    const lastDay = new Date(y, m, 0).getDate()
+    const newFrom = `${y}-${String(m).padStart(2, "0")}-01`
+    const newTo = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
+    setFilters(f => {
+      if (f.dateFrom === newFrom && f.dateTo === newTo) return f
+      return { ...f, dateFrom: newFrom, dateTo: newTo }
+    })
+    setPage(1)
+  }, [globalMonth])
 
   // Debounce search
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -299,6 +315,7 @@ export default function TransactionsPage() {
     if (filters.standardAccountId) params.set("standard_account_id", filters.standardAccountId)
     if (filters.sourceType) params.set("source_type", filters.sourceType)
     if (filters.unclassified) params.set("unclassified", "true")
+    if (filters.unconfirmed) params.set("unconfirmed", "true")
 
     try {
       const result = await fetchAPI<PaginatedResponse>(`/transactions?${params.toString()}`)
@@ -310,7 +327,7 @@ export default function TransactionsPage() {
       setErrorMsg(msg)
       setViewState("error")
     }
-  }, [entityId, page, perPage, debouncedSearch, filters.dateFrom, filters.dateTo, filters.memberId, filters.standardAccountId, filters.sourceType, filters.unclassified])
+  }, [entityId, page, perPage, debouncedSearch, filters.dateFrom, filters.dateTo, filters.memberId, filters.standardAccountId, filters.sourceType, filters.unclassified, filters.unconfirmed])
 
   useEffect(() => {
     fetchTransactions()
@@ -330,7 +347,7 @@ export default function TransactionsPage() {
   const hasActiveFilters = useMemo(() => {
     return filters.search !== "" || filters.dateFrom !== "" || filters.dateTo !== "" ||
       filters.memberId !== "" || filters.standardAccountId !== "" ||
-      filters.sourceType !== "" || filters.unclassified
+      filters.sourceType !== "" || filters.unclassified || filters.unconfirmed
   }, [filters])
 
   // Selection
@@ -418,7 +435,8 @@ export default function TransactionsPage() {
             if (tx.id !== txId) return tx
             if (field === "internal_account_id") {
               const account = internalAccounts.find(a => a.id === numValue)
-              return { ...tx, internal_account_id: numValue, internal_account_name: account?.name ?? null, internal_account_code: account?.code ?? null }
+              const parent = account?.parent_id ? internalAccounts.find(a => a.id === account.parent_id) : null
+              return { ...tx, internal_account_id: numValue, internal_account_name: account?.name ?? null, internal_account_code: account?.code ?? null, internal_account_parent_name: parent?.name ?? null }
             } else {
               const account = standardAccounts.find(a => a.id === numValue)
               return { ...tx, standard_account_id: numValue, standard_account_name: account?.name ?? null, standard_account_code: account?.code ?? null }
@@ -490,7 +508,9 @@ export default function TransactionsPage() {
     if (!entityId) return
     setAutoMapping(true)
     try {
-      const result = await fetchAPI<{ new_mapped: number; updated: number; total_targets: number }>(`/transactions/auto-map?entity_id=${entityId}`, { method: "POST" })
+      const [y, m] = (filters.dateFrom && filters.dateTo && filters.dateFrom.slice(0, 7) === filters.dateTo.slice(0, 7)
+        ? filters.dateFrom.slice(0, 7) : globalMonth).split("-").map(Number)
+      const result = await fetchAPI<{ new_mapped: number; updated: number; total_targets: number }>(`/transactions/auto-map?entity_id=${entityId}&year=${y}&month=${m}`, { method: "POST" })
       const total = (result.new_mapped || 0) + (result.updated || 0)
       if (total > 0) {
         const parts = []
@@ -509,31 +529,41 @@ export default function TransactionsPage() {
   }, [entityId, fetchTransactions])
 
   // 자동 매핑 일괄 확정
+  // 브랜드/사업부별 색상 점 — 하위 계정에 항상 표시
+  const BRAND_COLORS: Record<string, string> = {
+    "ODD": "bg-red-500",
+    "한아원리테일": "bg-yellow-500",
+    "마트약국": "bg-sky-400",
+    "YUNE": "bg-pink-500",
+    "3PL": "bg-green-500",
+  }
+
   const autoMappedUnconfirmed = useMemo(() => {
     if (!data) return []
     return data.items.filter(tx =>
       tx.internal_account_id && !tx.is_confirmed &&
-      tx.mapping_source && ["exact", "similar", "keyword", "ai", "rule"].includes(tx.mapping_source)
+      tx.mapping_source && ["exact", "similar", "keyword", "ai", "rule", "manual"].includes(tx.mapping_source)
     )
   }, [data])
 
   const handleBulkConfirmAutoMapped = useCallback(async () => {
-    if (autoMappedUnconfirmed.length === 0) return
+    if (!entityId) return
     setBulkConfirming(true)
     try {
-      const ids = autoMappedUnconfirmed.map(tx => tx.id)
-      const result = await fetchAPI<{ confirmed: number }>("/transactions/bulk-confirm", {
+      const selectedYM = filters.dateFrom && filters.dateTo && filters.dateFrom.slice(0, 7) === filters.dateTo.slice(0, 7)
+        ? filters.dateFrom.slice(0, 7) : globalMonth
+      const [y, m] = selectedYM.split("-").map(Number)
+      const result = await fetchAPI<{ confirmed: number }>(`/transactions/bulk-confirm-month?entity_id=${entityId}&year=${y}&month=${m}`, {
         method: "POST",
-        body: JSON.stringify({ ids }),
       })
-      toast.success(`${result.confirmed}건 자동 매핑 거래 확정 완료`)
+      toast.success(`${selectedYM.replace("-", "년 ")}월 — ${result.confirmed}건 일괄 확정 완료`)
       fetchTransactions(true)
     } catch {
       toast.error("일괄 확정에 실패했습니다")
     } finally {
       setBulkConfirming(false)
     }
-  }, [autoMappedUnconfirmed, fetchTransactions])
+  }, [entityId, filters.dateFrom, filters.dateTo, globalMonth, fetchTransactions])
 
   // ---------------------------------------------------------------------------
   // Render
@@ -558,12 +588,10 @@ export default function TransactionsPage() {
               <Wand2 className="h-4 w-4 mr-1.5" />
               {autoMapping ? "매핑 중..." : "자동 매핑"}
             </Button>
-            {autoMappedUnconfirmed.length > 0 && (
-              <Button variant="outline" size="sm" onClick={handleBulkConfirmAutoMapped} disabled={bulkConfirming}
-                className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10">
-                {bulkConfirming ? "확정 중..." : `자동 매핑 ${autoMappedUnconfirmed.length}건 일괄 확정`}
-              </Button>
-            )}
+            <Button variant="outline" size="sm" onClick={handleBulkConfirmAutoMapped} disabled={bulkConfirming || autoMappedUnconfirmed.length === 0}
+              className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10">
+              {bulkConfirming ? "확정 중..." : `이 달 일괄 확정`}
+            </Button>
             <Button variant="outline" size="sm" onClick={handleCSVDownload}>
               <Download className="h-4 w-4 mr-1.5" />
               CSV 다운로드
@@ -654,7 +682,16 @@ export default function TransactionsPage() {
               checked={filters.unclassified}
               onCheckedChange={v => updateFilter("unclassified", v === true)}
             />
-            미분류만
+            미분류
+          </label>
+
+          {/* Unconfirmed */}
+          <label className="flex items-center gap-1.5 text-sm cursor-pointer select-none">
+            <Checkbox
+              checked={filters.unconfirmed}
+              onCheckedChange={v => updateFilter("unconfirmed", v === true)}
+            />
+            미확정
           </label>
 
           {/* Clear */}
@@ -664,6 +701,17 @@ export default function TransactionsPage() {
               초기화
             </Button>
           )}
+        </div>
+
+        {/* 브랜드/사업부 범례 */}
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span>내부계정 구분:</span>
+          {Object.entries(BRAND_COLORS).map(([name, color]) => (
+            <span key={name} className="flex items-center gap-1">
+              <span className={cn("inline-block w-2 h-2 rounded-full", color)} />
+              {name}
+            </span>
+          ))}
         </div>
 
         {/* Main content area */}
@@ -679,8 +727,8 @@ export default function TransactionsPage() {
                   일부 데이터만 표시됩니다.
                 </div>
               )}
-              <Table className="w-full table-fixed">
-                <TableHeader className="sticky top-0 z-10 bg-primary">
+              <table className="w-full table-fixed caption-bottom text-sm">
+                <thead className="sticky top-0 z-10 bg-primary [&_tr]:border-b">
                   <TableRow className="hover:bg-primary border-b-0 whitespace-nowrap">
                     <TableHead className="w-[36px] text-center">
                       <Checkbox
@@ -700,7 +748,7 @@ export default function TransactionsPage() {
                     <TableHead className="w-[80px]">표준 계정</TableHead>
                     <TableHead className="w-[80px] text-center">신뢰</TableHead>
                   </TableRow>
-                </TableHeader>
+                </thead>
                 <TableBody>
                   {data.items.map((tx, idx) => (
                     <TableRow
@@ -743,7 +791,7 @@ export default function TransactionsPage() {
 
                       {/* Member */}
                       <TableCell className="p-2 text-sm truncate max-w-[80px]">
-                        {tx.member_name || "\u2014"}
+                        {tx.member_name || (tx.card_number ? tx.card_number.slice(-4) : "\u2014")}
                       </TableCell>
 
                       {/* Description */}
@@ -795,8 +843,18 @@ export default function TransactionsPage() {
                             autoOpen
                           />
                         ) : (
-                          <span className={cn("text-xs truncate block", tx.internal_account_name ? "text-foreground" : "text-muted-foreground")}>
-                            {tx.internal_account_name || "-"}
+                          <span className={cn("text-xs truncate flex items-center gap-1", tx.internal_account_name ? "text-foreground" : "text-muted-foreground")}
+                            title={tx.internal_account_parent_name && BRAND_COLORS[tx.internal_account_parent_name]
+                              ? `${tx.internal_account_parent_name} > ${tx.internal_account_name}` : tx.internal_account_name ?? ""}
+                          >
+                            {tx.internal_account_name ? (
+                              <>
+                                {tx.internal_account_parent_name && BRAND_COLORS[tx.internal_account_parent_name] && (
+                                  <span className={cn("inline-block w-2 h-2 rounded-full shrink-0", BRAND_COLORS[tx.internal_account_parent_name])} />
+                                )}
+                                <span className="truncate">{tx.internal_account_name}</span>
+                              </>
+                            ) : "-"}
                           </span>
                         )}
                       </TableCell>
@@ -830,7 +888,7 @@ export default function TransactionsPage() {
                     </TableRow>
                   ))}
                 </TableBody>
-              </Table>
+              </table>
             </>
           )}
 

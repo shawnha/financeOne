@@ -82,21 +82,42 @@ async def upload_transactions(
 
         cumulative = build_file_key_counts(parsed)
 
+        import json as _json
+
         for i, tx in enumerate(parsed):
+            # 원본 행 저장 (중복/스킵 여부와 무관하게 항상 저장)
+            raw_row_id = None
+            if tx.raw_data is not None:
+                cur.execute(
+                    """
+                    INSERT INTO raw_upload_rows
+                        (entity_id, file_id, row_number, source_type, raw_data, balance_after, parse_status)
+                    VALUES (%s, %s, %s, %s, %s, %s, 'pending')
+                    ON CONFLICT (file_id, row_number) DO NOTHING
+                    RETURNING id
+                    """,
+                    [entity_id, file_id, tx.row_number or (i + 1), tx.source_type,
+                     _json.dumps(tx.raw_data, ensure_ascii=False), tx.balance_after],
+                )
+                raw_result = cur.fetchone()
+                raw_row_id = raw_result[0] if raw_result else None
+
             # 중복 감지: O(1) set 기반
             cur.execute(
                 """
                 SELECT COUNT(*) FROM transactions
-                WHERE entity_id = %s AND date = %s AND amount = %s
+                WHERE entity_id = %s AND date = %s AND amount = %s AND type = %s
                   AND counterparty = %s AND description = %s AND source_type = %s
                 """,
-                [entity_id, tx.date, tx.amount, tx.counterparty, tx.description, tx.source_type],
+                [entity_id, tx.date, tx.amount, tx.type, tx.counterparty, tx.description, tx.source_type],
             )
             db_count = cur.fetchone()[0]
 
             if is_file_duplicate(i, cumulative, db_count):
                 duplicate_count += 1
-                continue  # DB에 이미 충분히 있으면 건너뜀
+                if raw_row_id:
+                    cur.execute("UPDATE raw_upload_rows SET parse_status = 'duplicate', skip_reason = 'dedup' WHERE id = %s", [raw_row_id])
+                continue
 
             # 체크카드 중복: 은행 거래가 DB에 존재할 때만
             is_dup = False
@@ -115,6 +136,8 @@ async def upload_transactions(
 
             if is_dup:
                 duplicate_count += 1
+                if raw_row_id:
+                    cur.execute("UPDATE raw_upload_rows SET parse_status = 'duplicate', skip_reason = 'check_card_dedup' WHERE id = %s", [raw_row_id])
                 continue
 
             # 취소 건 카운트
@@ -137,16 +160,23 @@ async def upload_transactions(
                 INSERT INTO transactions
                     (entity_id, file_id, date, amount, currency, type,
                      description, counterparty, source_type, member_id,
-                     is_duplicate, duplicate_of_id, is_cancel, parsed_member_name, card_number)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, NULL, %s, %s, %s)
+                     is_duplicate, duplicate_of_id, is_cancel, parsed_member_name, card_number, raw_row_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, NULL, %s, %s, %s, %s)
+                RETURNING id
                 """,
                 [
                     entity_id, file_id, tx.date, tx.amount, tx.currency, tx.type,
                     tx.description, tx.counterparty, tx.source_type, member_id,
-                    tx.is_cancel, tx.member_name, tx.card_number,
+                    tx.is_cancel, tx.member_name, tx.card_number, raw_row_id,
                 ],
             )
+            tx_id_row = cur.fetchone()
             inserted_count += 1
+
+            # raw_upload_rows에 transaction_id 연결
+            if raw_row_id and tx_id_row:
+                cur.execute("UPDATE raw_upload_rows SET parse_status = 'parsed', transaction_id = %s WHERE id = %s",
+                            [tx_id_row[0], raw_row_id])
 
             # 자동 매핑: 5단계 캐스케이드 (exact → similar → keyword → AI → manual)
             mapping = auto_map_transaction(cur, entity_id=entity_id, counterparty=tx.counterparty, description=tx.description)

@@ -121,6 +121,11 @@ class WooriCardParser(BaseParser):
                 sale_type = str(sheet.cell_value(row_idx, col["sale_type"])).strip()
                 is_check_card = sale_type == "체크계좌"
 
+                # 원본 행 보존
+                raw = {}
+                for col_name, col_idx in col.items():
+                    raw[col_name] = str(sheet.cell_value(row_idx, col_idx)).strip()
+
                 results.append(ParsedTransaction(
                     date=tx_date,
                     amount=abs(amount),
@@ -131,6 +136,8 @@ class WooriCardParser(BaseParser):
                     source_type="woori_card",
                     is_check_card=is_check_card,
                     is_cancel=is_cancel,
+                    raw_data=raw,
+                    row_number=row_idx + 1,
                 ))
             except Exception as e:
                 logger.warning("Parse row failed (row %d): %s", row_idx, e)

@@ -37,11 +37,11 @@ export default function RootLayout({
           geistMono.variable
         )}
       >
-        <div className="flex min-h-screen">
+        <div className="flex h-screen overflow-hidden">
           <Suspense fallback={null}>
             <Sidebar />
           </Suspense>
-          <main className="flex-1 overflow-auto" id="main-scroll">{children}</main>
+          <main className="flex-1 overflow-y-auto" id="main-scroll">{children}</main>
         </div>
         <Toaster
           theme="dark"

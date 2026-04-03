@@ -116,6 +116,8 @@ interface SlackMessage {
   item_matches?: ItemMatch[]
   match_progress?: MatchProgress
   parsed_amount_krw?: number
+  parsed_amount_vat_included?: number | null
+  vat_flag?: string | null
   exchange_rate?: number
 }
 
@@ -517,6 +519,20 @@ function CompactMessageRow({
                       {formatKRW(krwAmount)}
                     </span>
                   )}
+                </span>
+              )
+            }
+            // VAT 별도인 경우 VAT 포함 금액도 표시
+            const vatIncluded = message.parsed_amount_vat_included ?? (
+              message.vat_flag === "excluded" && amount != null ? Math.round(amount * 1.1) : null
+            )
+            if (vatIncluded != null && message.vat_flag === "excluded") {
+              return (
+                <span className="flex flex-col items-end">
+                  <span>{formatKRW(amount ?? 0)} <span className="text-[10px] text-muted-foreground font-normal">+VAT</span></span>
+                  <span className="text-[10px] text-emerald-400 font-normal">
+                    VAT포함 {formatKRW(vatIncluded)}
+                  </span>
                 </span>
               )
             }
@@ -1341,7 +1357,7 @@ function SlackMatchContent() {
   const [expandedId, setExpandedId] = useState<number | null>(null)
 
   // Month navigation
-  const [selectedMonth, setSelectedMonth] = useGlobalMonth()
+  const [selectedMonth, setSelectedMonth, monthReady] = useGlobalMonth()
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending")
@@ -1350,6 +1366,7 @@ function SlackMatchContent() {
   const [textSearch, setTextSearch] = useState<string>("")
 
   const fetchMessages = useCallback(async (background = false) => {
+    if (!monthReady) return
     if (!background) setLoading(true)
     setError(null)
     try {
@@ -1376,7 +1393,7 @@ function SlackMatchContent() {
     } finally {
       setLoading(false)
     }
-  }, [entityId, page, selectedMonth, statusFilter])
+  }, [entityId, page, selectedMonth, statusFilter, monthReady])
 
   const [syncing, setSyncing] = useState(false)
 
@@ -1408,10 +1425,13 @@ function SlackMatchContent() {
     setMonthAutoSelected(false)
   }, [entityId])
 
-  // Auto-select latest month with data if current month is empty
+  // Auto-select latest month with data ONLY on first load (no saved month)
   const [monthAutoSelected, setMonthAutoSelected] = useState(false)
   useEffect(() => {
     if (monthAutoSelected) return
+    // localStorage에 저장된 월이 있으면 자동 전환 안 함
+    const saved = typeof window !== "undefined" && localStorage.getItem("financeone-selected-month")
+    if (saved) { setMonthAutoSelected(true); return }
     if (monthlySummary.length > 0 && messages.length === 0 && !loading) {
       const sorted = [...monthlySummary].sort((a, b) =>
         a.yr !== b.yr ? b.yr - a.yr : b.mo - a.mo,

@@ -148,9 +148,12 @@ export function ActualTab({ entityId }: { entityId: string | null }) {
   const [state, setState] = useState<LoadState>("loading")
   const [detailState, setDetailState] = useState<LoadState>("loading")
   const [error, setError] = useState("")
-  const [globalMonth, setGlobalMonth] = useGlobalMonth()
+  const [globalMonth, setGlobalMonth, monthReady] = useGlobalMonth()
   const [selectedMonth, setSelectedMonthLocal] = useState(globalMonth)
   const setSelectedMonth = useCallback((m: string) => { setSelectedMonthLocal(m); setGlobalMonth(m) }, [setGlobalMonth])
+
+  // globalMonth가 localStorage에서 복원되면 동기화
+  useEffect(() => { setSelectedMonthLocal(globalMonth) }, [globalMonth])
 
   // Fetch summary (chart data)
   const fetchSummary = useCallback(async () => {
