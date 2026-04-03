@@ -230,12 +230,19 @@ export default function TransactionsPage() {
   const [perPage, setPerPage] = useState(50)
   const [globalMonth, setGlobalMonth] = useGlobalMonth() // ready handled via globalMonth sync effect
   const [filters, setFilters] = useState<Filters>(() => {
-    const [y, m] = globalMonth.split("-").map(Number)
+    // URL query에서 year/month/filter 읽기
+    const urlYear = searchParams.get("year")
+    const urlMonth = searchParams.get("month")
+    const urlFilter = searchParams.get("filter")
+    const monthStr = urlYear && urlMonth ? `${urlYear}-${String(Number(urlMonth)).padStart(2, "0")}` : globalMonth
+    const [y, m] = monthStr.split("-").map(Number)
     const lastDay = new Date(y, m, 0).getDate()
     return {
       ...INITIAL_FILTERS,
       dateFrom: `${y}-${String(m).padStart(2, "0")}-01`,
       dateTo: `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
+      unclassified: urlFilter === "unmapped",
+      unconfirmed: urlFilter === "unconfirmed",
     }
   })
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
@@ -253,6 +260,16 @@ export default function TransactionsPage() {
   const [bulkMapAccountId, setBulkMapAccountId] = useState("")
   const [slackMatch, setSlackMatch] = useState<SlackMatchInfo | null>(null)
   const [slackMatchLoading, setSlackMatchLoading] = useState(false)
+
+  // URL query에서 month 왔으면 globalMonth 동기화
+  useEffect(() => {
+    const urlYear = searchParams.get("year")
+    const urlMonth = searchParams.get("month")
+    if (urlYear && urlMonth) {
+      const m = `${urlYear}-${String(Number(urlMonth)).padStart(2, "0")}`
+      if (m !== globalMonth) setGlobalMonth(m)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // globalMonth 변경 시 filters 동기화 (localStorage 복원 포함)
   useEffect(() => {

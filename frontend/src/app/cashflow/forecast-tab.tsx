@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react"
 import { useGlobalMonth } from "@/hooks/use-global-month"
+import Link from "next/link"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import {
@@ -1258,9 +1259,23 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                         item.type === "in" ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]",
                       )}>
                         {(hasChildren && isCollapsed) || isVirtualParent ? (
-                          <span className={cn(isVirtualParent && !isCollapsed && "text-muted-foreground")}>
-                            {item.type === "in" ? "+" : "-"}{formatByEntity(displayAmount, entityId)}
-                          </span>
+                          <div className="flex flex-col items-end">
+                            <span className={cn(isVirtualParent && !isCollapsed && "text-muted-foreground")}>
+                              {item.type === "in" ? "+" : "-"}{formatByEntity(displayAmount, entityId)}
+                            </span>
+                            {displayActual != null && displayActual !== 0 && (() => {
+                              const diff = displayActual! - displayAmount
+                              if (Math.abs(diff) < 1) return null
+                              const pct = displayAmount !== 0 ? Math.round((diff / displayAmount) * 100) : null
+                              const isOver = diff > 0
+                              return (
+                                <span className={cn("text-[10px] font-normal", isOver ? "text-[hsl(var(--loss))]" : "text-[hsl(var(--profit))]")}>
+                                  실제 {formatByEntity(displayActual!, entityId)}
+                                  {pct != null && ` (${isOver ? "+" : ""}${pct}%)`}
+                                </span>
+                              )
+                            })()}
+                          </div>
                         ) : editingItemId === item.id ? (
                           <input
                             type="text"
@@ -1290,16 +1305,30 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                             }}
                           />
                         ) : (
-                          <span
-                            className="cursor-pointer hover:underline decoration-dotted"
-                            onClick={() => {
-                              setEditingItemId(item.id)
-                              setEditingAmount(item.forecast_amount.toLocaleString())
-                            }}
-                            title="클릭하여 수정"
-                          >
-                            {item.type === "in" ? "+" : "-"}{formatByEntity(item.forecast_amount, entityId)}
-                          </span>
+                          <div className="flex flex-col items-end">
+                            <span
+                              className="cursor-pointer hover:underline decoration-dotted"
+                              onClick={() => {
+                                setEditingItemId(item.id)
+                                setEditingAmount(item.forecast_amount.toLocaleString())
+                              }}
+                              title="클릭하여 수정"
+                            >
+                              {item.type === "in" ? "+" : "-"}{formatByEntity(item.forecast_amount, entityId)}
+                            </span>
+                            {item.actual_from_transactions != null && item.actual_from_transactions !== 0 && (() => {
+                              const diff = item.actual_from_transactions! - item.forecast_amount
+                              if (Math.abs(diff) < 1) return null
+                              const pct = item.forecast_amount !== 0 ? Math.round((diff / item.forecast_amount) * 100) : null
+                              const isOver = diff > 0
+                              return (
+                                <span className={cn("text-[10px] font-normal", isOver ? "text-[hsl(var(--loss))]" : "text-[hsl(var(--profit))]")}>
+                                  실제 {formatByEntity(item.actual_from_transactions!, entityId)}
+                                  {pct != null && ` (${isOver ? "+" : ""}${pct}%)`}
+                                </span>
+                              )
+                            })()}
+                          </div>
                         )}
                       </td>
                       {showComparison && (
@@ -1397,7 +1426,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                       <Badge variant="outline" className="text-[10px] font-semibold px-2 py-0.5 bg-amber-500/12 text-amber-400">미분류</Badge>
                     </td>
                     <td className="px-4 py-2.5">
-                      <a
+                      <Link
                         href={`/transactions?entity=${entityId}&year=${data.year}&month=${data.month}&filter=unmapped`}
                         className="flex items-center gap-1.5 group/link"
                       >
@@ -1405,7 +1434,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                         <span className="text-xs text-amber-400 underline decoration-dotted underline-offset-2 group-hover/link:decoration-solid">
                           미분류 실제 거래 {data.unmapped_count}건 &rarr;
                         </span>
-                      </a>
+                      </Link>
                     </td>
                     <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-muted-foreground">--</td>
                     {showComparison && (

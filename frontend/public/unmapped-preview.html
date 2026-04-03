@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>미분류 거래 행 — 예상 현금흐름 테이블 미리보기</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0b; color: #e4e4e7; font-family: -apple-system, 'Pretendard', sans-serif; padding: 40px; }
+  h2 { font-size: 14px; color: #a1a1aa; margin-bottom: 16px; letter-spacing: 0.05em; text-transform: uppercase; }
+  .card { background: #18181b; border: 1px solid #27272a; border-radius: 12px; overflow: hidden; max-width: 900px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 10px 16px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717a; border-bottom: 1px solid #27272a; }
+  th.right { text-align: right; }
+  td { padding: 10px 16px; border-bottom: 1px solid #27272a20; }
+  td.right { text-align: right; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; font-variant-numeric: tabular-nums; }
+  tr:last-child td { border-bottom: none; }
+
+  /* Type badges */
+  .badge { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 6px; }
+  .badge-in { background: rgba(34,197,94,0.12); color: #4ade80; }
+  .badge-out { background: rgba(239,68,68,0.12); color: #f87171; }
+  .badge-unmapped { background: rgba(245,158,11,0.12); color: #fbbf24; border: 1px solid rgba(245,158,11,0.2); }
+  .badge-timing { background: rgba(245,158,11,0.12); color: #fbbf24; }
+
+  /* Colors */
+  .profit { color: #4ade80; }
+  .loss { color: #f87171; }
+  .warning { color: #fbbf24; }
+  .muted { color: #52525b; }
+  .amber-bg { background: rgba(245,158,11,0.04); }
+  .amber-border { border-top: 1px dashed rgba(245,158,11,0.3); }
+  .closing-bg { background: rgba(245,158,11,0.03); border-top: 2px solid rgba(245,158,11,0.15); }
+
+  /* Icon */
+  .icon-warn { display: inline-flex; align-items: center; gap: 6px; }
+  .icon-warn svg { width: 14px; height: 14px; color: #fbbf24; }
+
+  .section-label { font-size: 11px; color: #71717a; padding: 6px 16px; background: #111113; }
+
+  /* Annotation */
+  .annotation {
+    position: relative;
+    margin-top: 20px;
+    max-width: 900px;
+  }
+  .annotation-arrow {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 16px;
+    background: rgba(245,158,11,0.08);
+    border: 1px solid rgba(245,158,11,0.2);
+    border-radius: 10px;
+  }
+  .annotation-arrow svg { flex-shrink: 0; margin-top: 2px; }
+  .annotation-text { font-size: 13px; line-height: 1.6; color: #fbbf24; }
+  .annotation-text strong { color: #fde68a; }
+
+  .comparison { margin-top: 40px; }
+  .comparison h3 { font-size: 12px; color: #71717a; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+
+<h2>Option A: 미분류 행이 있는 예상 항목 테이블</h2>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th style="width:80px">구분</th>
+        <th>항목</th>
+        <th class="right">예상 금액</th>
+        <th class="right">실제 금액</th>
+        <th class="right">예상 잔고</th>
+        <th class="right">실제 잔고</th>
+      </tr>
+    </thead>
+    <tbody>
+      <!-- Opening -->
+      <tr style="background:#111113">
+        <td></td>
+        <td style="font-weight:600">기초 잔고</td>
+        <td class="right muted">--</td>
+        <td class="right muted">--</td>
+        <td class="right warning">161,050,376</td>
+        <td class="right profit">161,050,376</td>
+      </tr>
+
+      <!-- Income items -->
+      <tr>
+        <td><span class="badge badge-in">수입</span></td>
+        <td>스마트스토어 정산</td>
+        <td class="right profit">+226,700,000</td>
+        <td class="right profit">+220,500,000</td>
+        <td class="right warning">387,750,376</td>
+        <td class="right profit">381,550,376</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-in">수입</span></td>
+        <td>기타 매출</td>
+        <td class="right profit">+15,000,000</td>
+        <td class="right profit">+14,200,000</td>
+        <td class="right warning">402,750,376</td>
+        <td class="right profit">395,750,376</td>
+      </tr>
+
+      <!-- Expense items -->
+      <tr>
+        <td><span class="badge badge-out">지출</span></td>
+        <td>급여</td>
+        <td class="right loss">-85,000,000</td>
+        <td class="right loss">-85,000,000</td>
+        <td class="right warning">317,750,376</td>
+        <td class="right profit">310,750,376</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-out">지출</span></td>
+        <td>임차료</td>
+        <td class="right loss">-12,000,000</td>
+        <td class="right loss">-12,000,000</td>
+        <td class="right warning">305,750,376</td>
+        <td class="right profit">298,750,376</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-out">지출</span></td>
+        <td>물류비</td>
+        <td class="right loss">-45,000,000</td>
+        <td class="right loss">-43,800,000</td>
+        <td class="right warning">260,750,376</td>
+        <td class="right profit">254,950,376</td>
+      </tr>
+
+      <!-- ★ UNMAPPED ROW — 핵심 -->
+      <tr class="amber-bg amber-border">
+        <td><span class="badge badge-unmapped">미분류</span></td>
+        <td>
+          <span class="icon-warn">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+            <span>미분류 실제 거래 <strong style="color:#fde68a">7건</strong></span>
+          </span>
+        </td>
+        <td class="right muted">--</td>
+        <td class="right">
+          <div class="profit" style="font-size:12px; font-family:monospace">+3,200,000</div>
+          <div class="loss" style="font-size:12px; font-family:monospace; margin-top:2px">-8,450,000</div>
+        </td>
+        <td class="right muted">--</td>
+        <td class="right muted">--</td>
+      </tr>
+
+      <!-- Timing -->
+      <tr class="amber-bg" style="border-top:1px solid rgba(168,85,247,0.15)">
+        <td><span class="badge badge-timing">시차보정</span></td>
+        <td>카드 시차 보정</td>
+        <td class="right loss">-5,400,000</td>
+        <td class="right muted">--</td>
+        <td class="right warning">--</td>
+        <td class="right muted">--</td>
+      </tr>
+
+      <!-- Closing -->
+      <tr class="closing-bg">
+        <td></td>
+        <td style="font-weight:700">기말 잔고</td>
+        <td class="right muted">--</td>
+        <td class="right muted">--</td>
+        <td class="right warning" style="font-weight:600">255,350,376</td>
+        <td class="right profit" style="font-weight:600">249,700,376</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="annotation">
+  <div class="annotation-arrow">
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+    <div class="annotation-text">
+      <strong>미분류 행 설명:</strong><br>
+      내부계정에 매핑되지 않은 실제 은행 거래 7건의 합계입니다.<br>
+      이 금액은 "실제 기말 잔고"에는 이미 반영되어 있지만,<br>
+      어떤 예상 항목에도 연결되지 않아 항목별 비교가 불가능합니다.<br><br>
+      <strong>예상 vs 실제 차이 = 예상 오차 + 미분류 거래</strong><br>
+      미분류를 줄이면 예상 정확도 추적이 더 투명해집니다.
+    </div>
+  </div>
+</div>
+
+<div class="comparison">
+  <h3>현재 구현 (미분류 행 없음) vs 제안 (미분류 행 있음)</h3>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; max-width:900px">
+    <div class="card" style="padding:16px">
+      <p style="font-size:11px; color:#ef4444; font-weight:600; margin-bottom:8px">BEFORE: 미분류 행 없음</p>
+      <p style="font-size:12px; color:#a1a1aa; line-height:1.6">
+        예상 기말: 255,350,376<br>
+        실제 기말: 249,700,376<br>
+        <span style="color:#f87171">차이: -5,650,000 (원인 불명)</span>
+      </p>
+    </div>
+    <div class="card" style="padding:16px; border-color:rgba(245,158,11,0.3)">
+      <p style="font-size:11px; color:#4ade80; font-weight:600; margin-bottom:8px">AFTER: 미분류 행 있음</p>
+      <p style="font-size:12px; color:#a1a1aa; line-height:1.6">
+        예상 기말: 255,350,376<br>
+        실제 기말: 249,700,376<br>
+        <span style="color:#fbbf24">미분류: +3.2M / -8.4M (7건)</span><br>
+        <span style="color:#4ade80">→ 차이 원인 투명하게 표시</span>
+      </p>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

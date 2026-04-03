@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>미분류 거래 반영 방식 — 설계 리뷰</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0b; color: #e4e4e7; font-family: -apple-system, 'Pretendard', sans-serif; padding: 32px 40px; }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .subtitle { font-size: 13px; color: #71717a; margin-bottom: 32px; }
+  h2 { font-size: 14px; color: #a1a1aa; margin-bottom: 12px; letter-spacing: 0.05em; text-transform: uppercase; }
+  h3 { font-size: 13px; color: #e4e4e7; margin-bottom: 8px; }
+
+  .section { margin-bottom: 40px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .card { background: #18181b; border: 1px solid #27272a; border-radius: 12px; overflow: hidden; }
+  .card-header { padding: 12px 16px; border-bottom: 1px solid #27272a; display: flex; align-items: center; gap: 8px; }
+  .card-body { padding: 16px; }
+
+  .tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; }
+  .tag-a { background: rgba(239,68,68,0.15); color: #f87171; }
+  .tag-b { background: rgba(34,197,94,0.15); color: #4ade80; }
+  .tag-rec { background: rgba(59,130,246,0.15); color: #60a5fa; }
+
+  /* Table styles */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; padding: 8px 12px; font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; color: #52525b; border-bottom: 1px solid #27272a; }
+  th.r { text-align: right; }
+  td { padding: 7px 12px; border-bottom: 1px solid #27272a15; }
+  td.r { text-align: right; font-family: 'SF Mono', monospace; font-size: 11px; font-variant-numeric: tabular-nums; }
+  .profit { color: #4ade80; }
+  .loss { color: #f87171; }
+  .warning { color: #fbbf24; }
+  .muted { color: #52525b; }
+  .purple { color: #a78bfa; }
+
+  .badge { display: inline-block; font-size: 9px; font-weight: 600; padding: 1px 6px; border-radius: 4px; }
+  .badge-in { background: rgba(34,197,94,0.12); color: #4ade80; }
+  .badge-out { background: rgba(239,68,68,0.12); color: #f87171; }
+  .badge-unmapped { background: rgba(245,158,11,0.12); color: #fbbf24; border: 1px solid rgba(245,158,11,0.25); }
+  .badge-timing { background: rgba(168,85,247,0.12); color: #a78bfa; }
+
+  .row-unmapped { background: rgba(245,158,11,0.04); border-top: 1px dashed rgba(245,158,11,0.3) !important; }
+  .row-closing { background: rgba(245,158,11,0.03); }
+  .row-closing td { border-top: 2px solid rgba(245,158,11,0.15); font-weight: 600; }
+  .row-open { background: #111113; }
+
+  /* Graph mock */
+  .graph-container { position: relative; height: 200px; background: #111113; border-radius: 8px; overflow: hidden; }
+  .graph-svg { width: 100%; height: 100%; }
+
+  /* Callout */
+  .callout { padding: 14px 16px; border-radius: 10px; font-size: 12px; line-height: 1.7; }
+  .callout-amber { background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.2); color: #fbbf24; }
+  .callout-blue { background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2); color: #60a5fa; }
+  .callout-green { background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.2); color: #4ade80; }
+  .callout strong { color: #fefce8; }
+  .callout-blue strong { color: #dbeafe; }
+  .callout-green strong { color: #dcfce7; }
+
+  .divider { border: none; border-top: 1px solid #27272a; margin: 32px 0; }
+
+  /* Decision box */
+  .decision-box { background: #18181b; border: 2px solid rgba(59,130,246,0.3); border-radius: 12px; padding: 20px; }
+  .decision-box h3 { color: #60a5fa; margin-bottom: 12px; }
+  .decision-option { display: flex; gap: 12px; padding: 12px; border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
+  .decision-option:hover { background: rgba(255,255,255,0.03); }
+  .radio { width: 18px; height: 18px; border: 2px solid #3f3f46; border-radius: 50%; flex-shrink: 0; margin-top: 2px; display: flex; align-items: center; justify-content: center; }
+  .radio.selected { border-color: #60a5fa; }
+  .radio.selected::after { content: ''; width: 8px; height: 8px; background: #60a5fa; border-radius: 50%; }
+  .option-text { font-size: 13px; line-height: 1.5; }
+  .option-text .label { font-weight: 600; color: #e4e4e7; }
+  .option-text .desc { color: #a1a1aa; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>미분류 거래 반영 방식 — 설계 리뷰</h1>
+<p class="subtitle">예상 현금흐름 테이블 + 그래프에서 미매핑 거래를 어떻게 보여줄 것인가</p>
+
+<!-- ─── SECTION 1: 테이블 비교 ─── -->
+<div class="section">
+  <h2>1. 테이블 비교</h2>
+  <div class="grid-2">
+
+    <!-- Option A -->
+    <div class="card">
+      <div class="card-header">
+        <span class="tag tag-a">Option A</span>
+        <span style="font-size:12px; font-weight:600">정보 표시만 (예상 잔고 미반영)</span>
+      </div>
+      <table>
+        <thead><tr><th>항목</th><th class="r">예상</th><th class="r">실제</th><th class="r">예상잔고</th></tr></thead>
+        <tbody>
+          <tr class="row-open"><td style="font-weight:600">기초 잔고</td><td class="r muted">-</td><td class="r muted">-</td><td class="r warning">161.0M</td></tr>
+          <tr><td><span class="badge badge-in">수입</span> 스마트스토어</td><td class="r profit">+226.7M</td><td class="r profit">+220.5M</td><td class="r warning">387.7M</td></tr>
+          <tr><td><span class="badge badge-out">지출</span> 급여</td><td class="r loss">-85.0M</td><td class="r loss">-85.0M</td><td class="r warning">302.7M</td></tr>
+          <tr><td><span class="badge badge-out">지출</span> 물류비</td><td class="r loss">-45.0M</td><td class="r loss">-43.8M</td><td class="r warning">257.7M</td></tr>
+          <tr class="row-unmapped">
+            <td><span class="badge badge-unmapped">미분류</span> 7건</td>
+            <td class="r muted">--</td>
+            <td class="r"><span class="profit">+3.2M</span> / <span class="loss">-8.4M</span></td>
+            <td class="r muted" style="font-size:11px">반영 안 됨</td>
+          </tr>
+          <tr class="row-closing"><td>기말 잔고</td><td class="r muted">-</td><td class="r muted">-</td><td class="r warning">257.7M</td></tr>
+        </tbody>
+      </table>
+      <div style="padding: 12px 16px;">
+        <div class="callout callout-amber" style="font-size:11px">
+          미분류 입금 +3.2M, 출금 -8.4M이 예상 잔고에 <strong>반영되지 않음</strong>.<br>
+          실제 기말은 252.5M인데 예상은 257.7M으로 표시 → <strong>5.2M 갭이 보이지 않음</strong>
+        </div>
+      </div>
+    </div>
+
+    <!-- Option B -->
+    <div class="card" style="border-color: rgba(34,197,94,0.3)">
+      <div class="card-header">
+        <span class="tag tag-b">Option B</span>
+        <span style="font-size:12px; font-weight:600">예상 잔고에 반영 (조정된 예상)</span>
+      </div>
+      <table>
+        <thead><tr><th>항목</th><th class="r">예상</th><th class="r">실제</th><th class="r">예상잔고</th></tr></thead>
+        <tbody>
+          <tr class="row-open"><td style="font-weight:600">기초 잔고</td><td class="r muted">-</td><td class="r muted">-</td><td class="r warning">161.0M</td></tr>
+          <tr><td><span class="badge badge-in">수입</span> 스마트스토어</td><td class="r profit">+226.7M</td><td class="r profit">+220.5M</td><td class="r warning">387.7M</td></tr>
+          <tr><td><span class="badge badge-out">지출</span> 급여</td><td class="r loss">-85.0M</td><td class="r loss">-85.0M</td><td class="r warning">302.7M</td></tr>
+          <tr><td><span class="badge badge-out">지출</span> 물류비</td><td class="r loss">-45.0M</td><td class="r loss">-43.8M</td><td class="r warning">257.7M</td></tr>
+          <tr class="row-unmapped">
+            <td><span class="badge badge-unmapped">미분류</span> 7건</td>
+            <td class="r muted">--</td>
+            <td class="r"><span class="profit">+3.2M</span> / <span class="loss">-8.4M</span></td>
+            <td class="r warning" style="font-weight:600">252.5M</td>
+          </tr>
+          <tr class="row-closing"><td>기말 잔고</td><td class="r muted">-</td><td class="r muted">-</td><td class="r warning" style="font-weight:700">252.5M</td></tr>
+        </tbody>
+      </table>
+      <div style="padding: 12px 16px;">
+        <div class="callout callout-green" style="font-size:11px">
+          미분류 순효과(-5.2M)가 예상 잔고에 <strong>즉시 반영</strong>.<br>
+          예상 기말 252.5M ≈ 실제 기말 252.5M → <strong>갭 원인이 투명하게 보임</strong><br>
+          월말: "어떤 항목을 예상에서 빠뜨렸나" 바로 파악 가능
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── SECTION 2: 그래프 비교 ─── -->
+<div class="section">
+  <h2>2. 일별 시뮬레이션 그래프 비교</h2>
+  <div class="grid-2">
+
+    <!-- Graph A -->
+    <div class="card">
+      <div class="card-header">
+        <span class="tag tag-a">Option A</span>
+        <span style="font-size:12px">그래프에 미분류 미반영</span>
+      </div>
+      <div class="card-body">
+        <div class="graph-container">
+          <svg class="graph-svg" viewBox="0 0 400 180">
+            <!-- Grid -->
+            <line x1="40" y1="20" x2="40" y2="155" stroke="#27272a" stroke-width="0.5"/>
+            <line x1="40" y1="155" x2="380" y2="155" stroke="#27272a" stroke-width="0.5"/>
+            <line x1="40" y1="60" x2="380" y2="60" stroke="#27272a" stroke-width="0.3" stroke-dasharray="4"/>
+            <line x1="40" y1="105" x2="380" y2="105" stroke="#27272a" stroke-width="0.3" stroke-dasharray="4"/>
+            <!-- Y labels -->
+            <text x="36" y="25" fill="#52525b" font-size="8" text-anchor="end">300M</text>
+            <text x="36" y="63" fill="#52525b" font-size="8" text-anchor="end">260M</text>
+            <text x="36" y="108" fill="#52525b" font-size="8" text-anchor="end">220M</text>
+            <text x="36" y="158" fill="#52525b" font-size="8" text-anchor="end">160M</text>
+            <!-- X labels -->
+            <text x="55" y="170" fill="#52525b" font-size="8">1</text>
+            <text x="120" y="170" fill="#52525b" font-size="8">7</text>
+            <text x="200" y="170" fill="#52525b" font-size="8">15</text>
+            <text x="290" y="170" fill="#52525b" font-size="8">23</text>
+            <text x="370" y="170" fill="#52525b" font-size="8">31</text>
+
+            <!-- Forecast line (예상) - smooth upward curve ending at 257.7M -->
+            <path d="M 45,150 Q 100,145 140,120 Q 200,80 260,55 Q 320,45 375,42" fill="none" stroke="#fbbf24" stroke-width="2" opacity="0.8"/>
+            <!-- Forecast area -->
+            <path d="M 45,150 Q 100,145 140,120 Q 200,80 260,55 Q 320,45 375,42 L 375,155 L 45,155 Z" fill="url(#gradA1)" opacity="0.15"/>
+
+            <!-- Actual line (실제) - ends lower at 252.5M -->
+            <path d="M 45,150 Q 90,148 130,125 Q 170,100 210,85 Q 250,70 290,58 Q 340,52 375,48" fill="none" stroke="#4ade80" stroke-width="2" stroke-dasharray="6,3"/>
+
+            <!-- Gap annotation -->
+            <line x1="375" y1="42" x2="375" y2="48" stroke="#f87171" stroke-width="2"/>
+            <text x="378" y="38" fill="#fbbf24" font-size="7" font-weight="600">257.7M</text>
+            <text x="378" y="54" fill="#4ade80" font-size="7" font-weight="600">252.5M</text>
+            <text x="378" y="66" fill="#f87171" font-size="7">갭 -5.2M</text>
+            <text x="378" y="76" fill="#f87171" font-size="6">(원인 불명)</text>
+
+            <defs>
+              <linearGradient id="gradA1" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#fbbf24"/>
+                <stop offset="100%" stop-color="#fbbf24" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+
+            <!-- Legend -->
+            <line x1="50" y1="12" x2="65" y2="12" stroke="#fbbf24" stroke-width="2"/>
+            <text x="68" y="15" fill="#fbbf24" font-size="7">예상</text>
+            <line x1="100" y1="12" x2="115" y2="12" stroke="#4ade80" stroke-width="2" stroke-dasharray="4,2"/>
+            <text x="118" y="15" fill="#4ade80" font-size="7">실제</text>
+          </svg>
+        </div>
+        <p style="font-size:11px; color:#71717a; margin-top:8px; text-align:center">
+          예상 선과 실제 선의 갭 원인을 알 수 없음
+        </p>
+      </div>
+    </div>
+
+    <!-- Graph B -->
+    <div class="card" style="border-color: rgba(34,197,94,0.3)">
+      <div class="card-header">
+        <span class="tag tag-b">Option B</span>
+        <span style="font-size:12px">미분류 반영 → 조정된 예상선 추가</span>
+      </div>
+      <div class="card-body">
+        <div class="graph-container">
+          <svg class="graph-svg" viewBox="0 0 400 180">
+            <!-- Grid -->
+            <line x1="40" y1="20" x2="40" y2="155" stroke="#27272a" stroke-width="0.5"/>
+            <line x1="40" y1="155" x2="380" y2="155" stroke="#27272a" stroke-width="0.5"/>
+            <line x1="40" y1="60" x2="380" y2="60" stroke="#27272a" stroke-width="0.3" stroke-dasharray="4"/>
+            <line x1="40" y1="105" x2="380" y2="105" stroke="#27272a" stroke-width="0.3" stroke-dasharray="4"/>
+            <!-- Y labels -->
+            <text x="36" y="25" fill="#52525b" font-size="8" text-anchor="end">300M</text>
+            <text x="36" y="63" fill="#52525b" font-size="8" text-anchor="end">260M</text>
+            <text x="36" y="108" fill="#52525b" font-size="8" text-anchor="end">220M</text>
+            <text x="36" y="158" fill="#52525b" font-size="8" text-anchor="end">160M</text>
+            <!-- X labels -->
+            <text x="55" y="170" fill="#52525b" font-size="8">1</text>
+            <text x="120" y="170" fill="#52525b" font-size="8">7</text>
+            <text x="200" y="170" fill="#52525b" font-size="8">15</text>
+            <text x="290" y="170" fill="#52525b" font-size="8">23</text>
+            <text x="370" y="170" fill="#52525b" font-size="8">31</text>
+
+            <!-- Original forecast line (원래 예상) - faded -->
+            <path d="M 45,150 Q 100,145 140,120 Q 200,80 260,55 Q 320,45 375,42" fill="none" stroke="#fbbf24" stroke-width="1.5" opacity="0.3" stroke-dasharray="4,3"/>
+
+            <!-- Adjusted forecast line (조정된 예상) - includes unmapped impact -->
+            <path d="M 45,150 Q 100,145 140,120 Q 180,95 210,82 Q 250,68 290,56 Q 340,50 375,48" fill="none" stroke="#fbbf24" stroke-width="2.5" opacity="0.9"/>
+            <!-- Adjusted forecast area -->
+            <path d="M 45,150 Q 100,145 140,120 Q 180,95 210,82 Q 250,68 290,56 Q 340,50 375,48 L 375,155 L 45,155 Z" fill="url(#gradB1)" opacity="0.15"/>
+
+            <!-- Actual line (실제) - very close to adjusted -->
+            <path d="M 45,150 Q 90,148 130,125 Q 170,100 210,85 Q 250,70 290,58 Q 340,52 375,48" fill="none" stroke="#4ade80" stroke-width="2" stroke-dasharray="6,3"/>
+
+            <!-- Unmapped impact markers -->
+            <circle cx="175" cy="95" r="4" fill="#fbbf24" opacity="0.6"/>
+            <text x="180" y="91" fill="#fbbf24" font-size="6" font-weight="600">미분류 -1.2M</text>
+            <circle cx="260" cy="65" r="4" fill="#fbbf24" opacity="0.6"/>
+            <text x="265" y="61" fill="#fbbf24" font-size="6" font-weight="600">미분류 -3.5M</text>
+
+            <!-- End annotations -->
+            <text x="378" y="38" fill="#71717a" font-size="6">원래 예상 257.7M</text>
+            <text x="378" y="46" fill="#fbbf24" font-size="7" font-weight="600">조정 252.5M</text>
+            <text x="378" y="54" fill="#4ade80" font-size="7" font-weight="600">실제 252.5M</text>
+            <text x="378" y="66" fill="#4ade80" font-size="7">갭 ≈ 0</text>
+
+            <defs>
+              <linearGradient id="gradB1" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#fbbf24"/>
+                <stop offset="100%" stop-color="#fbbf24" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+
+            <!-- Legend -->
+            <line x1="50" y1="12" x2="65" y2="12" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.4"/>
+            <text x="68" y="15" fill="#71717a" font-size="7">원래 예상</text>
+            <line x1="120" y1="12" x2="135" y2="12" stroke="#fbbf24" stroke-width="2.5"/>
+            <text x="138" y="15" fill="#fbbf24" font-size="7">조정 예상</text>
+            <line x1="180" y1="12" x2="195" y2="12" stroke="#4ade80" stroke-width="2" stroke-dasharray="4,2"/>
+            <text x="198" y="15" fill="#4ade80" font-size="7">실제</text>
+          </svg>
+        </div>
+        <p style="font-size:11px; color:#71717a; margin-top:8px; text-align:center">
+          미분류 거래 발생 시점에 조정선이 꺾임 → 갭 원인 투명
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── SECTION 3: 월말 분석 시나리오 ─── -->
+<div class="section">
+  <h2>3. 월말 분석 시나리오 — Option B가 가능하게 하는 것</h2>
+  <div class="card">
+    <div class="card-body" style="padding:20px">
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px">
+        <div>
+          <p style="font-size:10px; text-transform:uppercase; color:#52525b; margin-bottom:8px; letter-spacing:0.08em">Step 1: 월 중간</p>
+          <div style="background:#111; border-radius:8px; padding:12px; font-size:12px; line-height:1.8; color:#a1a1aa">
+            <span class="warning" style="font-weight:600">"미분류 7건 -5.2M"</span><br>
+            조정 예상 기말: 252.5M<br>
+            <span style="color:#71717a">→ 예상보다 5.2M 적을 것이라는 조기 경보</span>
+          </div>
+        </div>
+        <div>
+          <p style="font-size:10px; text-transform:uppercase; color:#52525b; margin-bottom:8px; letter-spacing:0.08em">Step 2: 월말 마감</p>
+          <div style="background:#111; border-radius:8px; padding:12px; font-size:12px; line-height:1.8; color:#a1a1aa">
+            예상: 257.7M → 실제: 252.5M<br>
+            <span class="loss">차이 -5.2M의 원인:</span><br>
+            - 미분류 지출: -8.4M<br>
+            - 미분류 수입: +3.2M<br>
+            <span style="color:#71717a">→ 항목별 차이 분해 가능</span>
+          </div>
+        </div>
+        <div>
+          <p style="font-size:10px; text-transform:uppercase; color:#52525b; margin-bottom:8px; letter-spacing:0.08em">Step 3: 다음 달 예상 작성</p>
+          <div style="background:#111; border-radius:8px; padding:12px; font-size:12px; line-height:1.8; color:#a1a1aa">
+            <span class="profit" style="font-weight:600">"이번 달 빠뜨린 항목:"</span><br>
+            - 미분류 출금 7건 중 5건 = 복리후생비<br>
+            → 다음 달 예상에 <span class="profit">복리후생비 항목 추가</span><br>
+            <span style="color:#71717a">→ 예상 정확도 점진적 개선</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ─── SECTION 4: 공식 비교 ─── -->
+<div class="section">
+  <h2>4. 예상 기말 공식 비교</h2>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header"><span class="tag tag-a">A</span><span style="font-size:11px; margin-left:4px">현재</span></div>
+      <div class="card-body" style="font-family:monospace; font-size:12px; line-height:2; color:#a1a1aa">
+        <span class="warning">예상 기말</span> = 기초 잔고<br>
+        &nbsp;&nbsp;+ 예상 입금<br>
+        &nbsp;&nbsp;- 예상 출금<br>
+        &nbsp;&nbsp;± 카드 시차보정<br>
+      </div>
+    </div>
+    <div class="card" style="border-color:rgba(34,197,94,0.3)">
+      <div class="card-header"><span class="tag tag-b">B</span><span style="font-size:11px; margin-left:4px">제안</span></div>
+      <div class="card-body" style="font-family:monospace; font-size:12px; line-height:2; color:#a1a1aa">
+        <span class="warning">조정 예상 기말</span> = 기초 잔고<br>
+        &nbsp;&nbsp;+ 예상 입금<br>
+        &nbsp;&nbsp;- 예상 출금<br>
+        &nbsp;&nbsp;± 카드 시차보정<br>
+        &nbsp;&nbsp;<span class="warning" style="font-weight:600">+ 미분류 실제 입금</span><br>
+        &nbsp;&nbsp;<span class="warning" style="font-weight:600">- 미분류 실제 출금</span><br>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── SECTION 5: 결정 ─── -->
+<div class="section">
+  <div class="decision-box">
+    <h3>결정 필요</h3>
+    <div class="decision-option">
+      <div class="radio"></div>
+      <div class="option-text">
+        <div class="label">Option A: 정보 표시만</div>
+        <div class="desc">미분류 행은 보여주되, 예상 잔고/그래프에는 반영하지 않음. 순수 예상과 실제를 분리.</div>
+      </div>
+    </div>
+    <div class="decision-option">
+      <div class="radio selected"></div>
+      <div class="option-text">
+        <div class="label">Option B: 조정된 예상 (추천)</div>
+        <div class="desc">미분류 거래를 예상 잔고에 반영. 그래프에 "원래 예상" 선(흐릿) + "조정 예상" 선(진하게). 월말 분석과 다음 달 예상 정확도 개선 가능.</div>
+      </div>
+    </div>
+    <div class="decision-option">
+      <div class="radio"></div>
+      <div class="option-text">
+        <div class="label">Option C: 토글 (둘 다)</div>
+        <div class="desc">"미분류 반영" 토글로 사용자가 선택. 기본값 B, 순수 예상 보고 싶으면 A로 전환.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
