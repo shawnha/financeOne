@@ -686,6 +686,196 @@ def get_forecast_cashflow(
     }
 
 
+def get_variance_bridge(
+    conn: PgConnection,
+    entity_id: int,
+    year: int,
+    month: int,
+) -> dict:
+    """예상 vs 실제 차이를 6개 버킷으로 분해하는 Variance Bridge.
+
+    부호 규칙: 양수 = 실제가 예상보다 높음, 음수 = 실제가 예상보다 낮음.
+    """
+    cur = conn.cursor()
+
+    # 기초잔고
+    opening = get_opening_balance(conn, entity_id, year, month)
+
+    # Forecast 합산
+    cur.execute(
+        """
+        SELECT type, COALESCE(payment_method, 'bank'), SUM(forecast_amount)
+        FROM forecasts
+        WHERE entity_id = %s AND year = %s AND month = %s
+        GROUP BY type, COALESCE(payment_method, 'bank')
+        """,
+        [entity_id, year, month],
+    )
+    forecast_income = Decimal("0")
+    forecast_expense_bank = Decimal("0")
+    forecast_expense_card = Decimal("0")
+    for row in cur.fetchall():
+        typ, pm, total = row
+        if typ == "in":
+            forecast_income += total
+        else:
+            if pm == "card":
+                forecast_expense_card += total
+            else:
+                forecast_expense_bank += total
+
+    # 실제 은행 거래 (전체)
+    cur.execute(
+        """
+        SELECT
+            COALESCE(SUM(CASE WHEN type = 'in' THEN amount ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN type = 'out' THEN amount ELSE 0 END), 0),
+            COUNT(*)
+        FROM transactions
+        WHERE entity_id = %s
+          AND source_type IN ('woori_bank', 'mercury_api', 'manual')
+          AND date >= %s AND date < %s
+          AND is_duplicate = false
+        """,
+        [entity_id, *build_date_range(year, month)],
+    )
+    actual_income, actual_expense_total, bank_tx_count = cur.fetchone()
+
+    # 은행 출금 중 카드대금 결제 분리 (이중 계산 방지)
+    cur.execute(
+        """
+        SELECT COALESCE(SUM(amount), 0), COUNT(*)
+        FROM transactions
+        WHERE entity_id = %s
+          AND source_type IN ('woori_bank', 'mercury_api', 'manual')
+          AND date >= %s AND date < %s
+          AND is_duplicate = false
+          AND type = 'out'
+          AND (counterparty ILIKE '%%롯데카드%%'
+               OR counterparty ILIKE '%%우리카드%%'
+               OR counterparty ILIKE '%%카드결제%%')
+        """,
+        [entity_id, *build_date_range(year, month)],
+    )
+    card_payment_via_bank, card_payment_count = cur.fetchone()
+    actual_expense_bank = actual_expense_total - card_payment_via_bank
+
+    # 카드 시차보정
+    prev_year = year if month > 1 else year - 1
+    prev_month = month - 1 if month > 1 else 12
+
+    prev_card_net = get_card_total_net(conn, entity_id, prev_year, prev_month)
+    curr_card_actual = get_card_total_net(conn, entity_id, year, month)
+    curr_card_estimate = forecast_expense_card if forecast_expense_card > 0 else prev_card_net
+    forecast_timing = curr_card_estimate - prev_card_net
+
+    # 미매핑 거래
+    cur.execute(
+        """
+        SELECT
+            COALESCE(SUM(CASE WHEN type = 'in' THEN amount ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN type = 'out' THEN amount ELSE 0 END), 0),
+            COUNT(*)
+        FROM transactions
+        WHERE entity_id = %s
+          AND date >= %s AND date < %s
+          AND is_duplicate = false
+          AND internal_account_id IS NULL
+          AND source_type IN ('woori_bank', 'mercury_api', 'manual')
+        """,
+        [entity_id, *build_date_range(year, month)],
+    )
+    unmapped_income, unmapped_expense, unmapped_count = cur.fetchone()
+
+    # Forecast/actual closing 계산
+    forecast_closing = (
+        opening + forecast_income - forecast_expense_bank
+        - curr_card_estimate + forecast_timing
+    )
+    adjusted_forecast = forecast_closing + unmapped_income - unmapped_expense
+    actual_closing = opening + actual_income - actual_expense_total
+    total_diff = actual_closing - adjusted_forecast
+
+    # 6개 버킷 (부호: 양수=실제가 높음, 음수=실제가 낮음)
+    b1_opening = Decimal("0")  # 같은 snapshot 사용하므로 0
+    b2_income = actual_income - forecast_income
+    b3_expense = -(actual_expense_bank - forecast_expense_bank)
+    b4_card = Decimal(str(card_payment_via_bank)) - prev_card_net
+    b5_unmapped = unmapped_income - unmapped_expense
+    bucket_sum = b1_opening + b2_income + b3_expense + b4_card + b5_unmapped
+    b6_residual = total_diff - bucket_sum
+
+    # Data quality checks
+    cur.execute(
+        "SELECT COUNT(DISTINCT source_type) FROM transactions "
+        "WHERE entity_id = %s AND source_type IN ('lotte_card', 'woori_card') "
+        "AND date >= %s AND date < %s AND is_duplicate = false",
+        [entity_id, *build_date_range(year, month)],
+    )
+    card_source_count = cur.fetchone()[0]
+    cur.execute(
+        "SELECT COUNT(*) FROM card_settings WHERE entity_id = %s AND is_active = true",
+        [entity_id],
+    )
+    card_setting_count = cur.fetchone()[0]
+    missing_card_settings = max(0, card_source_count - card_setting_count)
+
+    cur.execute(
+        "SELECT COUNT(*) FROM forecasts "
+        "WHERE entity_id = %s AND year = %s AND month = %s AND actual_amount IS NULL",
+        [entity_id, year, month],
+    )
+    unresolved_forecasts = cur.fetchone()[0]
+
+    # Missing snapshots: count bank accounts without prior-month snapshot
+    cur.execute(
+        """
+        SELECT COUNT(DISTINCT account_name) FROM balance_snapshots
+        WHERE entity_id = %s AND date <= make_date(%s, %s, 1)
+        """,
+        [entity_id, year, month],
+    )
+    snapshot_accounts = cur.fetchone()[0]
+    missing_snapshots = max(0, 1 - snapshot_accounts)  # at least 1 account expected
+
+    residual_threshold = max(abs(total_diff) * Decimal("0.2"), Decimal("100000"))
+    high_unexplained = abs(b6_residual) > residual_threshold
+
+    cur.close()
+
+    buckets = [
+        {"name": "기초잔고 차이", "amount": float(b1_opening),
+         "detail": "예상과 실제 동일 소스 사용" if b1_opening == 0 else "스냅샷 차이"},
+        {"name": "입금 차이", "amount": float(b2_income),
+         "detail": f"실제 {float(actual_income):,.0f} - 예상 {float(forecast_income):,.0f}"},
+        {"name": "출금 차이", "amount": float(b3_expense),
+         "detail": f"실제 {float(actual_expense_bank):,.0f} - 예상 {float(forecast_expense_bank):,.0f} (카드대금 제외)"},
+        {"name": "카드 결제", "amount": float(b4_card),
+         "detail": f"은행 카드대금 {float(card_payment_via_bank):,.0f} - 전월 카드 사용 {float(prev_card_net):,.0f}"},
+        {"name": "미매핑 거래", "amount": float(b5_unmapped),
+         "detail": f"미분류 {unmapped_count}건 (입금 {float(unmapped_income):,.0f} - 출금 {float(unmapped_expense):,.0f})"},
+        {"name": "기타/잔차", "amount": float(b6_residual),
+         "detail": "버킷 간 오차 또는 미식별 항목"},
+    ]
+
+    return {
+        "year": year,
+        "month": month,
+        "entity_id": entity_id,
+        "forecast_closing": float(adjusted_forecast),
+        "actual_closing": float(actual_closing),
+        "total_diff": float(total_diff),
+        "buckets": buckets,
+        "data_quality": {
+            "unmapped_count": int(unmapped_count),
+            "missing_snapshots": int(missing_snapshots),
+            "missing_card_settings": int(missing_card_settings),
+            "unresolved_forecasts": int(unresolved_forecasts),
+            "high_unexplained_variance": high_unexplained,
+        },
+    }
+
+
 def generate_daily_schedule(
     conn: PgConnection,
     entity_id: int,

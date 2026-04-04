@@ -30,7 +30,8 @@ import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { fetchAPI } from "@/lib/api"
 import { formatByEntity } from "@/lib/format"
-import { AlertCircle, RefreshCw, Plus, Download, Trash2, Pencil, ChevronRight, ChevronDown, Link2, AlertTriangle } from "lucide-react"
+import { BarChart, Bar, Cell } from "recharts"
+import { AlertCircle, RefreshCw, Plus, Download, Trash2, Pencil, ChevronRight, ChevronDown, Link2, AlertTriangle, TrendingDown, TrendingUp } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { MonthPicker } from "@/components/month-picker"
@@ -144,6 +145,29 @@ interface SummaryData {
   available_months: string[]
 }
 
+interface VarianceBucket {
+  name: string
+  amount: number
+  detail: string
+}
+
+interface VarianceData {
+  year: number
+  month: number
+  entity_id: number
+  forecast_closing: number
+  actual_closing: number
+  total_diff: number
+  buckets: VarianceBucket[]
+  data_quality: {
+    unmapped_count: number
+    missing_snapshots: number
+    missing_card_settings: number
+    unresolved_forecasts: number
+    high_unexplained_variance: boolean
+  }
+}
+
 type LoadState = "loading" | "empty" | "error" | "success"
 
 
@@ -210,6 +234,193 @@ const CARD_COLORS: Record<string, { stroke: string; fill: string; label: string 
 const DEFAULT_CARD_COLOR = { stroke: "#8B5CF6", fill: "rgba(139,92,246,0.3)", label: "카드 결제일" }
 
 // ── Forecast Balance Chart (daily-schedule API) ──────
+
+// ── Variance Bridge ──────────────────────────────────
+
+function VarianceBridge({ entityId, year, month }: { entityId: string | null; year: number; month: number }) {
+  const [data, setData] = useState<VarianceData | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [open, setOpen] = useState(false)
+
+  const fetchVariance = useCallback(async () => {
+    if (!entityId) return
+    setLoading(true)
+    try {
+      const res = await fetchAPI<VarianceData>(
+        `/cashflow/variance?entity_id=${entityId}&year=${year}&month=${month}`,
+      )
+      setData(res)
+    } catch {
+      setData(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [entityId, year, month])
+
+  useEffect(() => {
+    if (open && !data) fetchVariance()
+  }, [open, data, fetchVariance])
+
+  // Reset data when month changes
+  useEffect(() => {
+    setData(null)
+  }, [year, month])
+
+  if (!entityId) return null
+
+  const dqIssues = data ? [
+    data.data_quality.unmapped_count > 0 && `미매핑 거래 ${data.data_quality.unmapped_count}건`,
+    data.data_quality.missing_snapshots > 0 && `기초잔고 스냅샷 누락 ${data.data_quality.missing_snapshots}건`,
+    data.data_quality.missing_card_settings > 0 && `카드 설정 미등록 ${data.data_quality.missing_card_settings}건`,
+    data.data_quality.unresolved_forecasts > 0 && `예상 항목 미반영 ${data.data_quality.unresolved_forecasts}건`,
+    data.data_quality.high_unexplained_variance && "설명 안 되는 잔차가 큼",
+  ].filter(Boolean) as string[] : []
+
+  // Waterfall chart data: stacked bar with invisible base
+  const chartData = data ? (() => {
+    const items: Array<{ name: string; base: number; delta: number; total: number; isPositive: boolean; isEndpoint: boolean }> = []
+    // Start bar
+    items.push({ name: "예상 기말", base: 0, delta: data.forecast_closing, total: data.forecast_closing, isPositive: true, isEndpoint: true })
+
+    let running = data.forecast_closing
+    for (const bucket of data.buckets) {
+      if (Math.abs(bucket.amount) < 1) continue
+      const newRunning = running + bucket.amount
+      if (bucket.amount >= 0) {
+        items.push({ name: bucket.name, base: running, delta: bucket.amount, total: newRunning, isPositive: true, isEndpoint: false })
+      } else {
+        items.push({ name: bucket.name, base: newRunning, delta: Math.abs(bucket.amount), total: newRunning, isPositive: false, isEndpoint: false })
+      }
+      running = newRunning
+    }
+
+    // End bar
+    items.push({ name: "실제 기말", base: 0, delta: data.actual_closing, total: data.actual_closing, isPositive: true, isEndpoint: true })
+    return items
+  })() : []
+
+  const maxBucketAbs = data ? Math.max(...data.buckets.map(b => Math.abs(b.amount)), 1) : 1
+
+  return (
+    <Card className="rounded-2xl overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors"
+        aria-expanded={open}
+      >
+        <div className="flex items-center gap-2">
+          {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          <h3 className="text-lg font-semibold">차이 분석</h3>
+          {dqIssues.length > 0 && (
+            <Badge variant="outline" className="text-amber-400 border-amber-500/30 text-[10px]">
+              {dqIssues.length}건 주의
+            </Badge>
+          )}
+        </div>
+        {data && (
+          <span className={cn("text-sm font-mono tabular-nums", data.total_diff >= 0 ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]")}>
+            {data.total_diff >= 0 ? "+" : ""}{formatByEntity(data.total_diff, entityId)}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 space-y-4 border-t border-border pt-4">
+          {loading && (
+            <div className="space-y-2">
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-full" />
+            </div>
+          )}
+
+          {!loading && data && (
+            <>
+              {/* Waterfall Chart */}
+              <div className="w-full overflow-x-auto">
+                <ResponsiveContainer width="100%" height={200} minWidth={0}>
+                  <BarChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                    <XAxis dataKey="name" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} interval={0} angle={-20} textAnchor="end" height={50} />
+                    <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickFormatter={(v: number) => `${(v / 1000000).toFixed(0)}M`} width={50} />
+                    <Tooltip
+                      formatter={(value: number, name: string) => {
+                        if (name === "base") return [null, null]
+                        return [formatByEntity(value, entityId), "금액"]
+                      }}
+                      contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
+                    />
+                    <Bar dataKey="base" stackId="stack" fill="transparent" />
+                    <Bar dataKey="delta" stackId="stack" radius={[3, 3, 0, 0]}>
+                      {chartData.map((entry, i) => (
+                        <Cell key={i} fill={entry.isEndpoint ? "hsl(var(--primary))" : entry.isPositive ? "hsl(var(--profit))" : "hsl(var(--loss))"} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Driver Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/30 text-[10px] text-muted-foreground uppercase tracking-wider">
+                      <th className="text-left px-3 py-2">버킷</th>
+                      <th className="text-left px-3 py-2">설명</th>
+                      <th className="text-right px-3 py-2">금액</th>
+                      <th className="text-right px-3 py-2">비중</th>
+                      <th className="w-24 px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.buckets.filter(b => Math.abs(b.amount) >= 1).map((bucket, i) => {
+                      const pct = data.total_diff !== 0 ? Math.abs(bucket.amount / data.total_diff * 100) : 0
+                      const barWidth = Math.min(100, Math.abs(bucket.amount) / maxBucketAbs * 100)
+                      return (
+                        <tr key={i} className="border-t border-border/50 hover:bg-muted/20">
+                          <td className="px-3 py-2 font-medium">{bucket.name}</td>
+                          <td className="px-3 py-2 text-muted-foreground text-xs max-w-[200px] truncate">{bucket.detail}</td>
+                          <td className={cn("px-3 py-2 text-right font-mono tabular-nums", bucket.amount >= 0 ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]")}>
+                            {bucket.amount >= 0 ? "+" : ""}{formatByEntity(bucket.amount, entityId)}
+                          </td>
+                          <td className="px-3 py-2 text-right text-xs text-muted-foreground">{pct.toFixed(0)}%</td>
+                          <td className="px-3 py-2">
+                            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className={cn("h-full rounded-full", bucket.amount >= 0 ? "bg-[hsl(var(--profit))]" : "bg-[hsl(var(--loss))]")}
+                                style={{ width: `${barWidth}%` }}
+                              />
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Data Quality */}
+              {dqIssues.length > 0 && (
+                <div className="bg-amber-500/[0.06] border border-amber-500/15 rounded-lg px-4 py-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-400" />
+                    <span className="text-xs font-semibold text-amber-400">데이터 품질</span>
+                  </div>
+                  <div className="space-y-1">
+                    {dqIssues.map((issue, i) => (
+                      <p key={i} className="text-xs text-amber-300/80">{issue}</p>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </Card>
+  )
+}
+
 
 function ForecastBalanceChart({
   schedule,
@@ -1621,6 +1832,9 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
           </div>
         </Card>
       </div>
+
+      {/* Variance Bridge */}
+      <VarianceBridge entityId={entityId} year={y} month={m} />
 
       {/* Edit Modal */}
       {editModalItem && (

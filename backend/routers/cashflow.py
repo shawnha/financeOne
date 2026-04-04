@@ -18,6 +18,7 @@ from backend.services.cashflow_service import (
     get_card_transactions,
     get_monthly_summary_data,
     get_forecast_cashflow,
+    get_variance_bridge,
     generate_daily_schedule,
 )
 
@@ -176,6 +177,21 @@ def get_forecast(
         return get_forecast_cashflow(conn, entity_id, year, month)
     except Exception as e:
         logger.error("Cashflow forecast error: %s", e)
+        raise HTTPException(500, detail=str(e))
+
+
+@router.get("/variance")
+def get_variance(
+    entity_id: int = Query(...),
+    year: int = Query(...),
+    month: int = Query(...),
+    conn: PgConnection = Depends(get_db),
+):
+    """예상 vs 실제 차이 분석 (Variance Bridge) — 6개 버킷 분해."""
+    try:
+        return get_variance_bridge(conn, entity_id, year, month)
+    except Exception as e:
+        logger.error("Cashflow variance error: %s", e)
         raise HTTPException(500, detail=str(e))
 
 
