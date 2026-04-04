@@ -241,7 +241,7 @@ function ForecastBalanceChart({
 
   return (
     <Card className="bg-secondary rounded-2xl p-6">
-      <ResponsiveContainer width="100%" height={250}>
+      <ResponsiveContainer width="100%" height={250} minWidth={0}>
         <ComposedChart data={chartData.points} margin={{ top: 28, right: 20, left: 10, bottom: 5 }}>
           <defs>
             <linearGradient id="forecastEstGrad" x1="0" y1="0" x2="0" y2="1">
