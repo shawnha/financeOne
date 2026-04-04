@@ -57,6 +57,8 @@ def build_daily_rows(
             "balance": balance,
             "tx_id": tx.get("id"),
             "source_type": tx.get("source_type"),
+            "internal_account_id": tx.get("internal_account_id"),
+            "internal_account_name": tx.get("internal_account_name"),
         })
 
     # Closing row
