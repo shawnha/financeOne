@@ -49,6 +49,8 @@ def get_actual_cashflow(
                 "balance": float(row["balance"]),
                 "tx_id": row.get("tx_id"),
                 "source_type": row.get("source_type"),
+                "internal_account_id": row.get("internal_account_id"),
+                "internal_account_name": row.get("internal_account_name"),
             })
 
         return {

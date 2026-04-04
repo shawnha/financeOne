@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useMemo } from "react"
 import { useGlobalMonth } from "@/hooks/use-global-month"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -20,7 +20,7 @@ import {
   ComposedChart,
   Cell,
 } from "recharts"
-import { AlertCircle, RefreshCw, Upload, ChevronDown, ChevronUp, Download } from "lucide-react"
+import { AlertCircle, RefreshCw, Upload, ChevronDown, ChevronUp, Download, List, FolderTree } from "lucide-react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { MonthPicker } from "@/components/month-picker"
@@ -52,6 +52,8 @@ interface ActualRow {
   balance: number
   tx_id: number | null
   source_type?: string
+  internal_account_id?: number | null
+  internal_account_name?: string | null
 }
 
 interface ActualData {
@@ -148,6 +150,7 @@ export function ActualTab({ entityId }: { entityId: string | null }) {
   const [state, setState] = useState<LoadState>("loading")
   const [detailState, setDetailState] = useState<LoadState>("loading")
   const [error, setError] = useState("")
+  const [viewMode, setViewMode] = useState<"time" | "account">("time")
   const [globalMonth, setGlobalMonth, monthReady] = useGlobalMonth()
   const [selectedMonth, setSelectedMonthLocal] = useState(globalMonth)
   const setSelectedMonth = useCallback((m: string) => { setSelectedMonthLocal(m); setGlobalMonth(m) }, [setGlobalMonth])
@@ -441,6 +444,28 @@ export function ActualTab({ entityId }: { entityId: string | null }) {
           <h3 className="text-lg font-semibold">
             {selectedMonth && `${parseInt(selectedMonth.slice(5))}월 거래 내역`}
           </h3>
+          <div className="flex items-center gap-1 bg-muted/30 rounded-lg p-0.5">
+            <button
+              onClick={() => setViewMode("time")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+                viewMode === "time" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              )}
+              aria-pressed={viewMode === "time"}
+            >
+              <List className="h-3.5 w-3.5" /> 시간순
+            </button>
+            <button
+              onClick={() => setViewMode("account")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+                viewMode === "account" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              )}
+              aria-pressed={viewMode === "account"}
+            >
+              <FolderTree className="h-3.5 w-3.5" /> 계정별
+            </button>
+          </div>
         </div>
         {detailState === "loading" ? (
           <div className="p-4 space-y-2">
@@ -453,7 +478,9 @@ export function ActualTab({ entityId }: { entityId: string | null }) {
             해당 월에 거래가 없습니다.
           </div>
         ) : detail ? (
-          <TransactionList rows={detail.rows} entityId={entityId} />
+          viewMode === "time"
+            ? <TransactionList rows={detail.rows} entityId={entityId} />
+            : <AccountGroupedList rows={detail.rows} entityId={entityId} />
         ) : null}
       </Card>
     </div>
@@ -572,6 +599,133 @@ function TransactionList({ rows, entityId }: { rows: ActualRow[]; entityId: stri
               {row.type === "in" ? "+" : "-"}{formatByEntity(Math.abs(row.amount), entityId)}
             </span>
             <span className="text-right font-mono text-xs font-medium">{formatByEntity(row.balance, entityId)}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Account Grouped View ──────────────────────────────
+
+interface AccountGroup {
+  accountName: string
+  accountId: number | null
+  rows: ActualRow[]
+  totalIn: number
+  totalOut: number
+}
+
+function AccountGroupedList({ rows, entityId }: { rows: ActualRow[]; entityId: string | null }) {
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+
+  const groups = useMemo(() => {
+    const txRows = rows.filter(r => r.type === "in" || r.type === "out")
+    const map = new Map<string, AccountGroup>()
+
+    for (const row of txRows) {
+      const key = row.internal_account_name ?? "미분류"
+      if (!map.has(key)) {
+        map.set(key, {
+          accountName: key,
+          accountId: row.internal_account_id ?? null,
+          rows: [],
+          totalIn: 0,
+          totalOut: 0,
+        })
+      }
+      const group = map.get(key)!
+      group.rows.push(row)
+      if (row.type === "in") group.totalIn += row.amount
+      else group.totalOut += Math.abs(row.amount)
+    }
+
+    // Sort: named accounts first (alphabetical), 미분류 last
+    const sorted = (Array.from(map.values()) as AccountGroup[]).sort((a, b) => {
+      if (a.accountName === "미분류") return 1
+      if (b.accountName === "미분류") return -1
+      return a.accountName.localeCompare(b.accountName, "ko")
+    })
+
+    return sorted
+  }, [rows])
+
+  const toggleGroup = (name: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="grid grid-cols-[1fr_100px_100px_80px] px-4 py-2.5 bg-muted/30 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+        <span>계정</span>
+        <span className="text-right">입금</span>
+        <span className="text-right">출금</span>
+        <span className="text-right">건수</span>
+      </div>
+
+      {groups.map((group) => {
+        const isExpanded = expandedGroups.has(group.accountName)
+        const isUnmapped = group.accountName === "미분류"
+
+        return (
+          <div key={group.accountName}>
+            {/* Group header row */}
+            <button
+              onClick={() => toggleGroup(group.accountName)}
+              className={cn(
+                "w-full grid grid-cols-[1fr_100px_100px_80px] px-4 py-3 border-t border-border text-left hover:bg-white/[0.02] transition-colors",
+                isUnmapped && "bg-amber-500/[0.03]"
+              )}
+              aria-expanded={isExpanded}
+              aria-label={`${group.accountName} ${isExpanded ? '접기' : '펼치기'}`}
+            >
+              <span className="flex items-center gap-2">
+                {isExpanded
+                  ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  : <ChevronUp className="h-4 w-4 text-muted-foreground rotate-90" />}
+                <span className={cn("font-medium", isUnmapped && "text-amber-400")}>
+                  {group.accountName}
+                </span>
+                {isUnmapped && (
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/12 text-amber-400">
+                    {group.rows.length}건
+                  </Badge>
+                )}
+              </span>
+              <span className="text-right font-mono text-xs text-[hsl(var(--profit))]">
+                {group.totalIn > 0 ? `+${formatByEntity(group.totalIn, entityId)}` : ""}
+              </span>
+              <span className="text-right font-mono text-xs text-[hsl(var(--loss))]">
+                {group.totalOut > 0 ? `-${formatByEntity(group.totalOut, entityId)}` : ""}
+              </span>
+              <span className="text-right font-mono text-xs text-muted-foreground">
+                {group.rows.length}건
+              </span>
+            </button>
+
+            {/* Expanded transactions */}
+            {isExpanded && (
+              <div className="bg-black/[0.08]">
+                {group.rows.map((row: ActualRow, i: number) => (
+                  <div
+                    key={`${row.tx_id ?? i}`}
+                    className="grid grid-cols-[70px_1fr_120px] px-4 py-2 pl-10 border-t border-border/30 text-[13px]"
+                  >
+                    <span className="font-mono text-xs text-muted-foreground">{row.date?.slice(5) ?? ""}</span>
+                    <span className="truncate">{row.description}</span>
+                    <span className={cn("text-right font-mono text-xs", row.type === "in" ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]")}>
+                      {row.type === "in" ? "+" : "-"}{formatByEntity(Math.abs(row.amount), entityId)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )
       })}

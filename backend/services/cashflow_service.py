@@ -237,8 +237,10 @@ def get_bank_transactions(conn: PgConnection, entity_id: int, year: int, month: 
     cur.execute(
         """
         SELECT t.id, t.date, t.type, t.amount, t.description, t.counterparty,
-               t.source_type
+               t.source_type, t.internal_account_id,
+               ia.name AS internal_account_name
         FROM transactions t
+        LEFT JOIN internal_accounts ia ON t.internal_account_id = ia.id
         WHERE t.entity_id = %s
           AND t.source_type IN ('woori_bank', 'mercury_api', 'manual')
           AND t.date >= %s AND t.date < %s
