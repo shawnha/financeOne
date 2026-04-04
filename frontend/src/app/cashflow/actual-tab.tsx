@@ -438,7 +438,7 @@ export function ActualTab({ entityId }: { entityId: string | null }) {
       {/* Transaction List */}
       <Card className="overflow-hidden rounded-2xl">
         <div className="px-4 py-3 flex items-center justify-between border-b border-border">
-          <h3 className="text-sm font-semibold">
+          <h3 className="text-lg font-semibold">
             {selectedMonth && `${parseInt(selectedMonth.slice(5))}월 거래 내역`}
           </h3>
         </div>

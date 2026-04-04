@@ -1075,7 +1075,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
       <Card className="overflow-hidden rounded-2xl">
         <div className="px-4 py-3 flex items-center justify-between border-b border-border">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold">{m}월 예상 항목</h3>
+            <h3 className="text-lg font-semibold">{m}월 예상 항목</h3>
             {data.items.filter(i => !i.internal_account_id).length > 0 && (
               <button
                 onClick={async () => {
