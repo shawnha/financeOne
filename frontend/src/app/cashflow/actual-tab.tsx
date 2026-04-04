@@ -54,6 +54,7 @@ interface ActualRow {
   source_type?: string
   internal_account_id?: number | null
   internal_account_name?: string | null
+  parent_account_name?: string | null
 }
 
 interface ActualData {
@@ -645,53 +646,80 @@ function TransactionList({ rows, entityId }: { rows: ActualRow[]; entityId: stri
   )
 }
 
-// ── Account Grouped View (입금/출금 트리) ──────────────
+// ── Account Grouped View (입금/출금 → 중분류 → 소분류 트리) ──
 
-interface AccountGroup {
+interface ChildAccount {
   accountName: string
-  accountId: number | null
   rows: ActualRow[]
   total: number
 }
 
+interface ParentGroup {
+  parentName: string
+  children: ChildAccount[]
+  total: number
+  txCount: number
+}
+
 function AccountGroupedList({ rows, entityId }: { rows: ActualRow[]; entityId: string | null }) {
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set())
 
-  const { incomeGroups, expenseGroups, totalIncome, totalExpense } = useMemo(() => {
-    const incomeMap = new Map<string, AccountGroup>()
-    const expenseMap = new Map<string, AccountGroup>()
-
+  const { incomeTree, expenseTree, totalIncome, totalExpense } = useMemo(() => {
     const txRows = rows.filter(r => r.type === "in" || r.type === "out")
 
-    for (const row of txRows) {
-      const key = row.internal_account_name ?? "미분류"
-      const map = row.type === "in" ? incomeMap : expenseMap
+    // Build: type → parentName → childName → rows
+    const buildTree = (type: "in" | "out"): ParentGroup[] => {
+      const filtered = txRows.filter(r => r.type === type)
+      const parentMap = new Map<string, Map<string, ActualRow[]>>()
 
-      if (!map.has(key)) {
-        map.set(key, { accountName: key, accountId: row.internal_account_id ?? null, rows: [], total: 0 })
+      for (const row of filtered) {
+        const parentName = row.parent_account_name ?? row.internal_account_name ?? "미분류"
+        const childName = row.parent_account_name ? (row.internal_account_name ?? "미분류") : "_self"
+
+        if (!parentMap.has(parentName)) parentMap.set(parentName, new Map())
+        const childMap = parentMap.get(parentName)!
+        if (!childMap.has(childName)) childMap.set(childName, [])
+        childMap.get(childName)!.push(row)
       }
-      const group = map.get(key)!
-      group.rows.push(row)
-      group.total += Math.abs(row.amount)
-    }
 
-    const sortGroups = (groups: AccountGroup[]) =>
-      groups.sort((a, b) => {
-        if (a.accountName === "미분류") return 1
-        if (b.accountName === "미분류") return -1
-        return b.total - a.total // 금액 큰 순
+      const groups: ParentGroup[] = []
+      parentMap.forEach((childMap, parentName) => {
+        const children: ChildAccount[] = []
+        let groupTotal = 0
+        let txCount = 0
+
+        childMap.forEach((childRows, childName) => {
+          const total = childRows.reduce((s, r) => s + Math.abs(r.amount), 0)
+          children.push({ accountName: childName === "_self" ? parentName : childName, rows: childRows, total })
+          groupTotal += total
+          txCount += childRows.length
+        })
+
+        // Sort children by amount desc
+        children.sort((a, b) => b.total - a.total)
+        groups.push({ parentName, children, total: groupTotal, txCount })
       })
 
+      // Sort: 미분류 last, rest by total desc
+      groups.sort((a, b) => {
+        if (a.parentName === "미분류") return 1
+        if (b.parentName === "미분류") return -1
+        return b.total - a.total
+      })
+
+      return groups
+    }
+
     return {
-      incomeGroups: sortGroups(Array.from(incomeMap.values()) as AccountGroup[]),
-      expenseGroups: sortGroups(Array.from(expenseMap.values()) as AccountGroup[]),
+      incomeTree: buildTree("in"),
+      expenseTree: buildTree("out"),
       totalIncome: txRows.filter(r => r.type === "in").reduce((s, r) => s + r.amount, 0),
       totalExpense: txRows.filter(r => r.type === "out").reduce((s, r) => s + Math.abs(r.amount), 0),
     }
   }, [rows])
 
-  const toggleGroup = (key: string) => {
-    setExpandedGroups(prev => {
+  const toggle = (key: string) => {
+    setExpandedKeys(prev => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
@@ -699,85 +727,117 @@ function AccountGroupedList({ rows, entityId }: { rows: ActualRow[]; entityId: s
     })
   }
 
-  const renderSection = (
+  const renderTree = (
     label: string,
-    groups: AccountGroup[],
+    tree: ParentGroup[],
     sectionTotal: number,
     type: "in" | "out",
-    colorClass: string,
-    bgClass: string,
+    color: string,
+    bg: string,
   ) => {
     const sectionKey = `section-${type}`
-    const isSectionExpanded = !expandedGroups.has(sectionKey) // default expanded
+    const sectionOpen = !expandedKeys.has(sectionKey) // default open
 
     return (
       <div>
-        {/* Section header */}
+        {/* L0: 수입/지출 섹션 헤더 */}
         <button
-          onClick={() => toggleGroup(sectionKey)}
-          className={cn("w-full flex items-center justify-between px-4 py-3 font-semibold border-t border-border", bgClass)}
-          aria-expanded={isSectionExpanded}
+          onClick={() => toggle(sectionKey)}
+          className={cn("w-full flex items-center justify-between px-4 py-3 font-semibold border-t border-border", bg)}
+          aria-expanded={sectionOpen}
         >
           <span className="flex items-center gap-2">
-            {isSectionExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4 rotate-90" />}
-            <span className={colorClass}>{label}</span>
-            <span className="text-xs text-muted-foreground font-normal">({groups.length}개 계정)</span>
+            {sectionOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4 rotate-90" />}
+            <span className={color}>{label}</span>
+            <span className="text-xs text-muted-foreground font-normal">({tree.reduce((s, g) => s + g.txCount, 0)}건)</span>
           </span>
-          <span className={cn("font-mono tabular-nums text-sm", colorClass)}>
+          <span className={cn("font-mono tabular-nums text-sm", color)}>
             {type === "in" ? "+" : "-"}{formatByEntity(sectionTotal, entityId)}
           </span>
         </button>
 
-        {/* Account groups */}
-        {isSectionExpanded && groups.map((group) => {
-          const groupKey = `${type}-${group.accountName}`
-          const isExpanded = expandedGroups.has(groupKey)
-          const isUnmapped = group.accountName === "미분류"
+        {sectionOpen && tree.map((parent) => {
+          const parentKey = `${type}-${parent.parentName}`
+          const parentOpen = expandedKeys.has(parentKey)
+          const isUnmapped = parent.parentName === "미분류"
+          const hasMultipleChildren = parent.children.length > 1 || (parent.children.length === 1 && parent.children[0].accountName !== parent.parentName)
 
           return (
-            <div key={groupKey}>
-              {/* Account row */}
+            <div key={parentKey}>
+              {/* L1: 중분류 (매출, 인건비, ...) */}
               <button
-                onClick={() => toggleGroup(groupKey)}
+                onClick={() => toggle(parentKey)}
                 className={cn(
-                  "w-full grid grid-cols-[1fr_120px_60px] px-4 py-2.5 pl-8 border-t border-border/50 text-left hover:bg-white/[0.02] transition-colors text-[13px]",
+                  "w-full grid grid-cols-[1fr_130px_60px] px-4 py-2.5 pl-8 border-t border-border/50 text-left hover:bg-white/[0.02] transition-colors",
                   isUnmapped && "bg-amber-500/[0.03]"
                 )}
-                aria-expanded={isExpanded}
-                aria-label={`${group.accountName} ${isExpanded ? "접기" : "펼치기"}`}
+                aria-expanded={parentOpen}
+                aria-label={`${parent.parentName} ${parentOpen ? "접기" : "펼치기"}`}
               >
                 <span className="flex items-center gap-2">
-                  {isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronUp className="h-3.5 w-3.5 text-muted-foreground rotate-90" />}
-                  <span className={cn("font-medium", isUnmapped && "text-amber-400")}>{group.accountName}</span>
-                  {isUnmapped && (
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/12 text-amber-400">{group.rows.length}건</Badge>
-                  )}
+                  {hasMultipleChildren
+                    ? (parentOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronUp className="h-3.5 w-3.5 text-muted-foreground rotate-90" />)
+                    : <span className="w-3.5" />}
+                  <span className={cn("font-medium", isUnmapped && "text-amber-400")}>{parent.parentName}</span>
                 </span>
-                <span className={cn("text-right font-mono text-xs tabular-nums", colorClass)}>
-                  {type === "in" ? "+" : "-"}{formatByEntity(group.total, entityId)}
+                <span className={cn("text-right font-mono text-xs tabular-nums", color)}>
+                  {type === "in" ? "+" : "-"}{formatByEntity(parent.total, entityId)}
                 </span>
                 <span className="text-right font-mono text-xs text-muted-foreground tabular-nums">
-                  {group.rows.length}건
+                  {parent.txCount}건
                 </span>
               </button>
 
-              {/* Individual transactions */}
-              {isExpanded && (
-                <div className="bg-black/[0.06]">
-                  {group.rows.map((row: ActualRow, i: number) => (
-                    <div
-                      key={`${row.tx_id ?? i}`}
-                      className="grid grid-cols-[60px_1fr_120px] px-4 py-1.5 pl-14 border-t border-border/20 text-[12px]"
-                    >
-                      <span className="font-mono text-muted-foreground">{row.date?.slice(5) ?? ""}</span>
-                      <span className="truncate text-muted-foreground">{row.description}</span>
-                      <span className={cn("text-right font-mono tabular-nums", colorClass)}>
-                        {type === "in" ? "+" : "-"}{formatByEntity(Math.abs(row.amount), entityId)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {/* L2: 소분류 (스마트스토어, 급여, ...) + 거래 */}
+              {parentOpen && parent.children.map((child) => {
+                const childKey = `${parentKey}-${child.accountName}`
+                const childOpen = expandedKeys.has(childKey)
+
+                return (
+                  <div key={childKey}>
+                    {/* L2 header — only show if different from parent */}
+                    {child.accountName !== parent.parentName && (
+                      <button
+                        onClick={() => toggle(childKey)}
+                        className="w-full grid grid-cols-[1fr_130px_60px] px-4 py-2 pl-14 border-t border-border/30 text-left hover:bg-white/[0.02] transition-colors text-[13px]"
+                        aria-expanded={childOpen}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          {childOpen ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronUp className="h-3 w-3 text-muted-foreground rotate-90" />}
+                          <span className="text-muted-foreground">{child.accountName}</span>
+                        </span>
+                        <span className={cn("text-right font-mono text-xs tabular-nums", color)}>
+                          {type === "in" ? "+" : "-"}{formatByEntity(child.total, entityId)}
+                        </span>
+                        <span className="text-right font-mono text-xs text-muted-foreground tabular-nums">
+                          {child.rows.length}건
+                        </span>
+                      </button>
+                    )}
+
+                    {/* L3: 개별 거래 */}
+                    {(child.accountName === parent.parentName ? parentOpen : childOpen) && (
+                      <div className="bg-black/[0.05]">
+                        {child.rows.map((row: ActualRow, i: number) => (
+                          <div
+                            key={`${row.tx_id ?? i}`}
+                            className={cn(
+                              "grid grid-cols-[55px_1fr_120px] px-4 py-1.5 border-t border-border/15 text-[12px]",
+                              child.accountName === parent.parentName ? "pl-14" : "pl-20"
+                            )}
+                          >
+                            <span className="font-mono text-muted-foreground">{row.date?.slice(5) ?? ""}</span>
+                            <span className="truncate text-muted-foreground">{row.description}</span>
+                            <span className={cn("text-right font-mono tabular-nums", color)}>
+                              {type === "in" ? "+" : "-"}{formatByEntity(Math.abs(row.amount), entityId)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )
         })}
@@ -785,37 +845,25 @@ function AccountGroupedList({ rows, entityId }: { rows: ActualRow[]; entityId: s
     )
   }
 
-  // Opening / Closing balances from rows
   const openingRow = rows.find(r => r.type === "opening")
   const closingRow = rows.find(r => r.type === "closing")
 
   return (
     <div>
-      {/* Opening balance */}
       {openingRow && (
         <div className="grid grid-cols-[1fr_130px] px-4 py-3 font-semibold bg-green-500/[0.03] border-b border-border">
           <span>시작 잔고</span>
-          <span className="text-right font-mono text-xs font-medium">{formatByEntity(openingRow.balance, entityId)}</span>
+          <span className="text-right font-mono text-xs font-medium tabular-nums">{formatByEntity(openingRow.balance, entityId)}</span>
         </div>
       )}
 
-      {/* Income tree */}
-      {incomeGroups.length > 0 && renderSection(
-        "수입 (입금)", incomeGroups, totalIncome, "in",
-        "text-[hsl(var(--profit))]", "bg-green-500/[0.02]"
-      )}
+      {incomeTree.length > 0 && renderTree("수입 (입금)", incomeTree, totalIncome, "in", "text-[hsl(var(--profit))]", "bg-green-500/[0.02]")}
+      {expenseTree.length > 0 && renderTree("지출 (출금)", expenseTree, totalExpense, "out", "text-[hsl(var(--loss))]", "bg-red-500/[0.02]")}
 
-      {/* Expense tree */}
-      {expenseGroups.length > 0 && renderSection(
-        "지출 (출금)", expenseGroups, totalExpense, "out",
-        "text-[hsl(var(--loss))]", "bg-red-500/[0.02]"
-      )}
-
-      {/* Closing balance */}
       {closingRow && (
         <div className="grid grid-cols-[1fr_130px] px-4 py-3 font-bold bg-green-500/[0.03] border-t-2 border-t-green-500/15">
           <span>기말 잔고</span>
-          <span className="text-right font-mono text-xs font-medium text-[hsl(var(--profit))]">{formatByEntity(closingRow.balance, entityId)}</span>
+          <span className="text-right font-mono text-xs font-medium text-[hsl(var(--profit))] tabular-nums">{formatByEntity(closingRow.balance, entityId)}</span>
         </div>
       )}
     </div>

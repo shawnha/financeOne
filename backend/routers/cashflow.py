@@ -51,6 +51,7 @@ def get_actual_cashflow(
                 "source_type": row.get("source_type"),
                 "internal_account_id": row.get("internal_account_id"),
                 "internal_account_name": row.get("internal_account_name"),
+                "parent_account_name": row.get("parent_account_name"),
             })
 
         return {

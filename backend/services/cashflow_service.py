@@ -59,6 +59,8 @@ def build_daily_rows(
             "source_type": tx.get("source_type"),
             "internal_account_id": tx.get("internal_account_id"),
             "internal_account_name": tx.get("internal_account_name"),
+            "internal_account_parent_id": tx.get("internal_account_parent_id"),
+            "parent_account_name": tx.get("parent_account_name"),
         })
 
     # Closing row
@@ -240,9 +242,12 @@ def get_bank_transactions(conn: PgConnection, entity_id: int, year: int, month: 
         """
         SELECT t.id, t.date, t.type, t.amount, t.description, t.counterparty,
                t.source_type, t.internal_account_id,
-               ia.name AS internal_account_name
+               ia.name AS internal_account_name,
+               ia.parent_id AS internal_account_parent_id,
+               pia.name AS parent_account_name
         FROM transactions t
         LEFT JOIN internal_accounts ia ON t.internal_account_id = ia.id
+        LEFT JOIN internal_accounts pia ON ia.parent_id = pia.id
         WHERE t.entity_id = %s
           AND t.source_type IN ('woori_bank', 'mercury_api', 'manual')
           AND t.date >= %s AND t.date < %s
