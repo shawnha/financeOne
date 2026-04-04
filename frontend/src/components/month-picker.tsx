@@ -105,7 +105,7 @@ export function MonthPicker({
             if (allowFuture || monthSet.has(key)) onSelect(key)
           }
         }}
-        className="p-1 rounded-md hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+        className="p-2.5 rounded-md hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
         aria-label="이전 월"
       >
         <ChevronLeft className="h-4 w-4" />
@@ -138,7 +138,7 @@ export function MonthPicker({
             if (allowFuture || monthSet.has(key)) onSelect(key)
           }
         }}
-        className="p-1 rounded-md hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+        className="p-2.5 rounded-md hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
         aria-label="다음 월"
       >
         <ChevronRight className="h-4 w-4" />

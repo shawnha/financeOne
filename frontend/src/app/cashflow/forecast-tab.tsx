@@ -1231,7 +1231,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                           {hasChildren && (
                             <button
                               onClick={(e) => { e.stopPropagation(); item.internal_account_id && toggleCollapse(item.internal_account_id) }}
-                              className="mr-1.5 p-1 -ml-1 text-muted-foreground hover:text-foreground transition-colors rounded hover:bg-white/[0.05]"
+                              className="mr-1.5 p-2 -ml-2 text-muted-foreground hover:text-foreground transition-colors rounded hover:bg-white/[0.05]"
                               aria-expanded={!isCollapsed}
                               aria-label={`${item.internal_account_name ?? item.category} ${isCollapsed ? '펼치기' : '접기'}`}
                             >
