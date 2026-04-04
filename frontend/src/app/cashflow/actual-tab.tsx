@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback, useMemo } from "react"
+import { useEffect, useState, useCallback, useMemo, useRef } from "react"
 import { useGlobalMonth } from "@/hooks/use-global-month"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -66,26 +66,59 @@ interface ActualData {
 
 type LoadState = "loading" | "empty" | "error" | "success"
 
+// ── Count-up Hook ─────────────────────────────────────
+
+function useCountUp(target: number, duration = 600): number {
+  const [current, setCurrent] = useState(0)
+  const startRef = useRef<number | null>(null)
+  const rafRef = useRef<number>(0)
+
+  useEffect(() => {
+    startRef.current = null
+    const animate = (ts: number) => {
+      if (startRef.current === null) startRef.current = ts
+      const elapsed = ts - startRef.current
+      const progress = Math.min(elapsed / duration, 1)
+      const eased = 1 - Math.pow(1 - progress, 3)
+      setCurrent(target * eased)
+      if (progress < 1) rafRef.current = requestAnimationFrame(animate)
+    }
+    rafRef.current = requestAnimationFrame(animate)
+    return () => cancelAnimationFrame(rafRef.current)
+  }, [target, duration])
+
+  return current
+}
+
 // ── KPI Card ───────────────────────────────────────────
 
 function KPICard({
   label,
   value,
+  rawAmount,
   subtext,
   colorClass,
   subtextColor,
+  entityId,
 }: {
   label: string
   value: string
+  rawAmount?: number
   subtext?: string
   colorClass?: string
   subtextColor?: string
+  entityId?: string | null
 }) {
+  const animated = useCountUp(rawAmount ?? 0)
+  const displayValue = rawAmount != null && entityId != null
+    ? (value.startsWith("+") ? "+" : value.startsWith("-") ? "-" : "") + formatByEntity(Math.abs(animated), entityId)
+    : value
+
   return (
     <Card className="bg-secondary rounded-xl p-4">
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
       <p className={cn("text-[28px] font-bold font-mono tabular-nums mt-1", colorClass)}>
-        {value}
+        {displayValue}
       </p>
       {subtext && <p className={cn("text-[11px] mt-0.5", subtextColor || "text-muted-foreground")}>{subtext}</p>}
     </Card>
@@ -419,20 +452,26 @@ export function ActualTab({ entityId }: { entityId: string | null }) {
 
       {/* Summary KPI Cards */}
       <div className="grid grid-cols-4 gap-3 max-md:grid-cols-2">
-        <KPICard label="기초 잔고" value={formatByEntity(opening, entityId)} />
+        <KPICard label="기초 잔고" value={formatByEntity(opening, entityId)} rawAmount={opening} entityId={entityId} />
         <KPICard
           label="총 입금"
           value={`+${formatByEntity(income, entityId)}`}
+          rawAmount={income}
+          entityId={entityId}
           colorClass="text-[hsl(var(--profit))]"
         />
         <KPICard
           label="총 출금"
           value={`-${formatByEntity(Math.abs(expense), entityId)}`}
+          rawAmount={Math.abs(expense)}
+          entityId={entityId}
           colorClass="text-[hsl(var(--loss))]"
         />
         <KPICard
           label="기말 잔고"
           value={formatByEntity(closing, entityId)}
+          rawAmount={closing}
+          entityId={entityId}
           subtext={`순 ${net >= 0 ? "+" : ""}${formatByEntity(net, entityId)}`}
           subtextColor={net >= 0 ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]"}
         />

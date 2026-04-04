@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback, useMemo } from "react"
+import { useEffect, useState, useCallback, useMemo, useRef } from "react"
 import { useGlobalMonth } from "@/hooks/use-global-month"
 import Link from "next/link"
 import { Card } from "@/components/ui/card"
@@ -149,23 +149,54 @@ type LoadState = "loading" | "empty" | "error" | "success"
 
 // ── KPI Card ───────────────────────────────────────────
 
+function useCountUp(target: number, duration = 600): number {
+  const [current, setCurrent] = useState(0)
+  const startRef = useRef<number | null>(null)
+  const rafRef = useRef<number>(0)
+
+  useEffect(() => {
+    startRef.current = null
+    const animate = (ts: number) => {
+      if (startRef.current === null) startRef.current = ts
+      const elapsed = ts - startRef.current
+      const progress = Math.min(elapsed / duration, 1)
+      const eased = 1 - Math.pow(1 - progress, 3) // ease-out cubic
+      setCurrent(target * eased)
+      if (progress < 1) rafRef.current = requestAnimationFrame(animate)
+    }
+    rafRef.current = requestAnimationFrame(animate)
+    return () => cancelAnimationFrame(rafRef.current)
+  }, [target, duration])
+
+  return current
+}
+
 function KPICard({
   label,
   value,
+  rawAmount,
   subtext,
   colorClass,
   subtextColor,
+  entityId,
 }: {
   label: string
   value: string
+  rawAmount?: number
   subtext?: string
   colorClass?: string
   subtextColor?: string
+  entityId?: string | null
 }) {
+  const animated = useCountUp(rawAmount ?? 0)
+  const displayValue = rawAmount != null && entityId != null
+    ? (value.startsWith("+") ? "+" : value.startsWith("-") ? "-" : "") + formatByEntity(Math.abs(animated), entityId)
+    : value
+
   return (
     <Card className="bg-secondary rounded-xl p-4">
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
-      <p className={cn("text-[28px] font-bold font-mono tabular-nums mt-1", colorClass)}>{value}</p>
+      <p className={cn("text-[28px] font-bold font-mono tabular-nums mt-1", colorClass)}>{displayValue}</p>
       {subtext && <p className={cn("text-[11px] mt-0.5", subtextColor || "text-muted-foreground")}>{subtext}</p>}
     </Card>
   )
@@ -1032,10 +1063,12 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
 
       {/* KPI */}
       <div className="grid grid-cols-4 gap-3 max-md:grid-cols-2">
-        <KPICard label={`기초 (${m - 1 || 12}월 확정)`} value={formatByEntity(data.opening_balance, entityId)} />
+        <KPICard label={`기초 (${m - 1 || 12}월 확정)`} value={formatByEntity(data.opening_balance, entityId)} rawAmount={data.opening_balance} entityId={entityId} />
         <KPICard
           label="조정 예상 기말"
           value={formatByEntity(data.adjusted_forecast_closing, entityId)}
+          rawAmount={data.adjusted_forecast_closing}
+          entityId={entityId}
           colorClass="text-[hsl(var(--warning))]"
           subtext={data.unmapped_count > 0 ? `미분류 ${data.unmapped_count}건 반영` : undefined}
           subtextColor="text-amber-400"
@@ -1043,12 +1076,16 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
         <KPICard
           label="실제 진행 기준 기말"
           value={formatByEntity(data.actual_closing, entityId)}
+          rawAmount={data.actual_closing}
+          entityId={entityId}
           subtext={`차이: ${data.diff >= 0 ? "+" : ""}${formatByEntity(data.diff, entityId)}`}
           colorClass="text-[hsl(var(--profit))]"
         />
         <KPICard
           label="카드 사용 (진행)"
           value={formatByEntity(data.card_timing.curr_month_card_actual, entityId)}
+          rawAmount={data.card_timing.curr_month_card_actual}
+          entityId={entityId}
           subtext={`예상 ${formatByEntity(data.forecast_card_usage, entityId)} 중`}
           colorClass="text-[#8B5CF6]"
         />
