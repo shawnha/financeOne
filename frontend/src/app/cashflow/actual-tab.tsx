@@ -645,129 +645,179 @@ function TransactionList({ rows, entityId }: { rows: ActualRow[]; entityId: stri
   )
 }
 
-// ── Account Grouped View ──────────────────────────────
+// ── Account Grouped View (입금/출금 트리) ──────────────
 
 interface AccountGroup {
   accountName: string
   accountId: number | null
   rows: ActualRow[]
-  totalIn: number
-  totalOut: number
+  total: number
 }
 
 function AccountGroupedList({ rows, entityId }: { rows: ActualRow[]; entityId: string | null }) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
 
-  const groups = useMemo(() => {
+  const { incomeGroups, expenseGroups, totalIncome, totalExpense } = useMemo(() => {
+    const incomeMap = new Map<string, AccountGroup>()
+    const expenseMap = new Map<string, AccountGroup>()
+
     const txRows = rows.filter(r => r.type === "in" || r.type === "out")
-    const map = new Map<string, AccountGroup>()
 
     for (const row of txRows) {
       const key = row.internal_account_name ?? "미분류"
+      const map = row.type === "in" ? incomeMap : expenseMap
+
       if (!map.has(key)) {
-        map.set(key, {
-          accountName: key,
-          accountId: row.internal_account_id ?? null,
-          rows: [],
-          totalIn: 0,
-          totalOut: 0,
-        })
+        map.set(key, { accountName: key, accountId: row.internal_account_id ?? null, rows: [], total: 0 })
       }
       const group = map.get(key)!
       group.rows.push(row)
-      if (row.type === "in") group.totalIn += row.amount
-      else group.totalOut += Math.abs(row.amount)
+      group.total += Math.abs(row.amount)
     }
 
-    // Sort: named accounts first (alphabetical), 미분류 last
-    const sorted = (Array.from(map.values()) as AccountGroup[]).sort((a, b) => {
-      if (a.accountName === "미분류") return 1
-      if (b.accountName === "미분류") return -1
-      return a.accountName.localeCompare(b.accountName, "ko")
-    })
+    const sortGroups = (groups: AccountGroup[]) =>
+      groups.sort((a, b) => {
+        if (a.accountName === "미분류") return 1
+        if (b.accountName === "미분류") return -1
+        return b.total - a.total // 금액 큰 순
+      })
 
-    return sorted
+    return {
+      incomeGroups: sortGroups(Array.from(incomeMap.values()) as AccountGroup[]),
+      expenseGroups: sortGroups(Array.from(expenseMap.values()) as AccountGroup[]),
+      totalIncome: txRows.filter(r => r.type === "in").reduce((s, r) => s + r.amount, 0),
+      totalExpense: txRows.filter(r => r.type === "out").reduce((s, r) => s + Math.abs(r.amount), 0),
+    }
   }, [rows])
 
-  const toggleGroup = (name: string) => {
+  const toggleGroup = (key: string) => {
     setExpandedGroups(prev => {
       const next = new Set(prev)
-      if (next.has(name)) next.delete(name)
-      else next.add(name)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
 
+  const renderSection = (
+    label: string,
+    groups: AccountGroup[],
+    sectionTotal: number,
+    type: "in" | "out",
+    colorClass: string,
+    bgClass: string,
+  ) => {
+    const sectionKey = `section-${type}`
+    const isSectionExpanded = !expandedGroups.has(sectionKey) // default expanded
+
+    return (
+      <div>
+        {/* Section header */}
+        <button
+          onClick={() => toggleGroup(sectionKey)}
+          className={cn("w-full flex items-center justify-between px-4 py-3 font-semibold border-t border-border", bgClass)}
+          aria-expanded={isSectionExpanded}
+        >
+          <span className="flex items-center gap-2">
+            {isSectionExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4 rotate-90" />}
+            <span className={colorClass}>{label}</span>
+            <span className="text-xs text-muted-foreground font-normal">({groups.length}개 계정)</span>
+          </span>
+          <span className={cn("font-mono tabular-nums text-sm", colorClass)}>
+            {type === "in" ? "+" : "-"}{formatByEntity(sectionTotal, entityId)}
+          </span>
+        </button>
+
+        {/* Account groups */}
+        {isSectionExpanded && groups.map((group) => {
+          const groupKey = `${type}-${group.accountName}`
+          const isExpanded = expandedGroups.has(groupKey)
+          const isUnmapped = group.accountName === "미분류"
+
+          return (
+            <div key={groupKey}>
+              {/* Account row */}
+              <button
+                onClick={() => toggleGroup(groupKey)}
+                className={cn(
+                  "w-full grid grid-cols-[1fr_120px_60px] px-4 py-2.5 pl-8 border-t border-border/50 text-left hover:bg-white/[0.02] transition-colors text-[13px]",
+                  isUnmapped && "bg-amber-500/[0.03]"
+                )}
+                aria-expanded={isExpanded}
+                aria-label={`${group.accountName} ${isExpanded ? "접기" : "펼치기"}`}
+              >
+                <span className="flex items-center gap-2">
+                  {isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronUp className="h-3.5 w-3.5 text-muted-foreground rotate-90" />}
+                  <span className={cn("font-medium", isUnmapped && "text-amber-400")}>{group.accountName}</span>
+                  {isUnmapped && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/12 text-amber-400">{group.rows.length}건</Badge>
+                  )}
+                </span>
+                <span className={cn("text-right font-mono text-xs tabular-nums", colorClass)}>
+                  {type === "in" ? "+" : "-"}{formatByEntity(group.total, entityId)}
+                </span>
+                <span className="text-right font-mono text-xs text-muted-foreground tabular-nums">
+                  {group.rows.length}건
+                </span>
+              </button>
+
+              {/* Individual transactions */}
+              {isExpanded && (
+                <div className="bg-black/[0.06]">
+                  {group.rows.map((row: ActualRow, i: number) => (
+                    <div
+                      key={`${row.tx_id ?? i}`}
+                      className="grid grid-cols-[60px_1fr_120px] px-4 py-1.5 pl-14 border-t border-border/20 text-[12px]"
+                    >
+                      <span className="font-mono text-muted-foreground">{row.date?.slice(5) ?? ""}</span>
+                      <span className="truncate text-muted-foreground">{row.description}</span>
+                      <span className={cn("text-right font-mono tabular-nums", colorClass)}>
+                        {type === "in" ? "+" : "-"}{formatByEntity(Math.abs(row.amount), entityId)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  // Opening / Closing balances from rows
+  const openingRow = rows.find(r => r.type === "opening")
+  const closingRow = rows.find(r => r.type === "closing")
+
   return (
     <div>
-      {/* Header */}
-      <div className="grid grid-cols-[1fr_100px_100px_80px] px-4 py-2.5 bg-muted/30 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-        <span>계정</span>
-        <span className="text-right">입금</span>
-        <span className="text-right">출금</span>
-        <span className="text-right">건수</span>
-      </div>
+      {/* Opening balance */}
+      {openingRow && (
+        <div className="grid grid-cols-[1fr_130px] px-4 py-3 font-semibold bg-green-500/[0.03] border-b border-border">
+          <span>시작 잔고</span>
+          <span className="text-right font-mono text-xs font-medium">{formatByEntity(openingRow.balance, entityId)}</span>
+        </div>
+      )}
 
-      {groups.map((group) => {
-        const isExpanded = expandedGroups.has(group.accountName)
-        const isUnmapped = group.accountName === "미분류"
+      {/* Income tree */}
+      {incomeGroups.length > 0 && renderSection(
+        "수입 (입금)", incomeGroups, totalIncome, "in",
+        "text-[hsl(var(--profit))]", "bg-green-500/[0.02]"
+      )}
 
-        return (
-          <div key={group.accountName}>
-            {/* Group header row */}
-            <button
-              onClick={() => toggleGroup(group.accountName)}
-              className={cn(
-                "w-full grid grid-cols-[1fr_100px_100px_80px] px-4 py-3 border-t border-border text-left hover:bg-white/[0.02] transition-colors",
-                isUnmapped && "bg-amber-500/[0.03]"
-              )}
-              aria-expanded={isExpanded}
-              aria-label={`${group.accountName} ${isExpanded ? '접기' : '펼치기'}`}
-            >
-              <span className="flex items-center gap-2">
-                {isExpanded
-                  ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                  : <ChevronUp className="h-4 w-4 text-muted-foreground rotate-90" />}
-                <span className={cn("font-medium", isUnmapped && "text-amber-400")}>
-                  {group.accountName}
-                </span>
-                {isUnmapped && (
-                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/12 text-amber-400">
-                    {group.rows.length}건
-                  </Badge>
-                )}
-              </span>
-              <span className="text-right font-mono text-xs text-[hsl(var(--profit))]">
-                {group.totalIn > 0 ? `+${formatByEntity(group.totalIn, entityId)}` : ""}
-              </span>
-              <span className="text-right font-mono text-xs text-[hsl(var(--loss))]">
-                {group.totalOut > 0 ? `-${formatByEntity(group.totalOut, entityId)}` : ""}
-              </span>
-              <span className="text-right font-mono text-xs text-muted-foreground">
-                {group.rows.length}건
-              </span>
-            </button>
+      {/* Expense tree */}
+      {expenseGroups.length > 0 && renderSection(
+        "지출 (출금)", expenseGroups, totalExpense, "out",
+        "text-[hsl(var(--loss))]", "bg-red-500/[0.02]"
+      )}
 
-            {/* Expanded transactions */}
-            {isExpanded && (
-              <div className="bg-black/[0.08]">
-                {group.rows.map((row: ActualRow, i: number) => (
-                  <div
-                    key={`${row.tx_id ?? i}`}
-                    className="grid grid-cols-[70px_1fr_120px] px-4 py-2 pl-10 border-t border-border/30 text-[13px]"
-                  >
-                    <span className="font-mono text-xs text-muted-foreground">{row.date?.slice(5) ?? ""}</span>
-                    <span className="truncate">{row.description}</span>
-                    <span className={cn("text-right font-mono text-xs", row.type === "in" ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]")}>
-                      {row.type === "in" ? "+" : "-"}{formatByEntity(Math.abs(row.amount), entityId)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )
-      })}
+      {/* Closing balance */}
+      {closingRow && (
+        <div className="grid grid-cols-[1fr_130px] px-4 py-3 font-bold bg-green-500/[0.03] border-t-2 border-t-green-500/15">
+          <span>기말 잔고</span>
+          <span className="text-right font-mono text-xs font-medium text-[hsl(var(--profit))]">{formatByEntity(closingRow.balance, entityId)}</span>
+        </div>
+      )}
     </div>
   )
 }
