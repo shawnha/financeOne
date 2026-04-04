@@ -165,7 +165,7 @@ function KPICard({
   return (
     <Card className="bg-secondary rounded-xl p-4">
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
-      <p className={cn("text-[17px] font-semibold font-mono tabular-nums mt-1", colorClass)}>{value}</p>
+      <p className={cn("text-[28px] font-bold font-mono tabular-nums mt-1", colorClass)}>{value}</p>
       {subtext && <p className={cn("text-[11px] mt-0.5", subtextColor || "text-muted-foreground")}>{subtext}</p>}
     </Card>
   )
