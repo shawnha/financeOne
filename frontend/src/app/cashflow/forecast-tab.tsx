@@ -1104,6 +1104,8 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
             <button
               onClick={() => setShowComparison(!showComparison)}
               className="text-xs text-muted-foreground hover:text-foreground transition-colors bg-muted/30 border border-border px-3 py-1.5 rounded-lg"
+              aria-expanded={showComparison}
+              aria-label="실제 비교 컬럼 표시"
             >
               {showComparison ? "실제 비교 접기 \u25C2" : "실제 비교 펼치기 \u25B8"}
             </button>
@@ -1230,6 +1232,8 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                             <button
                               onClick={(e) => { e.stopPropagation(); item.internal_account_id && toggleCollapse(item.internal_account_id) }}
                               className="mr-1.5 p-1 -ml-1 text-muted-foreground hover:text-foreground transition-colors rounded hover:bg-white/[0.05]"
+                              aria-expanded={!isCollapsed}
+                              aria-label={`${item.internal_account_name ?? item.category} ${isCollapsed ? '펼치기' : '접기'}`}
                             >
                               {isCollapsed
                                 ? <ChevronRight className="h-4 w-4" />
