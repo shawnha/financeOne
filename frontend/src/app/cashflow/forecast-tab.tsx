@@ -30,7 +30,7 @@ import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { fetchAPI } from "@/lib/api"
 import { formatByEntity } from "@/lib/format"
-import { AlertCircle, RefreshCw, Plus, Download, Trash2, Pencil, ChevronRight, ChevronDown, Link2, AlertTriangle, TrendingDown, TrendingUp } from "lucide-react"
+import { AlertCircle, RefreshCw, RotateCw, Plus, Download, Trash2, Pencil, ChevronRight, ChevronDown, Link2, AlertTriangle, TrendingDown, TrendingUp } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { MonthPicker } from "@/components/month-picker"
@@ -1601,6 +1601,32 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
             >
               {showComparison ? "실제 비교 접기 \u25C2" : "실제 비교 펼치기 \u25B8"}
             </button>
+            {!data.items.some(i => i.is_recurring) && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2 text-xs"
+                onClick={async () => {
+                  const prevMonth = m - 1 > 0 ? m - 1 : 12
+                  const prevYear = m - 1 > 0 ? y : y - 1
+                  try {
+                    const res = await fetchAPI<{ copied: number }>(
+                      `/forecasts/copy-recurring?entity_id=${entityId}&source_year=${prevYear}&source_month=${prevMonth}&target_year=${y}&target_month=${m}&amount_source=actual`,
+                      { method: "POST" },
+                    )
+                    if (res.copied > 0) {
+                      toast.success(`전월 반복 항목 ${res.copied}건 가져옴`)
+                      fetchForecast(true)
+                    } else {
+                      toast.info("가져올 반복 항목이 없습니다")
+                    }
+                  } catch { toast.error("반복 항목 가져오기 실패") }
+                }}
+              >
+                <RotateCw className="h-3.5 w-3.5" />
+                전월 반복 가져오기
+              </Button>
+            )}
             <ForecastModal entityId={entityId!} year={y} month={m} onSaved={() => fetchForecast(true)} />
           </div>
         </div>
