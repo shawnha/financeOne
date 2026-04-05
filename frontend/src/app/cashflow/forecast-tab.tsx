@@ -1274,47 +1274,6 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
   useEffect(() => { fetchSummary() }, [fetchSummary])
   useEffect(() => { fetchForecast() }, [fetchForecast])
 
-  // 예상 탭: available_months + 마지막 완료월 기준 미래 2개월
-  const baseMonths = summary?.available_months ?? []
-  const months = (() => {
-    const set = new Set(baseMonths)
-    const now = new Date()
-    const lastComplete = new Date(now.getFullYear(), now.getMonth(), 0)
-    const base = baseMonths.length > 0
-      ? (() => { const [y, m] = baseMonths[baseMonths.length - 1].split("-").map(Number); return new Date(y, m - 1, 1) })()
-      : new Date(lastComplete.getFullYear(), lastComplete.getMonth(), 1)
-    for (let i = 1; i <= 2; i++) {
-      const d = new Date(base.getFullYear(), base.getMonth() + i, 1)
-      set.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`)
-    }
-    return Array.from(set).sort()
-  })()
-
-  // ── LOADING ──
-  if (state === "loading" || !selectedMonth) {
-    return (
-      <div className="space-y-6">
-        <div className="grid grid-cols-4 gap-3">
-          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-xl" />)}
-        </div>
-        <Skeleton className="h-[200px] rounded-xl" />
-      </div>
-    )
-  }
-
-  if (state === "error") {
-    return (
-      <Card className="p-8 flex flex-col items-center text-center gap-4">
-        <AlertCircle className="h-12 w-12 text-[hsl(var(--loss))]" />
-        <p className="font-medium">데이터를 불러올 수 없습니다.</p>
-        <p className="text-sm text-muted-foreground">{error}</p>
-        <Button onClick={fetchForecast} variant="secondary" className="gap-2">
-          <RefreshCw className="h-4 w-4" /> 다시 시도
-        </Button>
-      </Card>
-    )
-  }
-
   const handleExportCSV = useCallback(() => {
     if (!data) return
     const [yy, mm] = selectedMonth.split("-").map(Number)
@@ -1356,6 +1315,47 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
     a.click()
     URL.revokeObjectURL(url)
   }, [data, selectedMonth])
+
+  // 예상 탭: available_months + 마지막 완료월 기준 미래 2개월
+  const baseMonths = summary?.available_months ?? []
+  const months = (() => {
+    const set = new Set(baseMonths)
+    const now = new Date()
+    const lastComplete = new Date(now.getFullYear(), now.getMonth(), 0)
+    const base = baseMonths.length > 0
+      ? (() => { const [y, m] = baseMonths[baseMonths.length - 1].split("-").map(Number); return new Date(y, m - 1, 1) })()
+      : new Date(lastComplete.getFullYear(), lastComplete.getMonth(), 1)
+    for (let i = 1; i <= 2; i++) {
+      const d = new Date(base.getFullYear(), base.getMonth() + i, 1)
+      set.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`)
+    }
+    return Array.from(set).sort()
+  })()
+
+  // ── LOADING ──
+  if (state === "loading" || !selectedMonth) {
+    return (
+      <div className="space-y-6">
+        <div className="grid grid-cols-4 gap-3">
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-xl" />)}
+        </div>
+        <Skeleton className="h-[200px] rounded-xl" />
+      </div>
+    )
+  }
+
+  if (state === "error") {
+    return (
+      <Card className="p-8 flex flex-col items-center text-center gap-4">
+        <AlertCircle className="h-12 w-12 text-[hsl(var(--loss))]" />
+        <p className="font-medium">데이터를 불러올 수 없습니다.</p>
+        <p className="text-sm text-muted-foreground">{error}</p>
+        <Button onClick={fetchForecast} variant="secondary" className="gap-2">
+          <RefreshCw className="h-4 w-4" /> 다시 시도
+        </Button>
+      </Card>
+    )
+  }
 
   if (!data) return null
   const [y, m] = selectedMonth.split("-").map(Number)
