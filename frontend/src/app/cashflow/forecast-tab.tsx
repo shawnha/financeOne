@@ -548,11 +548,15 @@ function ForecastBalanceChart({
       }
     }
 
-    // 조정 예상: 실제 구간은 실제 잔고, 미래 구간은 마지막 실제 잔고 + 남은 예상 변동분
+    // 조정 예상 + shifted worst-case: 실제 구간은 실제 잔고, 미래는 남은 변동분 이어감
     const lastActualDay = forecastData.last_actual_day
     const lastActualBalance = lastActualDay > 0 ? (actualBalanceByDay.get(lastActualDay) ?? null) : null
     const lastForecastAtActualDay = lastActualDay > 0
       ? (schedule.points.find(p => p.day === lastActualDay)?.balance ?? null)
+      : null
+    const worstCasePoints = schedule.worst_case_points ?? []
+    const lastWorstAtActualDay = lastActualDay > 0
+      ? (worstCasePoints.find((p: { day: number }) => p.day === lastActualDay)?.balance ?? null)
       : null
 
     const points = schedule.points.map((p, i) => {
@@ -581,7 +585,16 @@ function ForecastBalanceChart({
           : p.day <= forecastData.last_actual_day
             ? (actualBalanceByDay.get(p.day) ?? null)
             : null,
-        worstCase: schedule.worst_case_points?.[i]?.balance ?? null,
+        worstCase: (() => {
+          const wc = worstCasePoints[i]
+          if (!wc) return null
+          if (p.day === 0) return wc.balance
+          if (p.day <= lastActualDay && actualBalanceByDay.has(p.day)) return actualBalanceByDay.get(p.day)!
+          if (lastActualBalance != null && lastWorstAtActualDay != null) {
+            return lastActualBalance + (wc.balance - lastWorstAtActualDay)
+          }
+          return wc.balance
+        })(),
         events: p.events,
         actualNetChange: dayTx?.net_change ?? 0,
         actualTransactions: dayTx?.transactions ?? [],
