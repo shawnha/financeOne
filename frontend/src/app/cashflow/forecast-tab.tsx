@@ -125,7 +125,12 @@ interface ForecastData {
   actual_expense: number
   actual_closing: number
   diff: number
-  actual_daily_points: Array<{ day: number; balance: number }>
+  actual_daily_points: Array<{
+    day: number
+    balance: number
+    net_change?: number
+    transactions?: Array<{ description: string; amount: number; type: string; account?: string }>
+  }>
   last_actual_day: number
   items: ForecastItem[]
   unmapped_income: number
@@ -522,14 +527,15 @@ function ForecastBalanceChart({
   const chartData = useMemo(() => {
     if (!schedule) return null
 
-    // Build actual balance lookup from daily points (step chart)
+    // Build actual balance + transaction lookup from daily points
     const actualBalanceByDay = new Map<number, number>()
+    const actualTxByDay = new Map<number, typeof forecastData.actual_daily_points[0]>()
     if (forecastData.actual_daily_points?.length) {
-      // Fill forward: each day keeps the last known balance
       let lastBal = forecastData.opening_balance
       for (const pt of forecastData.actual_daily_points) {
         lastBal = pt.balance
         actualBalanceByDay.set(pt.day, lastBal)
+        actualTxByDay.set(pt.day, pt)
       }
       // Fill forward for intermediate days
       let prev = forecastData.opening_balance
@@ -543,21 +549,25 @@ function ForecastBalanceChart({
     }
 
     // Calculate adjusted forecast: apply unmapped impact proportionally on unmapped tx dates
-    // Simple approach: distribute unmapped net evenly across the schedule
     const unmappedNet = (forecastData.unmapped_income ?? 0) - (forecastData.unmapped_expense ?? 0)
 
-    const points = schedule.points.map((p, i) => ({
-      day: p.day === 0 ? "시작" : `${month}/${p.day}`,
-      originalEstimated: p.balance,
-      estimated: p.day === 0 ? p.balance : p.balance + (unmappedNet * p.day / (schedule.points.length - 1)),
-      actual: p.day === 0
-        ? forecastData.opening_balance
-        : p.day <= forecastData.last_actual_day
-          ? (actualBalanceByDay.get(p.day) ?? null)
-          : null,
-      worstCase: schedule.worst_case_points?.[i]?.balance ?? null,
-      events: p.events,
-    }))
+    const points = schedule.points.map((p, i) => {
+      const dayTx = actualTxByDay.get(p.day)
+      return {
+        day: p.day === 0 ? "시작" : `${month}/${p.day}`,
+        originalEstimated: p.balance,
+        estimated: p.day === 0 ? p.balance : p.balance + (unmappedNet * p.day / (schedule.points.length - 1)),
+        actual: p.day === 0
+          ? forecastData.opening_balance
+          : p.day <= forecastData.last_actual_day
+            ? (actualBalanceByDay.get(p.day) ?? null)
+            : null,
+        worstCase: schedule.worst_case_points?.[i]?.balance ?? null,
+        events: p.events,
+        actualNetChange: dayTx?.net_change ?? 0,
+        actualTransactions: dayTx?.transactions ?? [],
+      }
+    })
 
     return { points, daysInMonth: schedule.points.length - 1, cardSettings: schedule.card_settings }
   }, [schedule, forecastData, month])
@@ -614,8 +624,22 @@ function ForecastBalanceChart({
                   )}
                   {point?.worstCase != null && <p className="text-red-400">최악: ₩{point.worstCase.toLocaleString()}</p>}
                   {point?.actual != null && <p className="text-[#22C55E]">실제: ₩{point.actual.toLocaleString()}</p>}
+                  {point?.actualTransactions?.length > 0 && (
+                    <div className="mt-1 pt-1 border-t border-white/10">
+                      <p className="text-muted-foreground mb-0.5">실제 거래:</p>
+                      {point.actualTransactions.slice(0, 5).map((t: { description: string; amount: number; type: string; account?: string }, i: number) => (
+                        <p key={i} className={t.type === "out" ? "text-red-400" : "text-green-400"}>
+                          {t.type === "out" ? "-" : "+"}₩{Math.round(t.amount).toLocaleString()} {t.description}{t.account ? ` (${t.account})` : ""}
+                        </p>
+                      ))}
+                      {point.actualTransactions.length > 5 && (
+                        <p className="text-muted-foreground">외 {point.actualTransactions.length - 5}건</p>
+                      )}
+                    </div>
+                  )}
                   {point?.events?.length > 0 && (
                     <div className="mt-1 pt-1 border-t border-white/10">
+                      <p className="text-muted-foreground mb-0.5">예상 이벤트:</p>
                       {point.events.map((e: { name: string; amount: number; type: string }, i: number) => (
                         <p key={i} className={e.type === "out" ? "text-red-400" : "text-green-400"}>
                           {e.type === "out" ? "-" : "+"}{e.name}: ₩{Math.round(e.amount).toLocaleString()}
@@ -703,13 +727,23 @@ function ForecastBalanceChart({
             dot={false}
             activeDot={false}
           />
-          {/* Actual balance (green solid line, smooth, stops at last upload day) */}
+          {/* Actual balance (green solid line, dots on large movements) */}
           <Line
             type="monotone"
             dataKey="actual"
             stroke="#22C55E"
             strokeWidth={2.5}
-            dot={false}
+            dot={(props: { cx?: number; cy?: number; payload?: { actualNetChange?: number; actualTransactions?: Array<{ description: string; amount: number; type: string }> } }) => {
+              const { cx, cy, payload } = props
+              if (!cx || !cy || !payload?.actualNetChange) return <g />
+              const absChange = Math.abs(payload.actualNetChange)
+              // 500만원 이상 변동만 표시
+              if (absChange < 5_000_000) return <g />
+              const color = payload.actualNetChange > 0 ? "#22C55E" : "#EF4444"
+              return (
+                <circle cx={cx} cy={cy} r={4} fill={color} stroke="#050508" strokeWidth={1.5} />
+              )
+            }}
             activeDot={{ r: 4, fill: "#22C55E", stroke: "#050508", strokeWidth: 2 }}
             connectNulls={false}
           />

@@ -600,12 +600,29 @@ def get_forecast_cashflow(
             "type": tx["type"],
             "amount": float(amt),
         })
-    # Deduplicate: keep last balance per day for chart step rendering
+    # 일별 집계: 최종 잔고 + 거래 목록
     daily_balance_by_day: dict[int, float] = {}
+    daily_txs_by_day: dict[int, list[dict]] = defaultdict(list)
     for pt in actual_daily_balances:
         daily_balance_by_day[pt["day"]] = pt["balance"]
+    for tx in bank_txs:
+        day = tx["date"].day if hasattr(tx["date"], "day") else int(str(tx["date"]).split("-")[2])
+        daily_txs_by_day[day].append({
+            "description": tx.get("counterparty") or tx.get("description", ""),
+            "amount": float(tx["amount"]),
+            "type": tx["type"],
+            "account": tx.get("internal_account_name"),
+        })
     actual_daily_points = [
-        {"day": d, "balance": b}
+        {
+            "day": d,
+            "balance": b,
+            "net_change": sum(
+                t["amount"] if t["type"] == "in" else -t["amount"]
+                for t in daily_txs_by_day.get(d, [])
+            ),
+            "transactions": daily_txs_by_day.get(d, []),
+        }
         for d, b in sorted(daily_balance_by_day.items())
     ]
 
