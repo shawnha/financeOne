@@ -350,10 +350,10 @@ function VarianceBridge({ entityId, year, month }: { entityId: string | null; ye
                       }}
                       contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
                     />
-                    <Bar dataKey="base" stackId="stack" fill="transparent" />
-                    <Bar dataKey="delta" stackId="stack" radius={[3, 3, 0, 0]}>
+                    <Bar dataKey="base" stackId="stack" fill="transparent" isAnimationActive={false} />
+                    <Bar dataKey="delta" stackId="stack" radius={[3, 3, 0, 0]} isAnimationActive={false} label={{ position: "top", fontSize: 10, fill: "hsl(var(--muted-foreground))", formatter: (v: number) => `${(v / 1000000).toFixed(0)}M` }}>
                       {chartData.map((entry, i) => (
-                        <Cell key={i} fill={entry.isEndpoint ? "hsl(var(--primary))" : entry.isPositive ? "hsl(var(--profit))" : "hsl(var(--loss))"} />
+                        <Cell key={i} fill={entry.isEndpoint ? "#6366f1" : entry.isPositive ? "hsl(var(--profit))" : "hsl(var(--loss))"} />
                       ))}
                     </Bar>
                   </BarChart>
