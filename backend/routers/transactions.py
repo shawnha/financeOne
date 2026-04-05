@@ -75,6 +75,7 @@ def list_transactions(
     if tx_type in ("in", "out"):
         where.append("t.type = %s")
         params.append(tx_type)
+        where.append("t.is_cancel = false")
     if unclassified:
         where.append("t.is_confirmed = false AND t.internal_account_id IS NULL")
     if unconfirmed:
