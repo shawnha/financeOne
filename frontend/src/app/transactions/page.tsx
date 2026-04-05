@@ -744,7 +744,7 @@ export default function TransactionsPage() {
               checked={filters.recentlyMapped}
               onCheckedChange={v => updateFilter("recentlyMapped", v === true)}
             />
-            <span className="text-amber-400">최근 매핑</span>
+            <span className="text-amber-400">자동 매핑</span>
           </label>
 
           {/* Slack matched */}
