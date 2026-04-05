@@ -83,7 +83,7 @@ def list_transactions(
         where.append("t.mapping_source = %s")
         params.append(mapping_source)
     if recently_mapped:
-        where.append("t.internal_account_id IS NOT NULL AND t.updated_at >= NOW() - INTERVAL '1 hour'")
+        where.append("t.internal_account_id IS NOT NULL AND t.updated_at >= NOW() - INTERVAL '24 hours'")
     if slack_matched:
         where.append("EXISTS (SELECT 1 FROM transaction_slack_match tsm WHERE tsm.transaction_id = t.id AND tsm.is_confirmed = true)")
     if unclassified:
