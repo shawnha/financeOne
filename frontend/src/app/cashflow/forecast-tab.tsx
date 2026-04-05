@@ -518,11 +518,13 @@ function ForecastBalanceChart({
   forecastData,
   entityId,
   month,
+  onClosingBalances,
 }: {
   schedule: DailyScheduleData | null
   forecastData: ForecastData
   entityId: string | null
   month: number
+  onClosingBalances?: (balances: { original: number; adjusted: number; worstCase: number }) => void
 }) {
   const chartData = useMemo(() => {
     if (!schedule) return null
@@ -604,8 +606,25 @@ function ForecastBalanceChart({
       }
     })
 
-    return { points, daysInMonth: schedule.points.length - 1, cardSettings: schedule.card_settings }
+    const lastPoint = points[points.length - 1]
+    return {
+      points,
+      daysInMonth: schedule.points.length - 1,
+      cardSettings: schedule.card_settings,
+      closingBalances: {
+        original: lastPoint?.originalEstimated ?? 0,
+        adjusted: lastPoint?.estimated ?? 0,
+        worstCase: lastPoint?.worstCase ?? lastPoint?.originalEstimated ?? 0,
+      },
+    }
   }, [schedule, forecastData, month])
+
+  // 부모에 기말 잔고 전달
+  useEffect(() => {
+    if (chartData?.closingBalances && onClosingBalances) {
+      onClosingBalances(chartData.closingBalances)
+    }
+  }, [chartData?.closingBalances?.adjusted, chartData?.closingBalances?.original, chartData?.closingBalances?.worstCase, onClosingBalances])
 
   if (!chartData) return <Skeleton className="h-[220px] rounded-2xl" />
 
@@ -1147,6 +1166,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
   const [data, setData] = useState<ForecastData | null>(null)
   const [schedule, setSchedule] = useState<DailyScheduleData | null>(null)
   const [summary, setSummary] = useState<SummaryData | null>(null)
+  const [closingBalances, setClosingBalances] = useState<{ original: number; adjusted: number; worstCase: number } | null>(null)
   const [state, setState] = useState<LoadState>("loading")
   const [error, setError] = useState("")
   const [globalMonth, setGlobalMonth, monthReady] = useGlobalMonth()
@@ -1495,37 +1515,23 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
       )}
 
       {/* Forecast vs Actual balance chart (daily-schedule API) */}
-      <ForecastBalanceChart schedule={schedule} forecastData={data} entityId={entityId} month={m} />
+      <ForecastBalanceChart schedule={schedule} forecastData={data} entityId={entityId} month={m} onClosingBalances={setClosingBalances} />
 
       {/* KPI */}
-      <div className="grid grid-cols-5 gap-3 max-md:grid-cols-2">
+      <div className="grid grid-cols-4 gap-3 max-md:grid-cols-2">
         <KPICard label={`기초 (${m - 1 || 12}월 확정)`} value={formatByEntity(data.opening_balance, entityId)} rawAmount={data.opening_balance} entityId={entityId} />
         <KPICard
-          label="원래 예상 기말"
-          value={formatByEntity(data.forecast_closing, entityId)}
-          rawAmount={data.forecast_closing}
-          entityId={entityId}
-          colorClass="text-[#71717a]"
-        />
-        <KPICard
-          label="조정 예상 기말"
-          value={formatByEntity(data.adjusted_forecast_closing, entityId)}
-          rawAmount={data.adjusted_forecast_closing}
+          label="예상 기말"
+          value={formatByEntity(closingBalances?.adjusted ?? data.adjusted_forecast_closing, entityId)}
+          rawAmount={closingBalances?.adjusted ?? data.adjusted_forecast_closing}
           entityId={entityId}
           colorClass="text-[hsl(var(--warning))]"
-          subtext={(() => {
-            const diff = data.adjusted_forecast_closing - data.forecast_closing
-            if (Math.abs(diff) < 1000) return undefined
-            return `차이: ${diff >= 0 ? "+" : ""}${formatByEntity(diff, entityId)}`
-          })()}
-          subtextColor={data.adjusted_forecast_closing >= data.forecast_closing ? "text-green-400" : "text-red-400"}
-        />
-        <KPICard
-          label="최악 시나리오 기말"
-          value={formatByEntity(schedule?.worst_case_points?.[schedule.worst_case_points.length - 1]?.balance ?? data.forecast_closing, entityId)}
-          rawAmount={schedule?.worst_case_points?.[schedule.worst_case_points.length - 1]?.balance ?? data.forecast_closing}
-          entityId={entityId}
-          colorClass="text-red-400"
+          subtext={closingBalances ? (() => {
+            const diff = closingBalances.adjusted - closingBalances.original
+            if (Math.abs(diff) < 1000) return `원래 예상: ${formatByEntity(closingBalances.original, entityId)}`
+            return `원래 예상 대비 ${diff >= 0 ? "+" : ""}${formatByEntity(diff, entityId)}`
+          })() : undefined}
+          subtextColor={closingBalances && closingBalances.adjusted >= closingBalances.original ? "text-green-400" : "text-red-400"}
         />
         <KPICard
           label="실제 진행 기말"
@@ -1534,6 +1540,14 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
           entityId={entityId}
           subtext={`차이: ${data.diff >= 0 ? "+" : ""}${formatByEntity(data.diff, entityId)}`}
           colorClass="text-[hsl(var(--profit))]"
+        />
+        <KPICard
+          label="카드 사용 (진행)"
+          value={formatByEntity(data.card_timing.curr_month_card_actual, entityId)}
+          rawAmount={data.card_timing.curr_month_card_actual}
+          entityId={entityId}
+          subtext={`예상 ${formatByEntity(data.forecast_card_usage, entityId)} 중`}
+          colorClass="text-[#8B5CF6]"
         />
       </div>
 
