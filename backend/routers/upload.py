@@ -450,6 +450,13 @@ def delete_uploaded_file(
             )
         """, [file_id])
 
+        # raw_upload_rows 삭제 (FK: raw_upload_rows → transactions)
+        cur.execute("""
+            DELETE FROM raw_upload_rows WHERE transaction_id IN (
+                SELECT id FROM transactions WHERE file_id = %s
+            )
+        """, [file_id])
+
         # 거래 삭제
         cur.execute("DELETE FROM transactions WHERE file_id = %s", [file_id])
         tx_deleted = cur.rowcount
