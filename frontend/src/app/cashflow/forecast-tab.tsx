@@ -1501,7 +1501,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                     )
                     if (res.matched > 0) {
                       toast.success(`${res.matched}건 내부계정 자동 연결 완료`)
-                      fetchForecast()
+                      fetchForecast(true)
                     }
                     if (res.unmatched.length > 0) {
                       toast.info(`미연결: ${res.unmatched.join(", ")} — 내부계정을 먼저 추가해주세요`)
@@ -1621,7 +1621,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                                   method: "PUT",
                                   body: JSON.stringify({ type: newType }),
                                 })
-                                fetchForecast()
+                                fetchForecast(true)
                               } catch { /* error */ }
                             }}
                             title="클릭하여 입금/출금 전환"
@@ -1738,7 +1738,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                                     method: "PUT",
                                     body: JSON.stringify({ forecast_amount: amt }),
                                   })
-                                  fetchForecast()
+                                  fetchForecast(true)
                                 } catch { /* error */ }
                               }
                               setEditingItemId(null)
@@ -1838,7 +1838,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                                 if (!confirm(`"${item.internal_account_name ?? item.category}" 항목을 삭제하시겠습니까?`)) return
                                 try {
                                   await fetchAPI(`/forecasts/${item.id}`, { method: "DELETE" })
-                                  fetchForecast()
+                                  fetchForecast(true)
                                 } catch { /* toast handled by fetchAPI */ }
                               }}
                               className="text-muted-foreground hover:text-destructive"
