@@ -539,11 +539,27 @@ function HistorySkeleton() {
   )
 }
 
+function extractDataMonth(filename: string): string | null {
+  // 파일명에서 데이터 월 추출: "2026년01월", "2026-01", "202601", "1월" 등
+  const patterns = [
+    /(\d{4})[년\-_.]?\s*(\d{1,2})[월]?/, // 2026년01월, 2026-01, 2026_01
+    /(\d{4})(\d{2})/, // 202601
+  ]
+  for (const p of patterns) {
+    const m = filename.match(p)
+    if (m) return `${m[1]}-${m[2].padStart(2, "0")}`
+  }
+  return null
+}
+
 function groupByMonth(items: UploadHistoryItem[]): { month: string; label: string; items: UploadHistoryItem[] }[] {
   const groups = new Map<string, UploadHistoryItem[]>()
   for (const item of items) {
-    const d = new Date(item.uploaded_at)
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+    const dataMonth = extractDataMonth(item.filename)
+    const key = dataMonth || (() => {
+      const d = new Date(item.uploaded_at)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+    })()
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key)!.push(item)
   }
@@ -551,7 +567,7 @@ function groupByMonth(items: UploadHistoryItem[]): { month: string; label: strin
     .sort((a, b) => b[0].localeCompare(a[0]))
     .map(([key, items]) => {
       const [y, m] = key.split("-").map(Number)
-      return { month: key, label: `${y}년 ${m}월`, items }
+      return { month: key, label: `${y}년 ${m}월 데이터`, items }
     })
 }
 
