@@ -281,29 +281,56 @@ def copy_recurring_forecasts(
     if amount_source not in ("forecast", "actual"):
         raise HTTPException(400, "amount_source must be 'forecast' or 'actual'")
 
-    # Choose which amount to copy as the new forecast_amount
-    amount_expr = "forecast_amount"
-    if amount_source == "actual":
-        amount_expr = "COALESCE(actual_amount, forecast_amount)"
-
     cur = conn.cursor()
     try:
-        cur.execute(
-            f"""
-            INSERT INTO forecasts
-                (entity_id, year, month, category, subcategory, type,
-                 forecast_amount, is_recurring, internal_account_id, note,
-                 expected_day, payment_method)
-            SELECT entity_id, %s, %s, category, subcategory, type,
-                   {amount_expr}, is_recurring, internal_account_id, note,
-                   expected_day, payment_method
-            FROM forecasts
-            WHERE entity_id = %s AND year = %s AND month = %s AND is_recurring = true
-            ON CONFLICT DO NOTHING
-            RETURNING id
-            """,
-            [target_year, target_month, entity_id, source_year, source_month],
-        )
+        if amount_source == "actual":
+            # transactions 테이블에서 실제 거래 합계를 가져와 forecast_amount로 사용
+            cur.execute(
+                """
+                INSERT INTO forecasts
+                    (entity_id, year, month, category, subcategory, type,
+                     forecast_amount, is_recurring, internal_account_id, note,
+                     expected_day, payment_method)
+                SELECT f.entity_id, %s, %s, f.category, f.subcategory, f.type,
+                       COALESCE(t.actual_total, f.forecast_amount),
+                       f.is_recurring, f.internal_account_id, f.note,
+                       f.expected_day, f.payment_method
+                FROM forecasts f
+                LEFT JOIN (
+                    SELECT internal_account_id, type, SUM(amount) AS actual_total
+                    FROM transactions
+                    WHERE entity_id = %s
+                      AND date >= make_date(%s, %s, 1)
+                      AND date < make_date(%s, %s, 1) + INTERVAL '1 month'
+                      AND is_duplicate = false
+                      AND internal_account_id IS NOT NULL
+                    GROUP BY internal_account_id, type
+                ) t ON t.internal_account_id = f.internal_account_id AND t.type = f.type
+                WHERE f.entity_id = %s AND f.year = %s AND f.month = %s AND f.is_recurring = true
+                ON CONFLICT DO NOTHING
+                RETURNING id
+                """,
+                [target_year, target_month,
+                 entity_id, source_year, source_month, source_year, source_month,
+                 entity_id, source_year, source_month],
+            )
+        else:
+            cur.execute(
+                """
+                INSERT INTO forecasts
+                    (entity_id, year, month, category, subcategory, type,
+                     forecast_amount, is_recurring, internal_account_id, note,
+                     expected_day, payment_method)
+                SELECT entity_id, %s, %s, category, subcategory, type,
+                       forecast_amount, is_recurring, internal_account_id, note,
+                       expected_day, payment_method
+                FROM forecasts
+                WHERE entity_id = %s AND year = %s AND month = %s AND is_recurring = true
+                ON CONFLICT DO NOTHING
+                RETURNING id
+                """,
+                [target_year, target_month, entity_id, source_year, source_month],
+            )
         copied = len(cur.fetchall())
         conn.commit()
         cur.close()
