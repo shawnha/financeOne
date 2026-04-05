@@ -548,15 +548,24 @@ function ForecastBalanceChart({
       }
     }
 
-    // Calculate adjusted forecast: apply unmapped impact proportionally on unmapped tx dates
-    const unmappedNet = (forecastData.unmapped_income ?? 0) - (forecastData.unmapped_expense ?? 0)
+    // 조정 예상: 실제 진행 시점까지의 누적 차이를 남은 기간에 반영
+    // variance = (마지막 실제 잔고) - (같은 날 원래 예상 잔고)
+    const lastActualDay = forecastData.last_actual_day
+    const lastActualBalance = lastActualDay > 0 ? (actualBalanceByDay.get(lastActualDay) ?? null) : null
+    const lastForecastAtActualDay = lastActualDay > 0
+      ? (schedule.points.find(p => p.day === lastActualDay)?.balance ?? null)
+      : null
+    const variance = lastActualBalance != null && lastForecastAtActualDay != null
+      ? lastActualBalance - lastForecastAtActualDay
+      : 0
 
     const points = schedule.points.map((p, i) => {
       const dayTx = actualTxByDay.get(p.day)
       return {
         day: p.day === 0 ? "시작" : `${month}/${p.day}`,
         originalEstimated: p.balance,
-        estimated: p.day === 0 ? p.balance : p.balance + (unmappedNet * p.day / (schedule.points.length - 1)),
+        // 조정 예상: 원래 예상 + 실제 누적 차이 (미래 구간에 반영)
+        estimated: p.day === 0 ? p.balance : p.balance + variance,
         actual: p.day === 0
           ? forecastData.opening_balance
           : p.day <= forecastData.last_actual_day
