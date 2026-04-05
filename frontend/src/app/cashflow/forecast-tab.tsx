@@ -548,24 +548,34 @@ function ForecastBalanceChart({
       }
     }
 
-    // 조정 예상: 실제 진행 시점까지의 누적 차이를 남은 기간에 반영
-    // variance = (마지막 실제 잔고) - (같은 날 원래 예상 잔고)
+    // 조정 예상: 실제 구간은 실제 잔고, 미래 구간은 마지막 실제 잔고 + 남은 예상 변동분
     const lastActualDay = forecastData.last_actual_day
     const lastActualBalance = lastActualDay > 0 ? (actualBalanceByDay.get(lastActualDay) ?? null) : null
     const lastForecastAtActualDay = lastActualDay > 0
       ? (schedule.points.find(p => p.day === lastActualDay)?.balance ?? null)
       : null
-    const variance = lastActualBalance != null && lastForecastAtActualDay != null
-      ? lastActualBalance - lastForecastAtActualDay
-      : 0
 
     const points = schedule.points.map((p, i) => {
       const dayTx = actualTxByDay.get(p.day)
+
+      // 조정 예상 계산
+      let estimated: number
+      if (p.day === 0) {
+        estimated = p.balance // 기초잔고
+      } else if (p.day <= lastActualDay && actualBalanceByDay.has(p.day)) {
+        // 실제 데이터 있는 구간: 실제 잔고를 따라감
+        estimated = actualBalanceByDay.get(p.day)!
+      } else if (lastActualBalance != null && lastForecastAtActualDay != null) {
+        // 미래 구간: 마지막 실제 잔고 + (이 날 예상 - 마지막 실제일 예상) = 남은 변동분
+        estimated = lastActualBalance + (p.balance - lastForecastAtActualDay)
+      } else {
+        estimated = p.balance // 실제 데이터 없으면 원래 예상 그대로
+      }
+
       return {
         day: p.day === 0 ? "시작" : `${month}/${p.day}`,
         originalEstimated: p.balance,
-        // 조정 예상: 원래 예상 + 실제 누적 차이 (미래 구간에 반영)
-        estimated: p.day === 0 ? p.balance : p.balance + variance,
+        estimated,
         actual: p.day === 0
           ? forecastData.opening_balance
           : p.day <= forecastData.last_actual_day
