@@ -1498,38 +1498,42 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
       <ForecastBalanceChart schedule={schedule} forecastData={data} entityId={entityId} month={m} />
 
       {/* KPI */}
-      <div className="grid grid-cols-4 gap-3 max-md:grid-cols-2">
+      <div className="grid grid-cols-5 gap-3 max-md:grid-cols-2">
         <KPICard label={`기초 (${m - 1 || 12}월 확정)`} value={formatByEntity(data.opening_balance, entityId)} rawAmount={data.opening_balance} entityId={entityId} />
+        <KPICard
+          label="원래 예상 기말"
+          value={formatByEntity(data.forecast_closing, entityId)}
+          rawAmount={data.forecast_closing}
+          entityId={entityId}
+          colorClass="text-[#71717a]"
+        />
         <KPICard
           label="조정 예상 기말"
           value={formatByEntity(data.adjusted_forecast_closing, entityId)}
           rawAmount={data.adjusted_forecast_closing}
           entityId={entityId}
           colorClass="text-[hsl(var(--warning))]"
-          subtext={
-            data.over_budget && data.over_budget.length > 0
-              ? `초과 ${data.over_budget.length}건`
-              : data.unmapped_count > 0
-                ? `미분류 ${data.unmapped_count}건 반영`
-                : undefined
-          }
-          subtextColor={data.over_budget && data.over_budget.length > 0 ? "text-red-400" : "text-amber-400"}
+          subtext={(() => {
+            const diff = data.adjusted_forecast_closing - data.forecast_closing
+            if (Math.abs(diff) < 1000) return undefined
+            return `차이: ${diff >= 0 ? "+" : ""}${formatByEntity(diff, entityId)}`
+          })()}
+          subtextColor={data.adjusted_forecast_closing >= data.forecast_closing ? "text-green-400" : "text-red-400"}
         />
         <KPICard
-          label="실제 진행 기준 기말"
+          label="최악 시나리오 기말"
+          value={formatByEntity(schedule?.worst_case_points?.[schedule.worst_case_points.length - 1]?.balance ?? data.forecast_closing, entityId)}
+          rawAmount={schedule?.worst_case_points?.[schedule.worst_case_points.length - 1]?.balance ?? data.forecast_closing}
+          entityId={entityId}
+          colorClass="text-red-400"
+        />
+        <KPICard
+          label="실제 진행 기말"
           value={formatByEntity(data.actual_closing, entityId)}
           rawAmount={data.actual_closing}
           entityId={entityId}
           subtext={`차이: ${data.diff >= 0 ? "+" : ""}${formatByEntity(data.diff, entityId)}`}
           colorClass="text-[hsl(var(--profit))]"
-        />
-        <KPICard
-          label="카드 사용 (진행)"
-          value={formatByEntity(data.card_timing.curr_month_card_actual, entityId)}
-          rawAmount={data.card_timing.curr_month_card_actual}
-          entityId={entityId}
-          subtext={`예상 ${formatByEntity(data.forecast_card_usage, entityId)} 중`}
-          colorClass="text-[#8B5CF6]"
         />
       </div>
 
