@@ -479,6 +479,20 @@ def get_forecast_cashflow(
     for row in cur.fetchall():
         actual_by_account[(row[0], row[1])] = {"total": float(row[2]), "name": row[3]}
 
+    # 2-bis-b. actual_amount 자동 반영 (forecast → DB 동기화)
+    for (acct_id, acct_type), info in actual_by_account.items():
+        cur.execute(
+            """
+            UPDATE forecasts
+            SET actual_amount = %s, updated_at = NOW()
+            WHERE entity_id = %s AND year = %s AND month = %s
+              AND internal_account_id = %s AND type = %s
+              AND (actual_amount IS DISTINCT FROM %s)
+            """,
+            [info["total"], entity_id, year, month, acct_id, acct_type, info["total"]],
+        )
+    conn.commit()
+
     # 2-ter. 미매핑 거래 합계 (internal_account_id IS NULL, 은행 거래만)
     cur.execute(
         """
