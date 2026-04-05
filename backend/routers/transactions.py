@@ -36,6 +36,7 @@ def list_transactions(
     member_id: Optional[int] = None,
     standard_account_id: Optional[int] = None,
     internal_account_id: Optional[int] = None,
+    tx_type: Optional[str] = None,
     unclassified: Optional[bool] = None,
     unconfirmed: Optional[bool] = None,
     page: int = Query(1, ge=1),
@@ -71,6 +72,9 @@ def list_transactions(
     if internal_account_id is not None:
         where.append("t.internal_account_id = %s")
         params.append(internal_account_id)
+    if tx_type in ("in", "out"):
+        where.append("t.type = %s")
+        params.append(tx_type)
     if unclassified:
         where.append("t.is_confirmed = false AND t.internal_account_id IS NULL")
     if unconfirmed:

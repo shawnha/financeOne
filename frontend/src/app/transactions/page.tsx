@@ -116,6 +116,7 @@ interface Filters {
   memberId: string
   standardAccountId: string
   sourceType: string
+  txType: "" | "in" | "out"
   unclassified: boolean
   unconfirmed: boolean
 }
@@ -154,7 +155,8 @@ const INITIAL_FILTERS: Filters = {
   memberId: "",
   standardAccountId: "",
   sourceType: "",
-  unclassified: false,
+  txType: "",
+  unclassified: true,
   unconfirmed: false,
 }
 
@@ -331,6 +333,7 @@ export default function TransactionsPage() {
     if (filters.memberId) params.set("member_id", filters.memberId)
     if (filters.standardAccountId) params.set("standard_account_id", filters.standardAccountId)
     if (filters.sourceType) params.set("source_type", filters.sourceType)
+    if (filters.txType) params.set("tx_type", filters.txType)
     if (filters.unclassified) params.set("unclassified", "true")
     if (filters.unconfirmed) params.set("unconfirmed", "true")
 
@@ -344,7 +347,7 @@ export default function TransactionsPage() {
       setErrorMsg(msg)
       setViewState("error")
     }
-  }, [entityId, page, perPage, debouncedSearch, filters.dateFrom, filters.dateTo, filters.memberId, filters.standardAccountId, filters.sourceType, filters.unclassified, filters.unconfirmed])
+  }, [entityId, page, perPage, debouncedSearch, filters.dateFrom, filters.dateTo, filters.memberId, filters.standardAccountId, filters.sourceType, filters.txType, filters.unclassified, filters.unconfirmed])
 
   useEffect(() => {
     fetchTransactions()
@@ -364,7 +367,7 @@ export default function TransactionsPage() {
   const hasActiveFilters = useMemo(() => {
     return filters.search !== "" || filters.dateFrom !== "" || filters.dateTo !== "" ||
       filters.memberId !== "" || filters.standardAccountId !== "" ||
-      filters.sourceType !== "" || filters.unclassified || filters.unconfirmed
+      filters.sourceType !== "" || filters.txType !== "" || filters.unclassified || filters.unconfirmed
   }, [filters])
 
   // Selection
@@ -692,6 +695,30 @@ export default function TransactionsPage() {
             searchPlaceholder="출처 검색..."
             className="w-32"
           />
+
+          {/* Type filter */}
+          <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
+            {[
+              { value: "" as const, label: "전체" },
+              { value: "in" as const, label: "수입" },
+              { value: "out" as const, label: "지출" },
+            ].map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => updateFilter("txType", opt.value)}
+                className={cn(
+                  "px-2.5 py-1 text-xs font-medium rounded transition-colors",
+                  filters.txType === opt.value
+                    ? opt.value === "in" ? "bg-green-500/20 text-green-400"
+                      : opt.value === "out" ? "bg-red-500/20 text-red-400"
+                      : "bg-secondary text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
 
           {/* Unclassified */}
           <label className="flex items-center gap-1.5 text-sm cursor-pointer select-none">
