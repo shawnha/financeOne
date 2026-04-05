@@ -539,23 +539,31 @@ function HistorySkeleton() {
   )
 }
 
-function extractDataMonth(filename: string): string | null {
-  // 파일명에서 데이터 월 추출: "2026년01월", "2026-01", "202601", "1월" 등
-  const patterns = [
-    /(\d{4})[년\-_.]?\s*(\d{1,2})[월]?/, // 2026년01월, 2026-01, 2026_01
-    /(\d{4})(\d{2})/, // 202601
-  ]
-  for (const p of patterns) {
-    const m = filename.match(p)
-    if (m) return `${m[1]}-${m[2].padStart(2, "0")}`
+function extractDataMonth(filename: string, uploadedAt: string): string | null {
+  // 1) 연도+월: "2026년01월", "2026-01", "2026_01"
+  const withYear = filename.match(/(\d{4})[년\-_.]?\s*(\d{1,2})월/)
+  if (withYear) return `${withYear[1]}-${withYear[2].padStart(2, "0")}`
+
+  // 2) 월만: "1월", "12월" → 업로드일에서 연도 추정
+  const monthOnly = filename.match(/(\d{1,2})월/)
+  if (monthOnly) {
+    const fileMonth = Number(monthOnly[1])
+    if (fileMonth < 1 || fileMonth > 12) return null
+    const uploadDate = new Date(uploadedAt)
+    const uploadMonth = uploadDate.getMonth() + 1
+    const uploadYear = uploadDate.getFullYear()
+    // 파일 월이 업로드 월보다 크면 전년도 데이터 (예: 12월 파일을 3월에 업로드)
+    const year = fileMonth > uploadMonth ? uploadYear - 1 : uploadYear
+    return `${year}-${String(fileMonth).padStart(2, "0")}`
   }
+
   return null
 }
 
 function groupByMonth(items: UploadHistoryItem[]): { month: string; label: string; items: UploadHistoryItem[] }[] {
   const groups = new Map<string, UploadHistoryItem[]>()
   for (const item of items) {
-    const dataMonth = extractDataMonth(item.filename)
+    const dataMonth = extractDataMonth(item.filename, item.uploaded_at)
     const key = dataMonth || (() => {
       const d = new Date(item.uploaded_at)
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
