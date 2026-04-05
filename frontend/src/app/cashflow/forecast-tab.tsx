@@ -587,6 +587,10 @@ function ForecastBalanceChart({
         worstCase: (() => {
           const wcBalance = worstBalanceByDay.get(p.day)
           if (wcBalance == null) return null
+          // 월 완료(실제 데이터가 전체): static worst-case 그대로 (실제 vs 최악 비교용)
+          const daysInMonth = schedule.points.length - 1 // day 0 제외
+          if (lastActualDay >= daysInMonth) return wcBalance
+          // 진행 중: shifted worst-case
           if (p.day === 0) return wcBalance
           if (p.day <= lastActualDay && actualBalanceByDay.has(p.day)) return actualBalanceByDay.get(p.day)!
           if (lastActualBalance != null && lastWorstAtActualDay != null) {
