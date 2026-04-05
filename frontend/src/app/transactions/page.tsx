@@ -117,6 +117,7 @@ interface Filters {
   standardAccountId: string
   sourceType: string
   txType: "" | "in" | "out"
+  slackMatched: boolean
   unclassified: boolean
   unconfirmed: boolean
 }
@@ -156,6 +157,7 @@ const INITIAL_FILTERS: Filters = {
   standardAccountId: "",
   sourceType: "",
   txType: "",
+  slackMatched: false,
   unclassified: false,
   unconfirmed: false,
 }
@@ -334,6 +336,7 @@ export default function TransactionsPage() {
     if (filters.standardAccountId) params.set("standard_account_id", filters.standardAccountId)
     if (filters.sourceType) params.set("source_type", filters.sourceType)
     if (filters.txType) params.set("tx_type", filters.txType)
+    if (filters.slackMatched) params.set("slack_matched", "true")
     if (filters.unclassified) params.set("unclassified", "true")
     if (filters.unconfirmed) params.set("unconfirmed", "true")
 
@@ -347,7 +350,7 @@ export default function TransactionsPage() {
       setErrorMsg(msg)
       setViewState("error")
     }
-  }, [entityId, page, perPage, debouncedSearch, filters.dateFrom, filters.dateTo, filters.memberId, filters.standardAccountId, filters.sourceType, filters.txType, filters.unclassified, filters.unconfirmed])
+  }, [entityId, page, perPage, debouncedSearch, filters.dateFrom, filters.dateTo, filters.memberId, filters.standardAccountId, filters.sourceType, filters.txType, filters.slackMatched, filters.unclassified, filters.unconfirmed])
 
   useEffect(() => {
     fetchTransactions()
@@ -376,7 +379,7 @@ export default function TransactionsPage() {
   const hasActiveFilters = useMemo(() => {
     return filters.search !== "" || filters.dateFrom !== "" || filters.dateTo !== "" ||
       filters.memberId !== "" || filters.standardAccountId !== "" ||
-      filters.sourceType !== "" || filters.txType !== "" || filters.unclassified || filters.unconfirmed
+      filters.sourceType !== "" || filters.txType !== "" || filters.slackMatched || filters.unclassified || filters.unconfirmed
   }, [filters])
 
   // Selection
@@ -728,6 +731,18 @@ export default function TransactionsPage() {
               </button>
             ))}
           </div>
+
+          {/* Slack matched */}
+          <label className="flex items-center gap-1.5 text-sm cursor-pointer select-none">
+            <Checkbox
+              checked={filters.slackMatched}
+              onCheckedChange={v => updateFilter("slackMatched", v === true)}
+            />
+            <span className="flex items-center gap-1">
+              <MessageSquare className="h-3 w-3" />
+              슬랙
+            </span>
+          </label>
 
           {/* Unclassified */}
           <label className="flex items-center gap-1.5 text-sm cursor-pointer select-none">

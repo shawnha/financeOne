@@ -37,6 +37,7 @@ def list_transactions(
     standard_account_id: Optional[int] = None,
     internal_account_id: Optional[int] = None,
     tx_type: Optional[str] = None,
+    slack_matched: Optional[bool] = None,
     unclassified: Optional[bool] = None,
     unconfirmed: Optional[bool] = None,
     page: int = Query(1, ge=1),
@@ -76,6 +77,8 @@ def list_transactions(
         where.append("t.type = %s")
         params.append(tx_type)
         where.append("t.is_cancel = false")
+    if slack_matched:
+        where.append("EXISTS (SELECT 1 FROM transaction_slack_match tsm WHERE tsm.transaction_id = t.id AND tsm.is_confirmed = true)")
     if unclassified:
         where.append("t.is_confirmed = false AND t.internal_account_id IS NULL")
     if unconfirmed:
