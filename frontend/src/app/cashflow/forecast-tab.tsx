@@ -30,7 +30,6 @@ import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { fetchAPI } from "@/lib/api"
 import { formatByEntity } from "@/lib/format"
-import { BarChart, Bar, Cell } from "recharts"
 import { AlertCircle, RefreshCw, Plus, Download, Trash2, Pencil, ChevronRight, ChevronDown, Link2, AlertTriangle, TrendingDown, TrendingUp } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -276,29 +275,6 @@ function VarianceBridge({ entityId, year, month }: { entityId: string | null; ye
     data.data_quality.high_unexplained_variance && "설명 안 되는 잔차가 큼",
   ].filter(Boolean) as string[] : []
 
-  // Waterfall chart data: stacked bar with invisible base
-  const chartData = data ? (() => {
-    const items: Array<{ name: string; base: number; delta: number; total: number; isPositive: boolean; isEndpoint: boolean }> = []
-    // Start bar
-    items.push({ name: "예상 기말", base: 0, delta: data.forecast_closing, total: data.forecast_closing, isPositive: true, isEndpoint: true })
-
-    let running = data.forecast_closing
-    for (const bucket of data.buckets) {
-      if (Math.abs(bucket.amount) < 1) continue
-      const newRunning = running + bucket.amount
-      if (bucket.amount >= 0) {
-        items.push({ name: bucket.name, base: running, delta: bucket.amount, total: newRunning, isPositive: true, isEndpoint: false })
-      } else {
-        items.push({ name: bucket.name, base: newRunning, delta: Math.abs(bucket.amount), total: newRunning, isPositive: false, isEndpoint: false })
-      }
-      running = newRunning
-    }
-
-    // End bar
-    items.push({ name: "실제 기말", base: 0, delta: data.actual_closing, total: data.actual_closing, isPositive: true, isEndpoint: true })
-    return items
-  })() : []
-
   const maxBucketAbs = data ? Math.max(...data.buckets.map(b => Math.abs(b.amount)), 1) : 1
 
   return (
@@ -336,28 +312,47 @@ function VarianceBridge({ entityId, year, month }: { entityId: string | null; ye
 
           {!loading && data && (
             <>
-              {/* Waterfall Chart */}
-              <div className="w-full overflow-x-auto">
-                <ResponsiveContainer width="100%" height={200} minWidth={0}>
-                  <BarChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                    <XAxis dataKey="name" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} interval={0} angle={-20} textAnchor="end" height={50} />
-                    <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickFormatter={(v: number) => `${(v / 1000000).toFixed(0)}M`} width={50} />
-                    <Tooltip
-                      formatter={(value: number, name: string) => {
-                        if (name === "base") return [null, null]
-                        return [formatByEntity(value, entityId), "금액"]
-                      }}
-                      contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
-                    />
-                    <Bar dataKey="base" stackId="stack" fill="transparent" isAnimationActive={false} />
-                    <Bar dataKey="delta" stackId="stack" radius={[3, 3, 0, 0]} isAnimationActive={false} label={{ position: "top", fontSize: 10, fill: "hsl(var(--muted-foreground))", formatter: (v: number) => `${(v / 1000000).toFixed(0)}M` }}>
-                      {chartData.map((entry, i) => (
-                        <Cell key={i} fill={entry.isEndpoint ? "#6366f1" : entry.isPositive ? "hsl(var(--profit))" : "hsl(var(--loss))"} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+              {/* Waterfall — horizontal flow */}
+              <div className="space-y-1">
+                {/* Start → End summary */}
+                <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
+                  <span>예상 기말 <span className="text-foreground font-medium">{formatByEntity(data.forecast_closing, entityId)}</span></span>
+                  <span>실제 기말 <span className="text-foreground font-medium">{formatByEntity(data.actual_closing, entityId)}</span></span>
+                </div>
+                {/* Bucket bars */}
+                {data.buckets.filter(b => Math.abs(b.amount) >= 1).map((bucket, i) => {
+                  const barWidth = Math.min(100, Math.abs(bucket.amount) / maxBucketAbs * 100)
+                  const isPositive = bucket.amount >= 0
+                  return (
+                    <div key={i} className="grid grid-cols-[120px_1fr_100px] items-center gap-2 h-8">
+                      <span className="text-xs text-muted-foreground text-right truncate">{bucket.name}</span>
+                      <div className="flex items-center h-full">
+                        {isPositive ? (
+                          <div className="flex items-center h-full w-full">
+                            <div className="w-1/2" />
+                            <div className="h-5 rounded-r-sm bg-[hsl(var(--profit))]" style={{ width: `${barWidth / 2}%` }} />
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-end h-full w-full">
+                            <div className="h-5 rounded-l-sm bg-[hsl(var(--loss))]" style={{ width: `${barWidth / 2}%` }} />
+                            <div className="w-1/2" />
+                          </div>
+                        )}
+                      </div>
+                      <span className={cn("text-xs font-mono tabular-nums text-right", isPositive ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]")}>
+                        {isPositive ? "+" : ""}{formatByEntity(bucket.amount, entityId)}
+                      </span>
+                    </div>
+                  )
+                })}
+                {/* Center line label */}
+                <div className="grid grid-cols-[120px_1fr_100px] items-center gap-2 mt-1">
+                  <span />
+                  <div className="flex justify-center">
+                    <span className="text-[10px] text-muted-foreground/50">← 감소 | 증가 →</span>
+                  </div>
+                  <span />
+                </div>
               </div>
 
               {/* Driver Table */}
