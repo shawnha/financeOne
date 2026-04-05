@@ -357,6 +357,15 @@ export default function TransactionsPage() {
   const updateFilter = useCallback(<K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters(prev => ({ ...prev, [key]: value }))
     if (key !== "search") setPage(1)
+    // URL에서 filter 파라미터 제거 (새로고침 시 필터 고착 방지)
+    if (key === "unclassified" || key === "unconfirmed") {
+      const params = new URLSearchParams(window.location.search)
+      if (params.has("filter")) {
+        params.delete("filter")
+        const newUrl = `${window.location.pathname}${params.toString() ? `?${params}` : ""}`
+        window.history.replaceState(null, "", newUrl)
+      }
+    }
   }, [])
 
   const clearFilters = useCallback(() => {
