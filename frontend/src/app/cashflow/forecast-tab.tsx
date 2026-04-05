@@ -1601,7 +1601,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
             >
               {showComparison ? "실제 비교 접기 \u25C2" : "실제 비교 펼치기 \u25B8"}
             </button>
-            {!data.items.some(i => i.is_recurring) && (
+            {(
               <Button
                 variant="outline"
                 size="sm"
