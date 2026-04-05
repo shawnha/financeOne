@@ -156,7 +156,7 @@ const INITIAL_FILTERS: Filters = {
   standardAccountId: "",
   sourceType: "",
   txType: "",
-  unclassified: true,
+  unclassified: false,
   unconfirmed: false,
 }
 
