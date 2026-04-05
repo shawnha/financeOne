@@ -1526,12 +1526,8 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
           rawAmount={closingBalances?.adjusted ?? data.adjusted_forecast_closing}
           entityId={entityId}
           colorClass="text-[hsl(var(--warning))]"
-          subtext={closingBalances ? (() => {
-            const diff = closingBalances.adjusted - closingBalances.original
-            if (Math.abs(diff) < 1000) return `원래 예상: ${formatByEntity(closingBalances.original, entityId)}`
-            return `원래 예상 대비 ${diff >= 0 ? "+" : ""}${formatByEntity(diff, entityId)}`
-          })() : undefined}
-          subtextColor={closingBalances && closingBalances.adjusted >= closingBalances.original ? "text-green-400" : "text-red-400"}
+          subtext={`원래 ${formatByEntity(closingBalances?.original ?? data.forecast_closing, entityId)}`}
+          subtextColor="text-[#71717a]"
         />
         <KPICard
           label="실제 진행 기말"
