@@ -841,15 +841,72 @@ def get_variance_bridge(
     residual_threshold = max(abs(total_diff) * Decimal("0.2"), Decimal("100000"))
     high_unexplained = abs(b6_residual) > residual_threshold
 
+    # 드릴다운: 입금/출금 항목별 forecast 매칭 여부
+    # forecast에 등록된 internal_account_id 집합
+    cur.execute(
+        "SELECT internal_account_id FROM forecasts "
+        "WHERE entity_id = %s AND year = %s AND month = %s AND type = 'out' "
+        "AND internal_account_id IS NOT NULL",
+        [entity_id, year, month],
+    )
+    forecast_out_ids = {r[0] for r in cur.fetchall()}
+    cur.execute(
+        "SELECT internal_account_id FROM forecasts "
+        "WHERE entity_id = %s AND year = %s AND month = %s AND type = 'in' "
+        "AND internal_account_id IS NOT NULL",
+        [entity_id, year, month],
+    )
+    forecast_in_ids = {r[0] for r in cur.fetchall()}
+
+    # 실제 은행 거래를 내부계정별로 집계 (카드대금 제외)
+    cur.execute(
+        """
+        SELECT ia.name, t.internal_account_id, t.type,
+               SUM(t.amount) AS total, COUNT(*) AS cnt
+        FROM transactions t
+        LEFT JOIN internal_accounts ia ON t.internal_account_id = ia.id
+        WHERE t.entity_id = %s
+          AND t.source_type IN ('woori_bank', 'mercury_api', 'manual')
+          AND t.date >= %s AND t.date < %s
+          AND t.is_duplicate = false
+          AND NOT (t.type = 'out' AND (
+              t.counterparty ILIKE '%%롯데카드%%'
+              OR t.counterparty ILIKE '%%우리카드%%'
+              OR t.counterparty ILIKE '%%카드결제%%'))
+        GROUP BY ia.name, t.internal_account_id, t.type
+        ORDER BY total DESC
+        """,
+        [entity_id, *build_date_range(year, month)],
+    )
+    expense_drivers = []
+    income_drivers = []
+    for row in cur.fetchall():
+        name, acct_id, tx_type, total, cnt = row
+        forecast_ids = forecast_out_ids if tx_type == "out" else forecast_in_ids
+        is_forecasted = acct_id in forecast_ids if acct_id else False
+        driver = {
+            "account_name": name or "(미매핑)",
+            "internal_account_id": acct_id,
+            "amount": float(total),
+            "tx_count": int(cnt),
+            "forecasted": is_forecasted,
+        }
+        if tx_type == "out":
+            expense_drivers.append(driver)
+        else:
+            income_drivers.append(driver)
+
     cur.close()
 
     buckets = [
         {"name": "기초잔고 차이", "amount": float(b1_opening),
          "detail": "예상과 실제 동일 소스 사용" if b1_opening == 0 else "스냅샷 차이"},
         {"name": "입금 차이", "amount": float(b2_income),
-         "detail": f"실제 {float(actual_income):,.0f} - 예상 {float(forecast_income):,.0f}"},
+         "detail": f"실제 {float(actual_income):,.0f} - 예상 {float(forecast_income):,.0f}",
+         "drivers": income_drivers},
         {"name": "출금 차이", "amount": float(b3_expense),
-         "detail": f"실제 {float(actual_expense_bank):,.0f} - 예상 {float(forecast_expense_bank):,.0f} (카드대금 제외)"},
+         "detail": f"실제 {float(actual_expense_bank):,.0f} - 예상 {float(forecast_expense_bank):,.0f} (카드대금 제외)",
+         "drivers": expense_drivers},
         {"name": "카드 결제", "amount": float(b4_card),
          "detail": f"은행 카드대금 {float(card_payment_via_bank):,.0f} - 전월 카드 사용 {float(prev_card_net):,.0f}"},
         {"name": "미매핑 거래", "amount": float(b5_unmapped),

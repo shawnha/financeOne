@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback, useMemo, useRef } from "react"
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react"
 import { useGlobalMonth } from "@/hooks/use-global-month"
 import Link from "next/link"
 import { Card } from "@/components/ui/card"
@@ -144,10 +144,19 @@ interface SummaryData {
   available_months: string[]
 }
 
+interface VarianceDriver {
+  account_name: string
+  internal_account_id: number | null
+  amount: number
+  tx_count: number
+  forecasted: boolean
+}
+
 interface VarianceBucket {
   name: string
   amount: number
   detail: string
+  drivers?: VarianceDriver[]
 }
 
 interface VarianceData {
@@ -240,6 +249,7 @@ function VarianceBridge({ entityId, year, month }: { entityId: string | null; ye
   const [data, setData] = useState<VarianceData | null>(null)
   const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
+  const [expandedBucket, setExpandedBucket] = useState<string | null>(null)
 
   const fetchVariance = useCallback(async () => {
     if (!entityId) return
@@ -371,23 +381,54 @@ function VarianceBridge({ entityId, year, month }: { entityId: string | null; ye
                     {data.buckets.filter(b => Math.abs(b.amount) >= 1).map((bucket, i) => {
                       const pct = data.total_diff !== 0 ? Math.abs(bucket.amount / data.total_diff * 100) : 0
                       const barWidth = Math.min(100, Math.abs(bucket.amount) / maxBucketAbs * 100)
+                      const hasDrivers = bucket.drivers && bucket.drivers.length > 0
+                      const isExpanded = expandedBucket === bucket.name
                       return (
-                        <tr key={i} className="border-t border-border/50 hover:bg-muted/20">
-                          <td className="px-3 py-2 font-medium">{bucket.name}</td>
-                          <td className="px-3 py-2 text-muted-foreground text-xs max-w-[200px] truncate">{bucket.detail}</td>
-                          <td className={cn("px-3 py-2 text-right font-mono tabular-nums", bucket.amount >= 0 ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]")}>
-                            {bucket.amount >= 0 ? "+" : ""}{formatByEntity(bucket.amount, entityId)}
-                          </td>
-                          <td className="px-3 py-2 text-right text-xs text-muted-foreground">{pct.toFixed(0)}%</td>
-                          <td className="px-3 py-2">
-                            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                              <div
-                                className={cn("h-full rounded-full", bucket.amount >= 0 ? "bg-[hsl(var(--profit))]" : "bg-[hsl(var(--loss))]")}
-                                style={{ width: `${barWidth}%` }}
-                              />
-                            </div>
-                          </td>
-                        </tr>
+                        <React.Fragment key={i}>
+                          <tr
+                            className={cn("border-t border-border/50 hover:bg-muted/20", hasDrivers && "cursor-pointer")}
+                            onClick={() => hasDrivers && setExpandedBucket(isExpanded ? null : bucket.name)}
+                          >
+                            <td className="px-3 py-2 font-medium">
+                              <span className="flex items-center gap-1">
+                                {hasDrivers && (isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />)}
+                                {bucket.name}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-muted-foreground text-xs max-w-[200px] truncate">{bucket.detail}</td>
+                            <td className={cn("px-3 py-2 text-right font-mono tabular-nums", bucket.amount >= 0 ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]")}>
+                              {bucket.amount >= 0 ? "+" : ""}{formatByEntity(bucket.amount, entityId)}
+                            </td>
+                            <td className="px-3 py-2 text-right text-xs text-muted-foreground">{pct.toFixed(0)}%</td>
+                            <td className="px-3 py-2">
+                              <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                                <div
+                                  className={cn("h-full rounded-full", bucket.amount >= 0 ? "bg-[hsl(var(--profit))]" : "bg-[hsl(var(--loss))]")}
+                                  style={{ width: `${barWidth}%` }}
+                                />
+                              </div>
+                            </td>
+                          </tr>
+                          {isExpanded && bucket.drivers && (
+                            bucket.drivers.map((driver, j) => (
+                              <tr key={`${i}-${j}`} className="bg-muted/10">
+                                <td className="pl-8 pr-3 py-1.5 text-xs">
+                                  {driver.forecasted
+                                    ? <span className="text-muted-foreground">{driver.account_name}</span>
+                                    : <span className="text-[hsl(var(--loss))]">✗ {driver.account_name}</span>
+                                  }
+                                </td>
+                                <td className="px-3 py-1.5 text-xs text-muted-foreground">
+                                  {driver.forecasted ? "예상 항목 있음" : "예상에 없음"} · {driver.tx_count}건
+                                </td>
+                                <td className="px-3 py-1.5 text-right text-xs font-mono tabular-nums text-muted-foreground">
+                                  {formatByEntity(driver.amount, entityId)}
+                                </td>
+                                <td colSpan={2} />
+                              </tr>
+                            ))
+                          )}
+                        </React.Fragment>
                       )
                     })}
                   </tbody>
