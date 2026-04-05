@@ -97,6 +97,7 @@ interface DailyScheduleData {
   opening_balance: number
   points: DailyPoint[]
   alerts: DailyAlert[]
+  worst_case_points?: Array<{ day: number; balance: number }>
   card_settings: CardSetting[]
   min_balance_threshold: number
 }
@@ -537,13 +538,14 @@ function ForecastBalanceChart({
     // Simple approach: distribute unmapped net evenly across the schedule
     const unmappedNet = (forecastData.unmapped_income ?? 0) - (forecastData.unmapped_expense ?? 0)
 
-    const points = schedule.points.map((p) => ({
+    const points = schedule.points.map((p, i) => ({
       day: `${month}/${p.day}`,
       originalEstimated: p.balance,
       estimated: p.balance + (unmappedNet * p.day / schedule.points.length),
       actual: p.day <= forecastData.last_actual_day
         ? (actualBalanceByDay.get(p.day) ?? null)
         : null,
+      worstCase: schedule.worst_case_points?.[i]?.balance ?? null,
       events: p.events,
     }))
 
@@ -600,6 +602,7 @@ function ForecastBalanceChart({
                   {point?.originalEstimated != null && point.originalEstimated !== point.estimated && (
                     <p className="text-[#71717a]">원래 예상: ₩{point.originalEstimated.toLocaleString()}</p>
                   )}
+                  {point?.worstCase != null && <p className="text-red-400">최악: ₩{point.worstCase.toLocaleString()}</p>}
                   {point?.actual != null && <p className="text-[#22C55E]">실제: ₩{point.actual.toLocaleString()}</p>}
                   {point?.events?.length > 0 && (
                     <div className="mt-1 pt-1 border-t border-white/10">
@@ -679,6 +682,17 @@ function ForecastBalanceChart({
             }}
             activeDot={{ r: 4, fill: "#F59E0B", stroke: "#050508", strokeWidth: 2 }}
           />
+          {/* Worst-case scenario (red dashed line) */}
+          <Line
+            type="monotone"
+            dataKey="worstCase"
+            stroke="#EF4444"
+            strokeWidth={1.2}
+            strokeDasharray="6 4"
+            strokeOpacity={0.5}
+            dot={false}
+            activeDot={false}
+          />
           {/* Actual balance (green solid line, smooth, stops at last upload day) */}
           <Line
             type="monotone"
@@ -704,6 +718,7 @@ function ForecastBalanceChart({
           <span className="inline-block w-4 h-0 border-t border-dashed" style={{ borderColor: "rgba(113,113,122,0.4)" }} />
           원래 예상
         </span>
+        <span className="text-[10px] text-red-400/60">— — 최악 시나리오</span>
         {chartData.cardSettings.map((card) => {
           const color = CARD_COLORS[card.source_type] || DEFAULT_CARD_COLOR
           return (

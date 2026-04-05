@@ -73,3 +73,19 @@ class TestOverBudget:
         diff = actual - forecast
         assert diff == -200_000.0
         assert not (actual >= forecast * 1.1)
+
+
+class TestWorstCaseSchedule:
+    """worst-case: 비정기 수입 월말, 비정기 지출 월초."""
+
+    def test_worst_case_income_at_end_expense_at_start(self):
+        opening = 100_000_000
+        nr_expense = 60_000_000
+        nr_income = 80_000_000
+        worst_day1 = opening - nr_expense
+        assert worst_day1 == 40_000_000
+        worst_day31 = worst_day1 + nr_income
+        assert worst_day31 == 120_000_000
+        daily_net = (nr_income - nr_expense) / 31
+        normal_day1 = opening + daily_net
+        assert worst_day1 < normal_day1

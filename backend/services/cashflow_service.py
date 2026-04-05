@@ -1017,6 +1017,38 @@ def generate_daily_schedule(
             "events": day_events.get(d, []),
         })
 
+    # Worst-case 시뮬레이션: 비정기 지출 1일, 비정기 수입 월말
+    worst_day_events: dict[int, list[dict]] = defaultdict(list)
+
+    # expected_day 있는 항목 + 카드 결제 (기본과 동일)
+    for d_key, evts in day_events.items():
+        worst_day_events[d_key].extend(evts)
+
+    # 비정기 undated: 지출→1일, 수입→월말
+    for item in items:
+        if (item.get("payment_method", "bank") == "bank"
+            and not item.get("expected_day")
+            and not item.get("is_recurring", False)):
+            target_day = days_in_month if item["type"] == "in" else 1
+            worst_day_events[target_day].append({
+                "name": item["category"],
+                "amount": item["forecast_amount"],
+                "type": item["type"],
+            })
+
+    worst_balance = forecast_data["opening_balance"]
+    worst_points = []
+    for d in range(1, days_in_month + 1):
+        day_change = sum(
+            -e["amount"] if e["type"] == "out" else e["amount"]
+            for e in worst_day_events.get(d, [])
+        ) - daily_undated_out + daily_undated_in
+        worst_balance += day_change
+        worst_points.append({
+            "day": d,
+            "balance": round(worst_balance),
+        })
+
     return {
         "year": year,
         "month": month,
@@ -1024,6 +1056,7 @@ def generate_daily_schedule(
         "opening_balance": forecast_data["opening_balance"],
         "points": points,
         "alerts": alerts,
+        "worst_case_points": worst_points,
         "card_settings": [
             {
                 "source_type": c["source_type"],
