@@ -1011,7 +1011,7 @@ def generate_daily_schedule(
 
     # 일별 잔고 + 경고
     balance = forecast_data["opening_balance"]
-    points = []
+    points = [{"day": 0, "balance": round(balance), "events": []}]  # 기초잔고
     alerts = []
     min_balance_threshold = 0
 
@@ -1073,7 +1073,7 @@ def generate_daily_schedule(
     worst_daily_in = worst_undated_in / days_in_month if days_in_month else 0
 
     worst_balance = forecast_data["opening_balance"]
-    worst_points = []
+    worst_points = [{"day": 0, "balance": round(worst_balance)}]  # 기초잔고 (동일 시작점)
     for d in range(1, days_in_month + 1):
         day_change = sum(
             -e["amount"] if e["type"] == "out" else e["amount"]

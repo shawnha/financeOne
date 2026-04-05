@@ -547,17 +547,19 @@ function ForecastBalanceChart({
     const unmappedNet = (forecastData.unmapped_income ?? 0) - (forecastData.unmapped_expense ?? 0)
 
     const points = schedule.points.map((p, i) => ({
-      day: `${month}/${p.day}`,
+      day: p.day === 0 ? "시작" : `${month}/${p.day}`,
       originalEstimated: p.balance,
-      estimated: p.balance + (unmappedNet * p.day / schedule.points.length),
-      actual: p.day <= forecastData.last_actual_day
-        ? (actualBalanceByDay.get(p.day) ?? null)
-        : null,
+      estimated: p.day === 0 ? p.balance : p.balance + (unmappedNet * p.day / (schedule.points.length - 1)),
+      actual: p.day === 0
+        ? forecastData.opening_balance
+        : p.day <= forecastData.last_actual_day
+          ? (actualBalanceByDay.get(p.day) ?? null)
+          : null,
       worstCase: schedule.worst_case_points?.[i]?.balance ?? null,
       events: p.events,
     }))
 
-    return { points, daysInMonth: schedule.points.length, cardSettings: schedule.card_settings }
+    return { points, daysInMonth: schedule.points.length - 1, cardSettings: schedule.card_settings }
   }, [schedule, forecastData, month])
 
   if (!chartData) return <Skeleton className="h-[220px] rounded-2xl" />
