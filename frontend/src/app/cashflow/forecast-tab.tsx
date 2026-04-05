@@ -1533,6 +1533,15 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
               <p className="text-lg md:text-xl font-bold font-mono tabular-nums mt-1 truncate text-[hsl(var(--warning))]">
                 {formatByEntity(closingBalances?.adjusted ?? data.adjusted_forecast_closing, entityId)}
               </p>
+              {closingBalances && (() => {
+                const diff = closingBalances.adjusted - closingBalances.original
+                if (Math.abs(diff) < 1000) return null
+                return (
+                  <p className={cn("text-[10px] font-mono mt-0.5", diff >= 0 ? "text-green-400" : "text-red-400")}>
+                    {diff >= 0 ? "+" : ""}{formatByEntity(diff, entityId)}
+                  </p>
+                )
+              })()}
             </div>
           </div>
         </Card>
