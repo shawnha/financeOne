@@ -551,13 +551,12 @@ function ForecastBalanceChart({
     // 조정 예상 + shifted worst-case: 실제 구간은 실제 잔고, 미래는 남은 변동분 이어감
     const lastActualDay = forecastData.last_actual_day
     const lastActualBalance = lastActualDay > 0 ? (actualBalanceByDay.get(lastActualDay) ?? null) : null
-    const lastForecastAtActualDay = lastActualDay > 0
-      ? (schedule.points.find(p => p.day === lastActualDay)?.balance ?? null)
-      : null
+    // index 기반 접근 (day 0 포함이므로 lastActualDay 번째가 해당 day)
+    const forecastBalanceByDay = new Map(schedule.points.map((p: { day: number; balance: number }) => [p.day, p.balance]))
     const worstCasePoints = schedule.worst_case_points ?? []
-    const lastWorstAtActualDay = lastActualDay > 0
-      ? (worstCasePoints.find((p: { day: number }) => p.day === lastActualDay)?.balance ?? null)
-      : null
+    const worstBalanceByDay = new Map(worstCasePoints.map((p: { day: number; balance: number }) => [p.day, p.balance]))
+    const lastForecastAtActualDay = lastActualDay > 0 ? (forecastBalanceByDay.get(lastActualDay) ?? null) : null
+    const lastWorstAtActualDay = lastActualDay > 0 ? (worstBalanceByDay.get(lastActualDay) ?? null) : null
 
     const points = schedule.points.map((p, i) => {
       const dayTx = actualTxByDay.get(p.day)
@@ -586,14 +585,14 @@ function ForecastBalanceChart({
             ? (actualBalanceByDay.get(p.day) ?? null)
             : null,
         worstCase: (() => {
-          const wc = worstCasePoints[i]
-          if (!wc) return null
-          if (p.day === 0) return wc.balance
+          const wcBalance = worstBalanceByDay.get(p.day)
+          if (wcBalance == null) return null
+          if (p.day === 0) return wcBalance
           if (p.day <= lastActualDay && actualBalanceByDay.has(p.day)) return actualBalanceByDay.get(p.day)!
           if (lastActualBalance != null && lastWorstAtActualDay != null) {
-            return lastActualBalance + (wc.balance - lastWorstAtActualDay)
+            return lastActualBalance + (wcBalance - lastWorstAtActualDay)
           }
-          return wc.balance
+          return wcBalance
         })(),
         events: p.events,
         actualNetChange: dayTx?.net_change ?? 0,
