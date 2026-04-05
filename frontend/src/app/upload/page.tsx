@@ -756,11 +756,7 @@ function UploadContent() {
       {/* Upload History */}
       <div>
         <h2 className="text-lg font-semibold mb-4">업로드 이력</h2>
-        <Card className="">
-          <CardContent className="p-0">
-            <UploadHistory entityId={entityId} />
-          </CardContent>
-        </Card>
+        <UploadHistory entityId={entityId} />
       </div>
     </div>
   )
