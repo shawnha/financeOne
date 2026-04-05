@@ -979,15 +979,31 @@ function ForecastModal({
           )}
           <div>
             <label className="text-xs text-muted-foreground">유형</label>
-            <div className="flex gap-4 mt-1">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="radio" checked={type === "in"} onChange={() => { setType("in"); if (!isEdit) { setCategory(""); setSelectedAccountId("") } }} className="accent-[hsl(var(--profit))]" />
-                <span className="text-sm">입금</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="radio" checked={type === "out"} onChange={() => { setType("out"); if (!isEdit) { setCategory(""); setSelectedAccountId("") } }} className="accent-[hsl(var(--loss))]" />
-                <span className="text-sm">출금</span>
-              </label>
+            <div className="flex gap-2 mt-1">
+              <button
+                type="button"
+                onClick={() => { setType("in"); if (!isEdit) { setCategory(""); setSelectedAccountId("") } }}
+                className={cn(
+                  "flex-1 py-2 rounded-md text-sm font-medium transition-all border",
+                  type === "in"
+                    ? "bg-green-500/20 text-green-400 border-green-500/40"
+                    : "bg-transparent text-muted-foreground border-border hover:border-green-500/30 hover:text-green-400/70",
+                )}
+              >
+                + 입금
+              </button>
+              <button
+                type="button"
+                onClick={() => { setType("out"); if (!isEdit) { setCategory(""); setSelectedAccountId("") } }}
+                className={cn(
+                  "flex-1 py-2 rounded-md text-sm font-medium transition-all border",
+                  type === "out"
+                    ? "bg-red-500/20 text-red-400 border-red-500/40"
+                    : "bg-transparent text-muted-foreground border-border hover:border-red-500/30 hover:text-red-400/70",
+                )}
+              >
+                - 출금
+              </button>
             </div>
           </div>
           {!isEdit && (
