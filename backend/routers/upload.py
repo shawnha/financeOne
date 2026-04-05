@@ -450,7 +450,12 @@ def delete_uploaded_file(
             )
         """, [file_id])
 
-        # raw_upload_rows 삭제 (FK: raw_upload_rows → transactions)
+        # 양방향 FK 해제: transactions.raw_row_id → NULL 먼저
+        cur.execute("""
+            UPDATE transactions SET raw_row_id = NULL WHERE file_id = %s
+        """, [file_id])
+
+        # raw_upload_rows 삭제 (FK: raw_upload_rows.transaction_id → transactions)
         cur.execute("""
             DELETE FROM raw_upload_rows WHERE transaction_id IN (
                 SELECT id FROM transactions WHERE file_id = %s
