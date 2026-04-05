@@ -1054,13 +1054,31 @@ def generate_daily_schedule(
                 "type": item["type"],
             })
 
+    # worst-case용 균등분배: 정기(recurring) undated만 (비정기는 이미 날짜 집중 배치)
+    worst_undated_out = sum(
+        item["forecast_amount"] for item in items
+        if item.get("payment_method", "bank") == "bank"
+        and not item.get("expected_day")
+        and item["type"] == "out"
+        and item.get("is_recurring", False)
+    )
+    worst_undated_in = sum(
+        item["forecast_amount"] for item in items
+        if item.get("payment_method", "bank") == "bank"
+        and not item.get("expected_day")
+        and item["type"] == "in"
+        and item.get("is_recurring", False)
+    )
+    worst_daily_out = worst_undated_out / days_in_month if days_in_month else 0
+    worst_daily_in = worst_undated_in / days_in_month if days_in_month else 0
+
     worst_balance = forecast_data["opening_balance"]
     worst_points = []
     for d in range(1, days_in_month + 1):
         day_change = sum(
             -e["amount"] if e["type"] == "out" else e["amount"]
             for e in worst_day_events.get(d, [])
-        ) - daily_undated_out + daily_undated_in
+        ) - worst_daily_out + worst_daily_in
         worst_balance += day_change
         worst_points.append({
             "day": d,
