@@ -1335,8 +1335,8 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
           { cache: "no-store" },
         ).catch(() => null),
       ])
-      // 항목이 비어있으면 전월 반복 항목 자동 복사 (actual 금액 우선)
-      if (d.items.length === 0) {
+      // recurring 항목이 없으면 전월에서 자동 복사 (비정기만 있어도 복사 트리거)
+      if (!d.items.some((item: { is_recurring: boolean }) => item.is_recurring)) {
         const prevMonth = m - 1 > 0 ? m - 1 : 12
         const prevYear = m - 1 > 0 ? y : y - 1
         try {
