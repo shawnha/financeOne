@@ -971,31 +971,27 @@ function ForecastModal({
             <label className="text-xs text-muted-foreground">월</label>
             <p className="font-medium">{year}년 {month}월</p>
           </div>
-          {isEdit ? (
+          {isEdit && (
             <div>
               <label className="text-xs text-muted-foreground">항목</label>
-              <p className="font-medium mt-1">
-                <Badge variant="outline" className={cn("text-[10px] mr-2", type === "in" ? "text-green-400" : "text-red-400")}>
-                  {type === "in" ? "입금" : "출금"}
-                </Badge>
-                {editItem?.internal_account_name ?? editItem?.category}
-              </p>
+              <p className="font-medium mt-1">{editItem?.internal_account_name ?? editItem?.category}</p>
             </div>
-          ) : (
+          )}
+          <div>
+            <label className="text-xs text-muted-foreground">유형</label>
+            <div className="flex gap-4 mt-1">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="radio" checked={type === "in"} onChange={() => { setType("in"); if (!isEdit) { setCategory(""); setSelectedAccountId("") } }} className="accent-[hsl(var(--profit))]" />
+                <span className="text-sm">입금</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="radio" checked={type === "out"} onChange={() => { setType("out"); if (!isEdit) { setCategory(""); setSelectedAccountId("") } }} className="accent-[hsl(var(--loss))]" />
+                <span className="text-sm">출금</span>
+              </label>
+            </div>
+          </div>
+          {!isEdit && (
             <>
-              <div>
-                <label className="text-xs text-muted-foreground">유형</label>
-                <div className="flex gap-4 mt-1">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="radio" checked={type === "in"} onChange={() => { setType("in"); setCategory(""); setSelectedAccountId("") }} className="accent-[hsl(var(--profit))]" />
-                    <span className="text-sm">입금</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="radio" checked={type === "out"} onChange={() => { setType("out"); setCategory(""); setSelectedAccountId("") }} className="accent-[hsl(var(--loss))]" />
-                    <span className="text-sm">출금</span>
-                  </label>
-                </div>
-              </div>
               <div>
                 <label className="text-xs text-muted-foreground">내부계정</label>
                 <div className="mt-1">
