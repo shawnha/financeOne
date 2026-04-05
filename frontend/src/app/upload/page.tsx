@@ -641,12 +641,12 @@ function UploadHistory({ entityId }: { entityId: string }) {
   const monthGroups = groupByMonth(history)
 
   return (
-    <div className="space-y-0">
+    <div className="space-y-4">
       {monthGroups.map((group) => (
-        <div key={group.month}>
-          <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/20 border-b border-border">
-            <span className="text-xs font-semibold text-muted-foreground">{group.label}</span>
-            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-muted/30 text-muted-foreground border-0">
+        <Card key={group.month} className="overflow-hidden">
+          <div className="flex items-center gap-3 px-5 py-3 border-b border-border bg-muted/10">
+            <span className="text-sm font-bold text-[hsl(var(--accent))]">{group.label}</span>
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground">
               {group.items.length}건
             </Badge>
           </div>
@@ -729,7 +729,7 @@ function UploadHistory({ entityId }: { entityId: string }) {
               ))}
             </TableBody>
           </Table>
-        </div>
+        </Card>
       ))}
     </div>
   )
