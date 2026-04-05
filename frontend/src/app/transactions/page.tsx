@@ -117,6 +117,8 @@ interface Filters {
   standardAccountId: string
   sourceType: string
   txType: "" | "in" | "out"
+  mappingSource: string
+  recentlyMapped: boolean
   slackMatched: boolean
   unclassified: boolean
   unconfirmed: boolean
@@ -157,6 +159,8 @@ const INITIAL_FILTERS: Filters = {
   standardAccountId: "",
   sourceType: "",
   txType: "",
+  mappingSource: "",
+  recentlyMapped: false,
   slackMatched: false,
   unclassified: false,
   unconfirmed: false,
@@ -336,6 +340,8 @@ export default function TransactionsPage() {
     if (filters.standardAccountId) params.set("standard_account_id", filters.standardAccountId)
     if (filters.sourceType) params.set("source_type", filters.sourceType)
     if (filters.txType) params.set("tx_type", filters.txType)
+    if (filters.mappingSource) params.set("mapping_source", filters.mappingSource)
+    if (filters.recentlyMapped) params.set("recently_mapped", "true")
     if (filters.slackMatched) params.set("slack_matched", "true")
     if (filters.unclassified) params.set("unclassified", "true")
     if (filters.unconfirmed) params.set("unconfirmed", "true")
@@ -350,7 +356,7 @@ export default function TransactionsPage() {
       setErrorMsg(msg)
       setViewState("error")
     }
-  }, [entityId, page, perPage, debouncedSearch, filters.dateFrom, filters.dateTo, filters.memberId, filters.standardAccountId, filters.sourceType, filters.txType, filters.slackMatched, filters.unclassified, filters.unconfirmed])
+  }, [entityId, page, perPage, debouncedSearch, filters.dateFrom, filters.dateTo, filters.memberId, filters.standardAccountId, filters.sourceType, filters.txType, filters.mappingSource, filters.recentlyMapped, filters.slackMatched, filters.unclassified, filters.unconfirmed])
 
   useEffect(() => {
     fetchTransactions()
@@ -379,7 +385,7 @@ export default function TransactionsPage() {
   const hasActiveFilters = useMemo(() => {
     return filters.search !== "" || filters.dateFrom !== "" || filters.dateTo !== "" ||
       filters.memberId !== "" || filters.standardAccountId !== "" ||
-      filters.sourceType !== "" || filters.txType !== "" || filters.slackMatched || filters.unclassified || filters.unconfirmed
+      filters.sourceType !== "" || filters.txType !== "" || filters.mappingSource !== "" || filters.recentlyMapped || filters.slackMatched || filters.unclassified || filters.unconfirmed
   }, [filters])
 
   // Selection
@@ -732,6 +738,15 @@ export default function TransactionsPage() {
             ))}
           </div>
 
+          {/* Recently mapped */}
+          <label className="flex items-center gap-1.5 text-sm cursor-pointer select-none">
+            <Checkbox
+              checked={filters.recentlyMapped}
+              onCheckedChange={v => updateFilter("recentlyMapped", v === true)}
+            />
+            <span className="text-amber-400">최근 매핑</span>
+          </label>
+
           {/* Slack matched */}
           <label className="flex items-center gap-1.5 text-sm cursor-pointer select-none">
             <Checkbox
@@ -917,6 +932,9 @@ export default function TransactionsPage() {
                           >
                             {tx.internal_account_name ? (
                               <>
+                                {!tx.is_confirmed && tx.internal_account_id && (
+                                  <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-amber-400" title="미확정 — 확인 필요" />
+                                )}
                                 {tx.internal_account_parent_name && BRAND_COLORS[tx.internal_account_parent_name] && (
                                   <span className={cn("inline-block w-2 h-2 rounded-full shrink-0", BRAND_COLORS[tx.internal_account_parent_name])} />
                                 )}
