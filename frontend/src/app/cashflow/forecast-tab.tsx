@@ -1315,17 +1315,9 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
     )
   }
 
-  if (!data) return null
-  const [y, m] = selectedMonth.split("-").map(Number)
-
-  const diffPct = data.adjusted_forecast_closing !== 0
-    ? ((data.actual_closing - data.adjusted_forecast_closing) / Math.abs(data.adjusted_forecast_closing) * 100)
-    : 0
-  const diffColor = Math.abs(diffPct) <= 5 ? "text-[hsl(var(--profit))]" : Math.abs(diffPct) <= 10 ? "text-[hsl(var(--warning))]" : "text-[hsl(var(--loss))]"
-
   const handleExportCSV = useCallback(() => {
     if (!data) return
-    const [y, m] = selectedMonth.split("-").map(Number)
+    const [yy, mm] = selectedMonth.split("-").map(Number)
 
     const rows: string[][] = [
       ["유형", "항목", "예상 금액", "실제 금액", "차이", "차이(%)", "반복", "결제일", "결제수단"],
@@ -1360,10 +1352,18 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = `forecast_${y}-${String(m).padStart(2, "0")}.csv`
+    a.download = `forecast_${yy}-${String(mm).padStart(2, "0")}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }, [data, selectedMonth])
+
+  if (!data) return null
+  const [y, m] = selectedMonth.split("-").map(Number)
+
+  const diffPct = data.adjusted_forecast_closing !== 0
+    ? ((data.actual_closing - data.adjusted_forecast_closing) / Math.abs(data.adjusted_forecast_closing) * 100)
+    : 0
+  const diffColor = Math.abs(diffPct) <= 5 ? "text-[hsl(var(--profit))]" : Math.abs(diffPct) <= 10 ? "text-[hsl(var(--warning))]" : "text-[hsl(var(--loss))]"
 
   return (
     <div className="space-y-6">
