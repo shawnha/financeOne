@@ -463,20 +463,21 @@ def get_forecast_cashflow(
     # 2-bis. 내부계정별 실제 거래 합계
     cur.execute(
         """
-        SELECT internal_account_id, type, SUM(amount) AS total
-        FROM transactions
-        WHERE entity_id = %s
-          AND date >= make_date(%s, %s, 1)
-          AND date < make_date(%s, %s, 1) + INTERVAL '1 month'
-          AND is_duplicate = false
-          AND internal_account_id IS NOT NULL
-        GROUP BY internal_account_id, type
+        SELECT t.internal_account_id, t.type, SUM(t.amount) AS total, ia.name AS account_name
+        FROM transactions t
+        LEFT JOIN internal_accounts ia ON ia.id = t.internal_account_id
+        WHERE t.entity_id = %s
+          AND t.date >= make_date(%s, %s, 1)
+          AND t.date < make_date(%s, %s, 1) + INTERVAL '1 month'
+          AND t.is_duplicate = false
+          AND t.internal_account_id IS NOT NULL
+        GROUP BY t.internal_account_id, t.type, ia.name
         """,
         [entity_id, year, month, year, month],
     )
     actual_by_account = {}
     for row in cur.fetchall():
-        actual_by_account[(row[0], row[1])] = float(row[2])
+        actual_by_account[(row[0], row[1])] = {"total": float(row[2]), "name": row[3]}
 
     # 2-ter. 미매핑 거래 합계 (internal_account_id IS NULL, 은행 거래만)
     cur.execute(
@@ -613,7 +614,7 @@ def get_forecast_cashflow(
     for i in items:
         if i.get("internal_account_id") and i["type"] == "out":
             forecast = float(i["forecast_amount"])
-            actual = actual_by_account.get((i["internal_account_id"], "out"), 0.0)
+            actual = actual_by_account.get((i["internal_account_id"], "out"), {}).get("total", 0.0)
             if forecast > 0 and actual >= forecast * 1.1:
                 over_budget.append({
                     "category": i["category"],
@@ -622,6 +623,22 @@ def get_forecast_cashflow(
                     "actual": actual,
                     "diff_pct": round((actual / forecast - 1) * 100, 1),
                 })
+
+    # 미예산 실제 거래 (forecast에 없는 계정의 거래)
+    forecast_account_ids = {
+        (i["internal_account_id"], i["type"])
+        for i in items if i.get("internal_account_id")
+    }
+    unbudgeted_actuals = []
+    for (acct_id, acct_type), info in actual_by_account.items():
+        if (acct_id, acct_type) not in forecast_account_ids:
+            unbudgeted_actuals.append({
+                "internal_account_id": acct_id,
+                "account_name": info["name"] or f"계정 #{acct_id}",
+                "type": acct_type,
+                "actual_amount": info["total"],
+            })
+    unbudgeted_actuals.sort(key=lambda x: x["actual_amount"], reverse=True)
 
     cur.close()
 
@@ -657,6 +674,7 @@ def get_forecast_cashflow(
         "actual_daily_points": actual_daily_points,
         "last_actual_day": last_actual_day,
         "over_budget": over_budget,
+        "unbudgeted_actuals": unbudgeted_actuals,
         "unmapped_income": unmapped_income,
         "unmapped_expense": unmapped_expense,
         "unmapped_count": unmapped_count,
@@ -678,8 +696,8 @@ def get_forecast_cashflow(
                 "expected_day": i.get("expected_day"),
                 "payment_method": i.get("payment_method", "bank"),
                 "actual_from_transactions": actual_by_account.get(
-                    (i.get("internal_account_id"), i["type"]), 0.0
-                ) if i.get("internal_account_id") else None,
+                    (i.get("internal_account_id"), i["type"]), {}
+                ).get("total", 0.0) if i.get("internal_account_id") else None,
             }
             for i in items
         ],

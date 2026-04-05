@@ -75,6 +75,21 @@ class TestOverBudget:
         assert not (actual >= forecast * 1.1)
 
 
+class TestUnbudgetedActuals:
+    """forecast에 없는 계정의 실제 거래를 감지."""
+
+    def test_identifies_unbudgeted(self):
+        forecast_account_ids = {(351, "out"), (353, "out"), (355, "out")}
+        actual_account_ids = {(351, "out"), (353, "out"), (355, "out"), (469, "out"), (467, "out")}
+        unbudgeted = actual_account_ids - forecast_account_ids
+        assert unbudgeted == {(469, "out"), (467, "out")}
+
+    def test_empty_when_all_budgeted(self):
+        forecast_ids = {(351, "out"), (353, "out")}
+        actual_ids = {(351, "out"), (353, "out")}
+        assert actual_ids - forecast_ids == set()
+
+
 class TestWorstCaseSchedule:
     """worst-case: 비정기 수입 월말, 비정기 지출 월초."""
 
