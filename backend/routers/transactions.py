@@ -409,19 +409,8 @@ def bulk_confirm(body: BulkConfirm, conn: PgConnection = Depends(get_db)):
         )
         updated = [r[0] for r in cur.fetchall()]
 
-        # 벌크 확정 → 표준계정 동기화 + 매핑 규칙 학습
+        # 벌크 확정 → 매핑 규칙 학습 (UPSERT)
         if updated:
-            # 내부계정의 standard_account_id를 거래에 동기화
-            cur.execute(
-                f"""UPDATE transactions t
-                    SET standard_account_id = ia.standard_account_id
-                    FROM internal_accounts ia
-                    WHERE t.internal_account_id = ia.id
-                      AND t.id IN ({placeholders})
-                      AND (t.standard_account_id IS DISTINCT FROM ia.standard_account_id)""",
-                body.ids,
-            )
-
             placeholders2 = ",".join(["%s"] * len(updated))
             cur.execute(
                 f"""SELECT id, entity_id, counterparty, internal_account_id
