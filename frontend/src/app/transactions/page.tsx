@@ -842,6 +842,7 @@ export default function TransactionsPage() {
                         idx % 2 === 1 && "bg-secondary/50",
                         tx.is_duplicate && "bg-gray-900/50",
                         tx.is_cancel && "opacity-50",
+                        !tx.is_confirmed && tx.internal_account_id && "border-l-2 border-l-amber-400",
                       )}
                       onClick={(e) => {
                         const target = e.target as HTMLElement
@@ -932,9 +933,6 @@ export default function TransactionsPage() {
                           >
                             {tx.internal_account_name ? (
                               <>
-                                {!tx.is_confirmed && tx.internal_account_id && (
-                                  <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-amber-400" title="미확정 — 확인 필요" />
-                                )}
                                 {tx.internal_account_parent_name && BRAND_COLORS[tx.internal_account_parent_name] && (
                                   <span className={cn("inline-block w-2 h-2 rounded-full shrink-0", BRAND_COLORS[tx.internal_account_parent_name])} />
                                 )}
