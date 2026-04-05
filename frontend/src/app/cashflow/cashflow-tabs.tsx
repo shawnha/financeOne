@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils"
+import { Skeleton } from "@/components/ui/skeleton"
 import { ActualTab } from "./actual-tab"
 import { ForecastTab } from "./forecast-tab"
 import { ExpenseTab } from "./expense-tab"
@@ -34,6 +35,25 @@ export function CashflowTabs() {
   const searchParams = useSearchParams()
   const entityId = searchParams.get("entity")
   const [activeTab, setActiveTab] = useState<TabKey>("actual")
+
+  // EntityTabs가 entity param을 세팅할 때까지 대기
+  if (!entityId) {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="flex gap-6 border-b border-border pb-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-8 w-28 rounded-md" />
+          ))}
+        </div>
+        <div className="grid grid-cols-4 gap-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-24 rounded-xl" />
+          ))}
+        </div>
+        <Skeleton className="h-[300px] w-full rounded-xl" />
+      </div>
+    )
+  }
 
   return (
     <div className="p-6 space-y-6">
