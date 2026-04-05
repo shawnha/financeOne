@@ -1253,9 +1253,9 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
     }
   }, [entityId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fetchForecast = useCallback(async () => {
+  const fetchForecast = useCallback(async (silent = false) => {
     if (!entityId || !selectedMonth || !monthReady) return
-    setState("loading")
+    if (!silent) setState("loading")
     const [y, m] = selectedMonth.split("-").map(Number)
     try {
       const [d, s] = await Promise.all([
@@ -1386,7 +1386,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
         <AlertCircle className="h-12 w-12 text-[hsl(var(--loss))]" />
         <p className="font-medium">데이터를 불러올 수 없습니다.</p>
         <p className="text-sm text-muted-foreground">{error}</p>
-        <Button onClick={fetchForecast} variant="secondary" className="gap-2">
+        <Button onClick={() => fetchForecast()} variant="secondary" className="gap-2">
           <RefreshCw className="h-4 w-4" /> 다시 시도
         </Button>
       </Card>
@@ -1524,7 +1524,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
             >
               {showComparison ? "실제 비교 접기 \u25C2" : "실제 비교 펼치기 \u25B8"}
             </button>
-            <ForecastModal entityId={entityId!} year={y} month={m} onSaved={fetchForecast} />
+            <ForecastModal entityId={entityId!} year={y} month={m} onSaved={() => fetchForecast(true)} />
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -2077,7 +2077,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
           entityId={entityId!}
           year={y}
           month={m}
-          onSaved={() => { setEditModalItem(null); fetchForecast() }}
+          onSaved={() => { setEditModalItem(null); fetchForecast(true) }}
           editItem={editModalItem}
           open={!!editModalItem}
           onOpenChange={(v) => { if (!v) setEditModalItem(null) }}
