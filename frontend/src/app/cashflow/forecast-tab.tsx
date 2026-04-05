@@ -1450,86 +1450,6 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
         />
       </div>
 
-      {/* Over-budget warning */}
-      {data.over_budget && data.over_budget.length > 0 && (
-        <Card className="bg-red-500/10 border-red-500/30 rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <AlertCircle className="h-4 w-4 text-red-400" />
-            <span className="text-sm font-medium text-red-400">예산 초과 항목</span>
-          </div>
-          <div className="space-y-1">
-            {data.over_budget.map((item, i) => (
-              <p key={i} className="text-xs text-red-300">
-                {item.category}: 예상 {formatByEntity(item.forecast, entityId)} &rarr; 실제 {formatByEntity(item.actual, entityId)} (+{item.diff_pct}%)
-              </p>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {/* Unbudgeted actuals */}
-      {data.unbudgeted_actuals && data.unbudgeted_actuals.length > 0 && (
-        <Card className="bg-amber-500/10 border-amber-500/30 rounded-xl p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-400" />
-              <span className="text-sm font-medium text-amber-400">
-                미예산 거래 ({data.unbudgeted_actuals.length}건)
-              </span>
-            </div>
-          </div>
-          <div className="space-y-2">
-            {data.unbudgeted_actuals.map((item) => (
-              <div key={`${item.internal_account_id}-${item.type}`}
-                className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <span className={cn(
-                    "px-1.5 py-0.5 rounded text-[10px] font-medium",
-                    item.type === "in"
-                      ? "bg-[hsl(var(--profit))]/10 text-[hsl(var(--profit))]"
-                      : "bg-[hsl(var(--loss))]/10 text-[hsl(var(--loss))]"
-                  )}>
-                    {item.type === "in" ? "입금" : "출금"}
-                  </span>
-                  <span className="text-foreground">{item.account_name}</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className={cn(
-                    "font-mono tabular-nums",
-                    item.type === "in" ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]"
-                  )}>
-                    {item.type === "out" ? "-" : "+"}{formatByEntity(item.actual_amount, entityId)}
-                  </span>
-                  <button
-                    onClick={async () => {
-                      try {
-                        await fetchAPI("/forecasts", {
-                          method: "POST",
-                          body: JSON.stringify({
-                            entity_id: Number(entityId),
-                            year: y,
-                            month: m,
-                            category: item.account_name,
-                            type: item.type,
-                            forecast_amount: item.actual_amount,
-                            is_recurring: false,
-                            internal_account_id: item.internal_account_id,
-                          }),
-                        })
-                        fetchForecast()
-                      } catch { /* error */ }
-                    }}
-                    className="text-[10px] text-amber-400 hover:text-amber-300 underline decoration-dotted"
-                  >
-                    + 예산 추가
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
       {/* Forecast items list (no chart -- table only per mockup) */}
       <Card className="overflow-hidden rounded-2xl">
         <div className="px-4 py-3 flex items-center justify-between border-b border-border">
@@ -2096,6 +2016,86 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
 
       {/* Variance Bridge */}
       <VarianceBridge entityId={entityId} year={y} month={m} />
+
+      {/* Over-budget warning */}
+      {data.over_budget && data.over_budget.length > 0 && (
+        <Card className="bg-red-500/10 border-red-500/30 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertCircle className="h-4 w-4 text-red-400" />
+            <span className="text-sm font-medium text-red-400">예산 초과 항목</span>
+          </div>
+          <div className="space-y-1">
+            {data.over_budget.map((item, i) => (
+              <p key={i} className="text-xs text-red-300">
+                {item.category}: 예상 {formatByEntity(item.forecast, entityId)} &rarr; 실제 {formatByEntity(item.actual, entityId)} (+{item.diff_pct}%)
+              </p>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Unbudgeted actuals */}
+      {data.unbudgeted_actuals && data.unbudgeted_actuals.length > 0 && (
+        <Card className="bg-amber-500/10 border-amber-500/30 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-400" />
+              <span className="text-sm font-medium text-amber-400">
+                미예산 거래 ({data.unbudgeted_actuals.length}건)
+              </span>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {data.unbudgeted_actuals.map((item) => (
+              <div key={`${item.internal_account_id}-${item.type}`}
+                className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <span className={cn(
+                    "px-1.5 py-0.5 rounded text-[10px] font-medium",
+                    item.type === "in"
+                      ? "bg-[hsl(var(--profit))]/10 text-[hsl(var(--profit))]"
+                      : "bg-[hsl(var(--loss))]/10 text-[hsl(var(--loss))]"
+                  )}>
+                    {item.type === "in" ? "입금" : "출금"}
+                  </span>
+                  <span className="text-foreground">{item.account_name}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className={cn(
+                    "font-mono tabular-nums",
+                    item.type === "in" ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]"
+                  )}>
+                    {item.type === "out" ? "-" : "+"}{formatByEntity(item.actual_amount, entityId)}
+                  </span>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await fetchAPI("/forecasts", {
+                          method: "POST",
+                          body: JSON.stringify({
+                            entity_id: Number(entityId),
+                            year: y,
+                            month: m,
+                            category: item.account_name,
+                            type: item.type,
+                            forecast_amount: item.actual_amount,
+                            is_recurring: false,
+                            internal_account_id: item.internal_account_id,
+                          }),
+                        })
+                        fetchForecast()
+                      } catch { /* error */ }
+                    }}
+                    className="text-[10px] text-amber-400 hover:text-amber-300 underline decoration-dotted"
+                  >
+                    + 예산 추가
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {/* Edit Modal */}
       {editModalItem && (
