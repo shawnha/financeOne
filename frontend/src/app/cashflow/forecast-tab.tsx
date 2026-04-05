@@ -1520,15 +1520,22 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
       {/* KPI */}
       <div className="grid grid-cols-4 gap-3 max-md:grid-cols-2">
         <KPICard label={`기초 (${m - 1 || 12}월 확정)`} value={formatByEntity(data.opening_balance, entityId)} rawAmount={data.opening_balance} entityId={entityId} />
-        <KPICard
-          label="예상 기말"
-          value={formatByEntity(closingBalances?.adjusted ?? data.adjusted_forecast_closing, entityId)}
-          rawAmount={closingBalances?.adjusted ?? data.adjusted_forecast_closing}
-          entityId={entityId}
-          colorClass="text-[hsl(var(--warning))]"
-          subtext={`원래 ${formatByEntity(closingBalances?.original ?? data.forecast_closing, entityId)}`}
-          subtextColor="text-[#71717a]"
-        />
+        <Card className="bg-secondary rounded-xl p-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">원래 예상 기말</p>
+              <p className="text-lg md:text-xl font-bold font-mono tabular-nums mt-1 truncate text-[#71717a]">
+                {formatByEntity(closingBalances?.original ?? data.forecast_closing, entityId)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">조정 예상 기말</p>
+              <p className="text-lg md:text-xl font-bold font-mono tabular-nums mt-1 truncate text-[hsl(var(--warning))]">
+                {formatByEntity(closingBalances?.adjusted ?? data.adjusted_forecast_closing, entityId)}
+              </p>
+            </div>
+          </div>
+        </Card>
         <KPICard
           label="실제 진행 기말"
           value={formatByEntity(data.actual_closing, entityId)}
