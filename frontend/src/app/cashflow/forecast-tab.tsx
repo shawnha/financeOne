@@ -681,17 +681,6 @@ function ForecastBalanceChart({
             strokeDasharray="6 3"
             strokeWidth={1}
           />
-          {/* Original forecast (thin gray dashed line — reference only) */}
-          <Line
-            type="monotone"
-            dataKey="originalEstimated"
-            stroke="#71717a"
-            strokeWidth={1.2}
-            strokeDasharray="6 4"
-            strokeOpacity={0.4}
-            dot={false}
-            activeDot={false}
-          />
           {/* Adjusted forecast (amber area + dashed border) */}
           <Area
             type="monotone"
@@ -715,6 +704,17 @@ function ForecastBalanceChart({
               )
             }}
             activeDot={{ r: 4, fill: "#F59E0B", stroke: "#050508", strokeWidth: 2 }}
+          />
+          {/* Original forecast (gray solid line — always visible above Area) */}
+          <Line
+            type="monotone"
+            dataKey="originalEstimated"
+            stroke="#71717a"
+            strokeWidth={1.5}
+            strokeDasharray="8 4"
+            strokeOpacity={0.7}
+            dot={false}
+            activeDot={false}
           />
           {/* Worst-case scenario (red dashed line) */}
           <Line
