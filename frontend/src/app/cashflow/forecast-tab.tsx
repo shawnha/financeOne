@@ -150,6 +150,7 @@ interface VarianceDriver {
   amount: number
   tx_count: number
   forecasted: boolean
+  forecast_amount: number | null
 }
 
 interface VarianceBucket {
@@ -409,25 +410,65 @@ function VarianceBridge({ entityId, year, month }: { entityId: string | null; ye
                               </div>
                             </td>
                           </tr>
-                          {isExpanded && bucket.drivers && (
-                            bucket.drivers.map((driver, j) => (
-                              <tr key={`${i}-${j}`} className="bg-muted/10">
-                                <td className="pl-8 pr-3 py-1.5 text-xs">
-                                  {driver.forecasted
-                                    ? <span className="text-muted-foreground">{driver.account_name}</span>
-                                    : <span className="text-[hsl(var(--loss))]">✗ {driver.account_name}</span>
-                                  }
-                                </td>
-                                <td className="px-3 py-1.5 text-xs text-muted-foreground">
-                                  {driver.forecasted ? "예상 항목 있음" : "예상에 없음"} · {driver.tx_count}건
-                                </td>
-                                <td className="px-3 py-1.5 text-right text-xs font-mono tabular-nums text-muted-foreground">
-                                  {formatByEntity(driver.amount, entityId)}
-                                </td>
-                                <td colSpan={2} />
-                              </tr>
-                            ))
-                          )}
+                          {isExpanded && bucket.drivers && (() => {
+                            const unforecasted = bucket.drivers.filter(d => !d.forecasted)
+                            const forecasted = bucket.drivers.filter(d => d.forecasted)
+                            return (
+                              <>
+                                {/* 예상에 없음 */}
+                                {unforecasted.length > 0 && (
+                                  <>
+                                    <tr className="bg-[hsl(var(--loss))]/5">
+                                      <td colSpan={5} className="pl-8 pr-3 py-1.5 text-xs font-semibold text-[hsl(var(--loss))]">
+                                        예상에 없음 ({unforecasted.length}건, 합계 {formatByEntity(unforecasted.reduce((s, d) => s + d.amount, 0), entityId)})
+                                      </td>
+                                    </tr>
+                                    {unforecasted.map((driver, j) => (
+                                      <tr key={`u-${j}`} className="bg-[hsl(var(--loss))]/5">
+                                        <td className="pl-10 pr-3 py-1 text-xs text-[hsl(var(--loss))]">✗ {driver.account_name}</td>
+                                        <td className="px-3 py-1 text-xs text-muted-foreground">{driver.tx_count}건</td>
+                                        <td className="px-3 py-1 text-right text-xs font-mono tabular-nums text-[hsl(var(--loss))]">
+                                          {formatByEntity(driver.amount, entityId)}
+                                        </td>
+                                        <td colSpan={2} />
+                                      </tr>
+                                    ))}
+                                  </>
+                                )}
+                                {/* 예상에 있음 */}
+                                {forecasted.length > 0 && (
+                                  <>
+                                    <tr className="bg-muted/10">
+                                      <td colSpan={5} className="pl-8 pr-3 py-1.5 text-xs font-semibold text-muted-foreground">
+                                        예상에 있음 ({forecasted.length}건)
+                                      </td>
+                                    </tr>
+                                    {forecasted.map((driver, j) => {
+                                      const diff = driver.forecast_amount != null ? driver.amount - driver.forecast_amount : null
+                                      return (
+                                        <tr key={`f-${j}`} className="bg-muted/5">
+                                          <td className="pl-10 pr-3 py-1 text-xs text-muted-foreground">{driver.account_name}</td>
+                                          <td className="px-3 py-1 text-xs text-muted-foreground">
+                                            예상 {driver.forecast_amount != null ? formatByEntity(driver.forecast_amount, entityId) : "-"}
+                                          </td>
+                                          <td className="px-3 py-1 text-right text-xs font-mono tabular-nums text-muted-foreground">
+                                            {formatByEntity(driver.amount, entityId)}
+                                          </td>
+                                          <td className="px-3 py-1 text-right text-xs font-mono tabular-nums" colSpan={2}>
+                                            {diff != null && Math.abs(diff) >= 1 && (
+                                              <span className={diff > 0 ? "text-[hsl(var(--loss))]" : "text-[hsl(var(--profit))]"}>
+                                                {diff > 0 ? "+" : ""}{formatByEntity(diff, entityId)}
+                                              </span>
+                                            )}
+                                          </td>
+                                        </tr>
+                                      )
+                                    })}
+                                  </>
+                                )}
+                              </>
+                            )
+                          })()}
                         </React.Fragment>
                       )
                     })}

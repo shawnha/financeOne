@@ -800,7 +800,7 @@ def get_variance_bridge(
     b1_opening = Decimal("0")  # 같은 snapshot 사용하므로 0
     b2_income = actual_income - forecast_income
     b3_expense = -(actual_expense_bank - forecast_expense_bank)
-    b4_card = Decimal(str(card_payment_via_bank)) - prev_card_net
+    b4_card = prev_card_net - Decimal(str(card_payment_via_bank))
     b5_unmapped = unmapped_income - unmapped_expense
     bucket_sum = b1_opening + b2_income + b3_expense + b4_card + b5_unmapped
     b6_residual = total_diff - bucket_sum
@@ -842,21 +842,21 @@ def get_variance_bridge(
     high_unexplained = abs(b6_residual) > residual_threshold
 
     # 드릴다운: 입금/출금 항목별 forecast 매칭 여부
-    # forecast에 등록된 internal_account_id 집합
+    # forecast에 등록된 internal_account_id → forecast_amount 매핑
     cur.execute(
-        "SELECT internal_account_id FROM forecasts "
+        "SELECT internal_account_id, SUM(forecast_amount) FROM forecasts "
         "WHERE entity_id = %s AND year = %s AND month = %s AND type = 'out' "
-        "AND internal_account_id IS NOT NULL",
+        "AND internal_account_id IS NOT NULL GROUP BY internal_account_id",
         [entity_id, year, month],
     )
-    forecast_out_ids = {r[0] for r in cur.fetchall()}
+    forecast_out_map = {r[0]: float(r[1]) for r in cur.fetchall()}
     cur.execute(
-        "SELECT internal_account_id FROM forecasts "
+        "SELECT internal_account_id, SUM(forecast_amount) FROM forecasts "
         "WHERE entity_id = %s AND year = %s AND month = %s AND type = 'in' "
-        "AND internal_account_id IS NOT NULL",
+        "AND internal_account_id IS NOT NULL GROUP BY internal_account_id",
         [entity_id, year, month],
     )
-    forecast_in_ids = {r[0] for r in cur.fetchall()}
+    forecast_in_map = {r[0]: float(r[1]) for r in cur.fetchall()}
 
     # 실제 은행 거래를 내부계정별로 집계 (카드대금 제외)
     cur.execute(
@@ -882,14 +882,15 @@ def get_variance_bridge(
     income_drivers = []
     for row in cur.fetchall():
         name, acct_id, tx_type, total, cnt = row
-        forecast_ids = forecast_out_ids if tx_type == "out" else forecast_in_ids
-        is_forecasted = acct_id in forecast_ids if acct_id else False
+        forecast_map = forecast_out_map if tx_type == "out" else forecast_in_map
+        forecast_amt = forecast_map.get(acct_id) if acct_id else None
         driver = {
             "account_name": name or "(미매핑)",
             "internal_account_id": acct_id,
             "amount": float(total),
             "tx_count": int(cnt),
-            "forecasted": is_forecasted,
+            "forecasted": forecast_amt is not None,
+            "forecast_amount": forecast_amt,
         }
         if tx_type == "out":
             expense_drivers.append(driver)
@@ -908,7 +909,7 @@ def get_variance_bridge(
          "detail": f"실제 {float(actual_expense_bank):,.0f} - 예상 {float(forecast_expense_bank):,.0f} (카드대금 제외)",
          "drivers": expense_drivers},
         {"name": "카드 결제", "amount": float(b4_card),
-         "detail": f"은행 카드대금 {float(card_payment_via_bank):,.0f} - 전월 카드 사용 {float(prev_card_net):,.0f}"},
+         "detail": f"예상 카드대금 {float(prev_card_net):,.0f} - 실제 카드대금 {float(card_payment_via_bank):,.0f}"},
         {"name": "미매핑 거래", "amount": float(b5_unmapped),
          "detail": f"미분류 {unmapped_count}건 (입금 {float(unmapped_income):,.0f} - 출금 {float(unmapped_expense):,.0f})"},
         {"name": "기타/잔차", "amount": float(b6_residual),
