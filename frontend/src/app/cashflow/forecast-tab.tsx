@@ -56,6 +56,13 @@ interface ForecastItem {
   payment_method: string
 }
 
+interface UnbudgetedActual {
+  internal_account_id: number
+  account_name: string
+  type: string
+  actual_amount: number
+}
+
 interface TreeNode {
   item: ForecastItem
   children: TreeNode[]
@@ -132,6 +139,7 @@ interface ForecastData {
     actual: number
     diff_pct: number
   }>
+  unbudgeted_actuals?: UnbudgetedActual[]
 }
 
 interface SummaryMonth {
@@ -1315,13 +1323,55 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
     : 0
   const diffColor = Math.abs(diffPct) <= 5 ? "text-[hsl(var(--profit))]" : Math.abs(diffPct) <= 10 ? "text-[hsl(var(--warning))]" : "text-[hsl(var(--loss))]"
 
+  const handleExportCSV = useCallback(() => {
+    if (!data) return
+    const [y, m] = selectedMonth.split("-").map(Number)
+
+    const rows: string[][] = [
+      ["유형", "항목", "예상 금액", "실제 금액", "차이", "차이(%)", "반복", "결제일", "결제수단"],
+    ]
+
+    for (const item of data.items) {
+      const actual = item.actual_from_transactions ?? 0
+      const diff = actual - item.forecast_amount
+      const pct = item.forecast_amount !== 0 ? Math.round((diff / item.forecast_amount) * 100) : 0
+      rows.push([
+        item.type === "in" ? "입금" : "출금",
+        item.category + (item.subcategory ? ` > ${item.subcategory}` : ""),
+        String(item.forecast_amount),
+        String(actual),
+        String(diff),
+        `${pct}%`,
+        item.is_recurring ? "Y" : "N",
+        item.expected_day ? `${item.expected_day}일` : "",
+        item.payment_method === "card" ? "카드" : "은행",
+      ])
+    }
+
+    rows.push([])
+    rows.push(["기초 잔고", "", String(data.opening_balance)])
+    rows.push(["조정 예상 기말", "", String(data.adjusted_forecast_closing)])
+    rows.push(["실제 기말", "", String(data.actual_closing)])
+    rows.push(["차이", "", String(data.diff)])
+
+    const BOM = "\uFEFF"
+    const csv = BOM + rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n")
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `forecast_${y}-${String(m).padStart(2, "0")}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [data, selectedMonth])
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <MonthPicker months={months} selected={selectedMonth} onSelect={setSelectedMonth} accentColor="hsl(var(--warning))" allowFuture />
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="gap-2">
+          <Button variant="outline" size="sm" className="gap-2" onClick={handleExportCSV}>
             <Download className="h-4 w-4" /> 내보내기
           </Button>
         </div>
@@ -1373,8 +1423,14 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
           rawAmount={data.adjusted_forecast_closing}
           entityId={entityId}
           colorClass="text-[hsl(var(--warning))]"
-          subtext={data.unmapped_count > 0 ? `미분류 ${data.unmapped_count}건 반영` : undefined}
-          subtextColor="text-amber-400"
+          subtext={
+            data.over_budget && data.over_budget.length > 0
+              ? `초과 ${data.over_budget.length}건`
+              : data.unmapped_count > 0
+                ? `미분류 ${data.unmapped_count}건 반영`
+                : undefined
+          }
+          subtextColor={data.over_budget && data.over_budget.length > 0 ? "text-red-400" : "text-amber-400"}
         />
         <KPICard
           label="실제 진행 기준 기말"
@@ -1406,6 +1462,69 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
               <p key={i} className="text-xs text-red-300">
                 {item.category}: 예상 {formatByEntity(item.forecast, entityId)} &rarr; 실제 {formatByEntity(item.actual, entityId)} (+{item.diff_pct}%)
               </p>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Unbudgeted actuals */}
+      {data.unbudgeted_actuals && data.unbudgeted_actuals.length > 0 && (
+        <Card className="bg-amber-500/10 border-amber-500/30 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-400" />
+              <span className="text-sm font-medium text-amber-400">
+                미예산 거래 ({data.unbudgeted_actuals.length}건)
+              </span>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {data.unbudgeted_actuals.map((item) => (
+              <div key={`${item.internal_account_id}-${item.type}`}
+                className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <span className={cn(
+                    "px-1.5 py-0.5 rounded text-[10px] font-medium",
+                    item.type === "in"
+                      ? "bg-[hsl(var(--profit))]/10 text-[hsl(var(--profit))]"
+                      : "bg-[hsl(var(--loss))]/10 text-[hsl(var(--loss))]"
+                  )}>
+                    {item.type === "in" ? "입금" : "출금"}
+                  </span>
+                  <span className="text-foreground">{item.account_name}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className={cn(
+                    "font-mono tabular-nums",
+                    item.type === "in" ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]"
+                  )}>
+                    {item.type === "out" ? "-" : "+"}{formatByEntity(item.actual_amount, entityId)}
+                  </span>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await fetchAPI("/forecasts", {
+                          method: "POST",
+                          body: JSON.stringify({
+                            entity_id: Number(entityId),
+                            year: y,
+                            month: m,
+                            category: item.account_name,
+                            type: item.type,
+                            forecast_amount: item.actual_amount,
+                            is_recurring: false,
+                            internal_account_id: item.internal_account_id,
+                          }),
+                        })
+                        fetchForecast()
+                      } catch { /* error */ }
+                    }}
+                    className="text-[10px] text-amber-400 hover:text-amber-300 underline decoration-dotted"
+                  >
+                    + 예산 추가
+                  </button>
+                </div>
+              </div>
             ))}
           </div>
         </Card>
@@ -1608,15 +1727,40 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                               {item.type === "in" ? "+" : "-"}{formatByEntity(displayAmount, entityId)}
                             </span>
                             {displayActual != null && displayActual !== 0 && (() => {
-                              const diff = displayActual! - displayAmount
-                              if (Math.abs(diff) < 1) return null
-                              const pct = displayAmount !== 0 ? Math.round((diff / displayAmount) * 100) : null
-                              const isOver = diff > 0
+                              const actual = displayActual!
+                              const forecast = displayAmount
+                              const pct = forecast !== 0 ? Math.round((actual / forecast) * 100) : 0
+                              const isOver = actual > forecast
+                              const barWidth = Math.min(pct, 150)
                               return (
-                                <span className={cn("text-[10px] font-normal", isOver ? "text-[hsl(var(--loss))]" : "text-[hsl(var(--profit))]")}>
-                                  실제 {formatByEntity(displayActual!, entityId)}
-                                  {pct != null && ` (${isOver ? "+" : ""}${pct}%)`}
-                                </span>
+                                <div className="mt-1 space-y-0.5">
+                                  <div className="flex items-center gap-2">
+                                    <div className="relative h-1.5 flex-1 rounded-full bg-white/5 min-w-[60px]">
+                                      <div
+                                        className={cn(
+                                          "absolute h-full rounded-full transition-all",
+                                          isOver ? "bg-[hsl(var(--loss))]" : pct >= 80 ? "bg-[hsl(var(--warning))]" : "bg-[hsl(var(--profit))]"
+                                        )}
+                                        style={{ width: `${Math.min(barWidth, 100)}%` }}
+                                      />
+                                      {isOver && (
+                                        <div
+                                          className="absolute h-full rounded-r-full bg-[hsl(var(--loss))]/50"
+                                          style={{ left: "100%", width: `${Math.min(barWidth - 100, 50)}%` }}
+                                        />
+                                      )}
+                                    </div>
+                                    <span className={cn(
+                                      "text-[10px] font-mono tabular-nums whitespace-nowrap",
+                                      isOver ? "text-[hsl(var(--loss))]" : "text-muted-foreground"
+                                    )}>
+                                      {pct}%
+                                    </span>
+                                  </div>
+                                  <span className={cn("text-[10px]", isOver ? "text-[hsl(var(--loss))]" : "text-[hsl(var(--profit))]")}>
+                                    실제 {formatByEntity(actual, entityId)}
+                                  </span>
+                                </div>
                               )
                             })()}
                           </div>
@@ -1661,15 +1805,40 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                               {item.type === "in" ? "+" : "-"}{formatByEntity(item.forecast_amount, entityId)}
                             </span>
                             {item.actual_from_transactions != null && item.actual_from_transactions !== 0 && (() => {
-                              const diff = item.actual_from_transactions! - item.forecast_amount
-                              if (Math.abs(diff) < 1) return null
-                              const pct = item.forecast_amount !== 0 ? Math.round((diff / item.forecast_amount) * 100) : null
-                              const isOver = diff > 0
+                              const actual = item.actual_from_transactions!
+                              const forecast = item.forecast_amount
+                              const pct = forecast !== 0 ? Math.round((actual / forecast) * 100) : 0
+                              const isOver = actual > forecast
+                              const barWidth = Math.min(pct, 150)
                               return (
-                                <span className={cn("text-[10px] font-normal", isOver ? "text-[hsl(var(--loss))]" : "text-[hsl(var(--profit))]")}>
-                                  실제 {formatByEntity(item.actual_from_transactions!, entityId)}
-                                  {pct != null && ` (${isOver ? "+" : ""}${pct}%)`}
-                                </span>
+                                <div className="mt-1 space-y-0.5">
+                                  <div className="flex items-center gap-2">
+                                    <div className="relative h-1.5 flex-1 rounded-full bg-white/5 min-w-[60px]">
+                                      <div
+                                        className={cn(
+                                          "absolute h-full rounded-full transition-all",
+                                          isOver ? "bg-[hsl(var(--loss))]" : pct >= 80 ? "bg-[hsl(var(--warning))]" : "bg-[hsl(var(--profit))]"
+                                        )}
+                                        style={{ width: `${Math.min(barWidth, 100)}%` }}
+                                      />
+                                      {isOver && (
+                                        <div
+                                          className="absolute h-full rounded-r-full bg-[hsl(var(--loss))]/50"
+                                          style={{ left: "100%", width: `${Math.min(barWidth - 100, 50)}%` }}
+                                        />
+                                      )}
+                                    </div>
+                                    <span className={cn(
+                                      "text-[10px] font-mono tabular-nums whitespace-nowrap",
+                                      isOver ? "text-[hsl(var(--loss))]" : "text-muted-foreground"
+                                    )}>
+                                      {pct}%
+                                    </span>
+                                  </div>
+                                  <span className={cn("text-[10px]", isOver ? "text-[hsl(var(--loss))]" : "text-[hsl(var(--profit))]")}>
+                                    실제 {formatByEntity(actual, entityId)}
+                                  </span>
+                                </div>
                               )
                             })()}
                           </div>
