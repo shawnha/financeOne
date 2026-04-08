@@ -252,6 +252,7 @@ def get_bank_transactions(conn: PgConnection, entity_id: int, year: int, month: 
           AND t.source_type IN ('woori_bank', 'mercury_api', 'manual')
           AND t.date >= %s AND t.date < %s
           AND t.is_duplicate = false
+          AND (t.is_cancel IS NOT TRUE)
         ORDER BY t.date, t.id
         """,
         [entity_id, *build_date_range(year, month)],
@@ -277,6 +278,7 @@ def get_card_transactions(conn: PgConnection, entity_id: int, year: int, month: 
           AND t.source_type IN ('lotte_card', 'woori_card')
           AND t.date >= %s AND t.date < %s
           AND t.is_duplicate = false
+          AND (t.is_cancel IS NOT TRUE)
         ORDER BY t.source_type, t.member_id, t.date, t.id
         """,
         [entity_id, *build_date_range(year, month)],
@@ -305,6 +307,7 @@ def get_monthly_summary_data(
         WHERE entity_id = %s
           AND source_type IN ('woori_bank', 'mercury_api', 'manual')
           AND is_duplicate = false
+          AND (is_cancel IS NOT TRUE)
         ORDER BY month
         """,
         [entity_id],
@@ -334,6 +337,7 @@ def get_monthly_summary_data(
         WHERE entity_id = %s
           AND source_type IN ('woori_bank', 'mercury_api', 'manual')
           AND is_duplicate = false
+          AND (is_cancel IS NOT TRUE)
           AND to_char(date_trunc('month', date), 'YYYY-MM') >= %s
         GROUP BY date_trunc('month', date)
         ORDER BY month
@@ -406,6 +410,7 @@ def get_card_total_net(
               AND source_type = %s
               AND date >= %s AND date < %s
               AND is_duplicate = false
+              AND (is_cancel IS NOT TRUE)
             """,
             [entity_id, source_type, *build_date_range(year, month)],
         )
@@ -420,6 +425,7 @@ def get_card_total_net(
               AND source_type IN ('lotte_card', 'woori_card')
               AND date >= %s AND date < %s
               AND is_duplicate = false
+              AND (is_cancel IS NOT TRUE)
             """,
             [entity_id, *build_date_range(year, month)],
         )
@@ -470,6 +476,7 @@ def get_forecast_cashflow(
           AND t.date >= make_date(%s, %s, 1)
           AND t.date < make_date(%s, %s, 1) + INTERVAL '1 month'
           AND t.is_duplicate = false
+          AND (t.is_cancel IS NOT TRUE)
           AND t.internal_account_id IS NOT NULL
         GROUP BY t.internal_account_id, t.type, ia.name
         """,
@@ -505,6 +512,7 @@ def get_forecast_cashflow(
           AND date >= make_date(%s, %s, 1)
           AND date < make_date(%s, %s, 1) + INTERVAL '1 month'
           AND is_duplicate = false
+          AND (is_cancel IS NOT TRUE)
           AND internal_account_id IS NULL
           AND source_type IN ('woori_bank', 'mercury_api', 'manual')
         """,
@@ -585,6 +593,7 @@ def get_forecast_cashflow(
           AND source_type IN ('woori_bank', 'mercury_api', 'manual')
           AND date >= %s AND date < %s
           AND is_duplicate = false
+          AND (is_cancel IS NOT TRUE)
         """,
         [entity_id, *build_date_range(year, month)],
     )
@@ -785,6 +794,7 @@ def get_variance_bridge(
           AND source_type IN ('woori_bank', 'mercury_api', 'manual')
           AND date >= %s AND date < %s
           AND is_duplicate = false
+          AND (is_cancel IS NOT TRUE)
         """,
         [entity_id, *build_date_range(year, month)],
     )
@@ -799,6 +809,7 @@ def get_variance_bridge(
           AND source_type IN ('woori_bank', 'mercury_api', 'manual')
           AND date >= %s AND date < %s
           AND is_duplicate = false
+          AND (is_cancel IS NOT TRUE)
           AND type = 'out'
           AND (counterparty ILIKE '%%롯데카드%%'
                OR counterparty ILIKE '%%우리카드%%'
@@ -829,6 +840,7 @@ def get_variance_bridge(
         WHERE entity_id = %s
           AND date >= %s AND date < %s
           AND is_duplicate = false
+          AND (is_cancel IS NOT TRUE)
           AND internal_account_id IS NULL
           AND source_type IN ('woori_bank', 'mercury_api', 'manual')
         """,
@@ -858,7 +870,8 @@ def get_variance_bridge(
     cur.execute(
         "SELECT COUNT(DISTINCT source_type) FROM transactions "
         "WHERE entity_id = %s AND source_type IN ('lotte_card', 'woori_card') "
-        "AND date >= %s AND date < %s AND is_duplicate = false",
+        "AND date >= %s AND date < %s AND is_duplicate = false "
+        "AND (is_cancel IS NOT TRUE)",
         [entity_id, *build_date_range(year, month)],
     )
     card_source_count = cur.fetchone()[0]
@@ -918,6 +931,7 @@ def get_variance_bridge(
           AND t.source_type IN ('woori_bank', 'mercury_api', 'manual')
           AND t.date >= %s AND t.date < %s
           AND t.is_duplicate = false
+          AND (t.is_cancel IS NOT TRUE)
           AND NOT (t.type = 'out' AND (
               t.counterparty ILIKE '%%롯데카드%%'
               OR t.counterparty ILIKE '%%우리카드%%'
@@ -1053,11 +1067,11 @@ def generate_daily_schedule(
         ) - daily_undated_out + daily_undated_in
         balance += day_change
 
-        if balance < min_balance_threshold:
+        if balance < min_balance_threshold and not alerts:
             alerts.append({
                 "day": d,
                 "deficit": round(abs(balance)),
-                "message": f"{d}일 잔고 부족 예상",
+                "message": f"{d}일부터 잔고 부족 예상",
             })
 
         points.append({

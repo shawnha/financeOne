@@ -242,6 +242,9 @@ CREATE TABLE IF NOT EXISTS mapping_rules (
   internal_account_id  INTEGER REFERENCES internal_accounts(id),
   confidence           NUMERIC(3,2) NOT NULL DEFAULT 1.0,
   hit_count            INTEGER NOT NULL DEFAULT 0,
+  description_pattern  TEXT,            -- Slack 항목 설명 (예: "클로드 코드 API")
+  vendor               TEXT,            -- Slack 파싱 거래처 (예: "Anthropic")
+  category             TEXT,            -- Slack 파싱 카테고리 (예: "구독")
   created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

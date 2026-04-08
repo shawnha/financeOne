@@ -61,6 +61,7 @@ def _get_dashboard_data(conn: PgConnection, entity_id: Optional[int]):
         FROM transactions
         WHERE date >= date_trunc('month', CURRENT_DATE)
           AND date < date_trunc('month', CURRENT_DATE) + interval '1 month'
+          AND (is_cancel IS NOT TRUE)
           {"AND entity_id = %s" if entity_id else ""}
         """,
         params,
@@ -78,6 +79,7 @@ def _get_dashboard_data(conn: PgConnection, entity_id: Optional[int]):
         FROM transactions
         WHERE date >= date_trunc('month', CURRENT_DATE) - interval '1 month'
           AND date < date_trunc('month', CURRENT_DATE)
+          AND (is_cancel IS NOT TRUE)
           {"AND entity_id = %s" if entity_id else ""}
         """,
         params,
@@ -107,6 +109,7 @@ def _get_dashboard_data(conn: PgConnection, entity_id: Optional[int]):
             COALESCE(SUM(CASE WHEN type = 'out' THEN amount ELSE 0 END), 0) AS expense
         FROM transactions
         WHERE date >= date_trunc('month', CURRENT_DATE) - interval '5 months'
+          AND (is_cancel IS NOT TRUE)
           {"AND entity_id = %s" if entity_id else ""}
         GROUP BY date_trunc('month', date)
         ORDER BY month
@@ -131,7 +134,8 @@ def _get_dashboard_data(conn: PgConnection, entity_id: Optional[int]):
                sa.name AS standard_account_name
         FROM transactions t
         LEFT JOIN standard_accounts sa ON t.standard_account_id = sa.id
-        {"WHERE t.entity_id = %s" if entity_id else ""}
+        WHERE (t.is_cancel IS NOT TRUE)
+        {"AND t.entity_id = %s" if entity_id else ""}
         ORDER BY t.date DESC, t.id DESC
         LIMIT 10
         """,
@@ -147,7 +151,8 @@ def _get_dashboard_data(conn: PgConnection, entity_id: Optional[int]):
             COUNT(*) FILTER (WHERE is_confirmed = false) AS unconfirmed,
             COUNT(*) FILTER (WHERE standard_account_id IS NULL) AS unmapped
         FROM transactions
-        {entity_filter}
+        WHERE (is_cancel IS NOT TRUE)
+        {("AND entity_id = %s" if entity_id else "")}
         """,
         params,
     )

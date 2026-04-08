@@ -15,11 +15,17 @@ function currentMonth(): string {
  * ready=false 동안 소비자가 fetch를 막을 수 있도록 ready 플래그 제공.
  */
 export function useGlobalMonth() {
-  const [month, setMonthState] = useState<string>(currentMonth)
-  const [ready, setReady] = useState(false)
-  const initialized = useRef(false)
+  const [month, setMonthState] = useState<string>(() => {
+    // SSR 안전: window 존재 시 localStorage에서 즉시 읽기
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(STORAGE_KEY) || currentMonth()
+    }
+    return currentMonth()
+  })
+  const [ready, setReady] = useState(() => typeof window !== "undefined")
+  const initialized = useRef(typeof window !== "undefined")
 
-  // 클라이언트 마운트 시 localStorage에서 읽어서 보정 (hydration 안전)
+  // SSR fallback: 서버에서 렌더된 경우 마운트 시 복원
   useEffect(() => {
     if (initialized.current) return
     initialized.current = true

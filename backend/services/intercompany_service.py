@@ -42,6 +42,8 @@ def detect_intercompany(
           AND t1.date >= %s AND t1.date <= %s
           AND t1.is_intercompany = FALSE
           AND t2.is_intercompany = FALSE
+          AND (t1.is_cancel IS NOT TRUE)
+          AND (t2.is_cancel IS NOT TRUE)
         ORDER BY t1.date DESC, t1.amount DESC
         """,
         [date_tolerance_days, entity_ids, entity_ids, start_date, end_date],

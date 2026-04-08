@@ -588,7 +588,7 @@ def get_candidates(
         f"""
         SELECT t.id, t.date, t.amount, t.currency, t.type,
                t.description, t.counterparty, t.source_type,
-               t.is_confirmed,
+               t.is_confirmed, t.entity_id,
                COALESCE(m.name, t.parsed_member_name) AS member_name,
                CASE
                    WHEN ABS(t.amount - %s) <= 1 THEN 'exact'
@@ -662,7 +662,7 @@ def search_transactions(
         f"""
         SELECT t.id, t.date, t.amount, t.currency, t.type,
                t.description, t.counterparty, t.source_type,
-               t.is_confirmed,
+               t.is_confirmed, t.entity_id,
                COALESCE(m.name, t.parsed_member_name) AS member_name
         FROM transactions t
         LEFT JOIN members m ON m.id = t.member_id
@@ -969,6 +969,13 @@ def sync_slack_channel(
                 stats["skipped"] += 1
                 continue
 
+            # 변경 없는 메시지는 완전히 스킵 (텍스트, reply_count 동일)
+            reply_count = msg.get("reply_count", 0)
+            existing = existing_cache.get(ts)
+            if existing and existing["text"] == text and existing["reply_count"] == reply_count and existing["has_structured"]:
+                stats["skipped"] += 1
+                continue
+
             # 유저 이름
             sender_name = None
             if user_id and user_id not in user_cache:
@@ -983,7 +990,6 @@ def sync_slack_channel(
 
             # 쓰레드 분석
             thread_events = {"deposit_done": False, "cancelled": False, "new_amount": None, "file_urls": []}
-            reply_count = msg.get("reply_count", 0)
             thread_replies_json = None
 
             if reply_count > 0:

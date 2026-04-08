@@ -27,7 +27,10 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
 import {
-  Search, Download, ChevronLeft, ChevronRight, X, AlertTriangle, Upload, RotateCw, Wand2, MessageSquare,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu"
+import {
+  Search, Download, ChevronLeft, ChevronRight, X, AlertTriangle, Upload, RotateCw, Wand2, MessageSquare, SlidersHorizontal, ChevronDown, CheckCircle2,
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -114,6 +117,7 @@ interface Filters {
   dateFrom: string
   dateTo: string
   memberId: string
+  internalAccountId: string
   standardAccountId: string
   sourceType: string
   txType: "" | "in" | "out"
@@ -156,6 +160,7 @@ const INITIAL_FILTERS: Filters = {
   dateFrom: "",
   dateTo: "",
   memberId: "",
+  internalAccountId: "",
   standardAccountId: "",
   sourceType: "",
   txType: "",
@@ -242,7 +247,11 @@ export default function TransactionsPage() {
     const urlYear = searchParams.get("year")
     const urlMonth = searchParams.get("month")
     const urlFilter = searchParams.get("filter")
-    const monthStr = urlYear && urlMonth ? `${urlYear}-${String(Number(urlMonth)).padStart(2, "0")}` : globalMonth
+    // localStorage에서 직접 읽기 (globalMonth는 아직 초기화 전일 수 있음)
+    const savedMonth = typeof window !== "undefined" ? localStorage.getItem("financeone-selected-month") : null
+    const now = new Date()
+    const fallback = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
+    const monthStr = urlYear && urlMonth ? `${urlYear}-${String(Number(urlMonth)).padStart(2, "0")}` : (savedMonth || fallback)
     const [y, m] = monthStr.split("-").map(Number)
     const lastDay = new Date(y, m, 0).getDate()
     return {
@@ -268,6 +277,7 @@ export default function TransactionsPage() {
   const [bulkMapAccountId, setBulkMapAccountId] = useState("")
   const [slackMatch, setSlackMatch] = useState<SlackMatchInfo | null>(null)
   const [slackMatchLoading, setSlackMatchLoading] = useState(false)
+  const [tier2Open, setTier2Open] = useState(false)
 
   // URL query에서 month 왔으면 globalMonth 동기화
   useEffect(() => {
@@ -337,6 +347,7 @@ export default function TransactionsPage() {
     if (filters.dateFrom) params.set("date_from", filters.dateFrom)
     if (filters.dateTo) params.set("date_to", filters.dateTo)
     if (filters.memberId) params.set("member_id", filters.memberId)
+    if (filters.internalAccountId) params.set("internal_account_id", filters.internalAccountId)
     if (filters.standardAccountId) params.set("standard_account_id", filters.standardAccountId)
     if (filters.sourceType) params.set("source_type", filters.sourceType)
     if (filters.txType) params.set("tx_type", filters.txType)
@@ -356,7 +367,7 @@ export default function TransactionsPage() {
       setErrorMsg(msg)
       setViewState("error")
     }
-  }, [entityId, page, perPage, debouncedSearch, filters.dateFrom, filters.dateTo, filters.memberId, filters.standardAccountId, filters.sourceType, filters.txType, filters.mappingSource, filters.recentlyMapped, filters.slackMatched, filters.unclassified, filters.unconfirmed])
+  }, [entityId, page, perPage, debouncedSearch, filters.dateFrom, filters.dateTo, filters.memberId, filters.internalAccountId, filters.standardAccountId, filters.sourceType, filters.txType, filters.mappingSource, filters.recentlyMapped, filters.slackMatched, filters.unclassified, filters.unconfirmed])
 
   useEffect(() => {
     fetchTransactions()
@@ -384,9 +395,26 @@ export default function TransactionsPage() {
 
   const hasActiveFilters = useMemo(() => {
     return filters.search !== "" || filters.dateFrom !== "" || filters.dateTo !== "" ||
-      filters.memberId !== "" || filters.standardAccountId !== "" ||
+      filters.memberId !== "" || filters.internalAccountId !== "" || filters.standardAccountId !== "" ||
       filters.sourceType !== "" || filters.txType !== "" || filters.mappingSource !== "" || filters.recentlyMapped || filters.slackMatched || filters.unclassified || filters.unconfirmed
   }, [filters])
+
+  // Tier 2 (보조 필터) 활성 개수 — 필터 버튼 배지 표시용
+  const activeTier2Count = useMemo(() => {
+    let n = 0
+    if (filters.internalAccountId) n++
+    if (filters.standardAccountId) n++
+    if (filters.memberId) n++
+    if (filters.sourceType) n++
+    if (filters.slackMatched) n++
+    if (filters.recentlyMapped) n++
+    return n
+  }, [filters.internalAccountId, filters.standardAccountId, filters.memberId, filters.sourceType, filters.slackMatched, filters.recentlyMapped])
+
+  // Tier 2에 값이 있으면 자동으로 펼침
+  useEffect(() => {
+    if (activeTier2Count > 0) setTier2Open(true)
+  }, [activeTier2Count])
 
   // Selection
   const allSelected = data ? data.items.length > 0 && data.items.every(tx => selectedIds.has(tx.id)) : false
@@ -428,6 +456,40 @@ export default function TransactionsPage() {
       setBulkConfirming(false)
     }
   }, [selectedIds, fetchTransactions])
+
+  // Bulk cancel
+  const [bulkCancelling, setBulkCancelling] = useState(false)
+  const handleBulkCancel = useCallback(async () => {
+    if (selectedIds.size === 0) return
+    setBulkCancelling(true)
+    try {
+      const result = await fetchAPI<{ cancelled: number; restored: number }>("/transactions/bulk-cancel", {
+        method: "POST",
+        body: JSON.stringify({ ids: Array.from(selectedIds) }),
+      })
+      if (result.cancelled > 0) toast.success(`${result.cancelled}건 취소 처리 완료`)
+      if (result.restored > 0) toast.success(`${result.restored}건 취소 해제 완료`)
+      setSelectedIds(new Set())
+      fetchTransactions(true)
+    } catch {
+      toast.error("취소 처리에 실패했습니다.")
+    } finally {
+      setBulkCancelling(false)
+    }
+  }, [selectedIds, fetchTransactions])
+
+  // Create internal account inline
+  const handleCreateInternalAccount = useCallback(async (name: string, parentId: number | null) => {
+    if (!entityId) return null
+    const code = name.toUpperCase().replace(/[^A-Z가-힣0-9]/g, "").slice(0, 20) || `NEW_${Date.now()}`
+    const res = await fetchAPI<{ id: number; code: string; name: string; parent_id?: number | null; is_recurring?: boolean }>(
+      "/accounts/internal",
+      { method: "POST", body: JSON.stringify({ entity_id: entityId, code, name, parent_id: parentId }) },
+    )
+    const updated = await fetchAPI<InternalAccount[]>(`/accounts/internal?entity_id=${entityId}`, { cache: "no-store" })
+    setInternalAccounts(updated)
+    return { id: res.id, code: res.code, name: res.name ?? name, parent_id: res.parent_id, is_recurring: res.is_recurring }
+  }, [entityId])
 
   // Bulk map
   const handleBulkMap = useCallback(async () => {
@@ -614,42 +676,15 @@ export default function TransactionsPage() {
 
       <div className="flex-1 flex flex-col p-6 gap-4 min-h-0">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl font-semibold">거래내역</h1>
-            {data && viewState === "success" && (
-              <span className="text-sm text-muted-foreground">{data.total.toLocaleString()}건</span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleAutoMap} disabled={autoMapping}>
-              <Wand2 className="h-4 w-4 mr-1.5" />
-              {autoMapping ? "매핑 중..." : "자동 매핑"}
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleBulkConfirmAutoMapped} disabled={bulkConfirming || autoMappedUnconfirmed.length === 0}
-              className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10">
-              {bulkConfirming ? "확정 중..." : `이 달 일괄 확정`}
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleCSVDownload}>
-              <Download className="h-4 w-4 mr-1.5" />
-              CSV 다운로드
-            </Button>
-          </div>
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl font-semibold">거래내역</h1>
+          {data && viewState === "success" && (
+            <span className="text-sm text-muted-foreground">{data.total.toLocaleString()}건</span>
+          )}
         </div>
 
-        {/* Filter Bar */}
+        {/* Filter Bar — Tier 1 (주 필터) */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="내역, 거래처, 내부계정, 날짜, 금액 검색..."
-              value={filters.search}
-              onChange={e => updateFilter("search", e.target.value)}
-              className="pl-8 h-9 w-56 text-sm"
-            />
-          </div>
-
           {/* Month picker */}
           <MonthPicker
             months={(() => {
@@ -680,42 +715,19 @@ export default function TransactionsPage() {
             allowFuture
           />
 
-          {/* Member */}
-          <SearchableSelect
-            value={filters.memberId}
-            onChange={v => updateFilter("memberId", v)}
-            options={members.map(m => ({ value: String(m.id), label: m.name }))}
-            placeholder="회원"
-            searchPlaceholder="회원 검색..."
-            className="w-32"
-          />
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="내역, 거래처, 금액 검색..."
+              value={filters.search}
+              onChange={e => updateFilter("search", e.target.value)}
+              className="pl-9 h-9 w-56 text-sm rounded-full bg-white/[0.03] border-white/10"
+            />
+          </div>
 
-          {/* Standard Account */}
-          <SearchableSelect
-            value={filters.standardAccountId}
-            onChange={v => updateFilter("standardAccountId", v)}
-            options={standardAccounts.map(a => ({ value: String(a.id), label: a.name }))}
-            placeholder="표준 계정"
-            searchPlaceholder="표준 계정 검색..."
-            className="w-36"
-          />
-
-          {/* Source Type */}
-          <SearchableSelect
-            value={filters.sourceType}
-            onChange={v => updateFilter("sourceType", v)}
-            options={[
-              { value: "lotte_card", label: "롯데카드" },
-              { value: "woori_card", label: "우리카드" },
-              { value: "woori_bank", label: "우리은행" },
-            ]}
-            placeholder="출처"
-            searchPlaceholder="출처 검색..."
-            className="w-32"
-          />
-
-          {/* Type filter */}
-          <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
+          {/* Type filter (전체/수입/지출) — pill tab group */}
+          <div className="flex items-center rounded-full border border-white/10 p-0.5">
             {[
               { value: "" as const, label: "전체" },
               { value: "in" as const, label: "수입" },
@@ -725,11 +737,11 @@ export default function TransactionsPage() {
                 key={opt.value}
                 onClick={() => updateFilter("txType", opt.value)}
                 className={cn(
-                  "px-2.5 py-1 text-xs font-medium rounded transition-colors",
+                  "px-3 py-1 text-xs font-medium rounded-full transition-colors",
                   filters.txType === opt.value
                     ? opt.value === "in" ? "bg-green-500/20 text-green-400"
                       : opt.value === "out" ? "bg-red-500/20 text-red-400"
-                      : "bg-secondary text-foreground"
+                      : "bg-white/[0.08] text-foreground"
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
@@ -738,53 +750,169 @@ export default function TransactionsPage() {
             ))}
           </div>
 
-          {/* Recently mapped */}
-          <label className="flex items-center gap-1.5 text-sm cursor-pointer select-none">
-            <Checkbox
-              checked={filters.recentlyMapped}
-              onCheckedChange={v => updateFilter("recentlyMapped", v === true)}
-            />
-            <span className="text-amber-400">자동 매핑</span>
-          </label>
+          {/* Unclassified toggle (pill) */}
+          <button
+            onClick={() => updateFilter("unclassified", !filters.unclassified)}
+            className={cn(
+              "h-8 px-3 rounded-full border text-xs font-medium transition-colors",
+              filters.unclassified
+                ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                : "border-white/10 text-muted-foreground hover:bg-white/[0.04]",
+            )}
+          >
+            미분류
+          </button>
 
-          {/* Slack matched */}
-          <label className="flex items-center gap-1.5 text-sm cursor-pointer select-none">
-            <Checkbox
-              checked={filters.slackMatched}
-              onCheckedChange={v => updateFilter("slackMatched", v === true)}
+          {/* Unconfirmed toggle (pill) */}
+          <button
+            onClick={() => updateFilter("unconfirmed", !filters.unconfirmed)}
+            className={cn(
+              "h-8 px-3 rounded-full border text-xs font-medium transition-colors",
+              filters.unconfirmed
+                ? "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                : "border-white/10 text-muted-foreground hover:bg-white/[0.04]",
+            )}
+          >
+            미확정
+          </button>
+
+          {/* Filter expand button (opens Tier 2) */}
+          <button
+            onClick={() => setTier2Open(v => !v)}
+            className={cn(
+              "h-8 px-3 rounded-full border text-xs font-medium transition-colors inline-flex items-center gap-1.5",
+              tier2Open
+                ? "bg-white/[0.08] border-white/20 text-foreground"
+                : "border-white/10 text-muted-foreground hover:bg-white/[0.04]",
+            )}
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            필터
+            {activeTier2Count > 0 && (
+              <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-sky-500 text-[9px] font-bold text-background">
+                {activeTier2Count}
+              </span>
+            )}
+          </button>
+
+          {/* Clear (active filters indicator) */}
+          {hasActiveFilters && (
+            <button
+              onClick={clearFilters}
+              className="h-8 px-3 rounded-full text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+            >
+              <X className="h-3 w-3" />
+              초기화
+            </button>
+          )}
+
+          {/* Actions dropdown — 오른쪽 정렬 */}
+          <div className="ml-auto">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="h-8 px-3.5 rounded-full border border-white/10 text-xs font-medium text-foreground hover:bg-white/[0.05] inline-flex items-center gap-1.5">
+                  작업
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48 rounded-2xl">
+                <DropdownMenuItem onClick={handleAutoMap} disabled={autoMapping} className="rounded-xl">
+                  <Wand2 className="h-4 w-4 mr-2" />
+                  {autoMapping ? "매핑 중..." : "자동 매핑"}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={handleBulkConfirmAutoMapped}
+                  disabled={bulkConfirming || autoMappedUnconfirmed.length === 0}
+                  className="rounded-xl text-emerald-400 focus:text-emerald-400"
+                >
+                  <CheckCircle2 className="h-4 w-4 mr-2" />
+                  {bulkConfirming ? "확정 중..." : "이 달 일괄 확정"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleCSVDownload} className="rounded-xl">
+                  <Download className="h-4 w-4 mr-2" />
+                  CSV 다운로드
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+
+        {/* Filter Bar — Tier 2 (보조 필터, 접기/펼치기) */}
+        {tier2Open && (
+          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/[0.06]">
+            {/* Internal Account */}
+            <SearchableSelect
+              value={filters.internalAccountId}
+              onChange={v => updateFilter("internalAccountId", v)}
+              options={internalAccounts.filter(a => a.code !== "INC" && a.code !== "EXP").map(a => ({ value: String(a.id), label: a.name }))}
+              placeholder="내부계정"
+              searchPlaceholder="내부계정 검색..."
+              className="w-36 rounded-full"
             />
-            <span className="flex items-center gap-1">
+
+            {/* Standard Account */}
+            <SearchableSelect
+              value={filters.standardAccountId}
+              onChange={v => updateFilter("standardAccountId", v)}
+              options={standardAccounts.map(a => ({ value: String(a.id), label: a.name }))}
+              placeholder="표준 계정"
+              searchPlaceholder="표준 계정 검색..."
+              className="w-36 rounded-full"
+            />
+
+            {/* Member */}
+            <SearchableSelect
+              value={filters.memberId}
+              onChange={v => updateFilter("memberId", v)}
+              options={members.map(m => ({ value: String(m.id), label: m.name }))}
+              placeholder="회원"
+              searchPlaceholder="회원 검색..."
+              className="w-32 rounded-full"
+            />
+
+            {/* Source Type */}
+            <SearchableSelect
+              value={filters.sourceType}
+              onChange={v => updateFilter("sourceType", v)}
+              options={[
+                { value: "lotte_card", label: "롯데카드" },
+                { value: "woori_card", label: "우리카드" },
+                { value: "woori_bank", label: "우리은행" },
+              ]}
+              placeholder="출처"
+              searchPlaceholder="출처 검색..."
+              className="w-32 rounded-full"
+            />
+
+            {/* Slack matched toggle */}
+            <button
+              onClick={() => updateFilter("slackMatched", !filters.slackMatched)}
+              className={cn(
+                "h-8 px-3 rounded-full border text-xs font-medium transition-colors inline-flex items-center gap-1.5",
+                filters.slackMatched
+                  ? "bg-purple-500/15 text-purple-400 border-purple-500/30"
+                  : "border-white/10 text-muted-foreground hover:bg-white/[0.04]",
+              )}
+            >
               <MessageSquare className="h-3 w-3" />
               슬랙
-            </span>
-          </label>
+            </button>
 
-          {/* Unclassified */}
-          <label className="flex items-center gap-1.5 text-sm cursor-pointer select-none">
-            <Checkbox
-              checked={filters.unclassified}
-              onCheckedChange={v => updateFilter("unclassified", v === true)}
-            />
-            미분류
-          </label>
-
-          {/* Unconfirmed */}
-          <label className="flex items-center gap-1.5 text-sm cursor-pointer select-none">
-            <Checkbox
-              checked={filters.unconfirmed}
-              onCheckedChange={v => updateFilter("unconfirmed", v === true)}
-            />
-            미확정
-          </label>
-
-          {/* Clear */}
-          {hasActiveFilters && (
-            <Button variant="ghost" size="sm" onClick={clearFilters} className="h-9 text-sm text-muted-foreground">
-              <X className="h-3.5 w-3.5 mr-1" />
-              초기화
-            </Button>
-          )}
-        </div>
+            {/* Recently mapped toggle */}
+            <button
+              onClick={() => updateFilter("recentlyMapped", !filters.recentlyMapped)}
+              className={cn(
+                "h-8 px-3 rounded-full border text-xs font-medium transition-colors",
+                filters.recentlyMapped
+                  ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                  : "border-white/10 text-muted-foreground hover:bg-white/[0.04]",
+              )}
+            >
+              자동 매핑
+            </button>
+          </div>
+        )}
 
         {/* 브랜드/사업부 범례 */}
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
@@ -818,6 +946,7 @@ export default function TransactionsPage() {
                         checked={allSelected}
                         onCheckedChange={toggleSelectAll}
                         aria-label="전체 선택"
+                        className="border-white/40 data-[state=checked]:border-primary"
                       />
                     </TableHead>
                     <TableHead className="w-[88px]">날짜</TableHead>
@@ -857,6 +986,7 @@ export default function TransactionsPage() {
                           checked={selectedIds.has(tx.id)}
                           onCheckedChange={() => toggleSelect(tx.id)}
                           aria-label={`거래 ${tx.id} 선택`}
+                          className="border-white/40 data-[state=checked]:border-primary"
                         />
                       </TableCell>
 
@@ -925,6 +1055,7 @@ export default function TransactionsPage() {
                             placeholder="선택..."
                             compact
                             autoOpen
+                            onCreateAccount={handleCreateInternalAccount}
                           />
                         ) : (
                           <span className={cn("text-xs truncate flex items-center gap-1", tx.internal_account_name ? "text-foreground" : "text-muted-foreground")}
@@ -1068,6 +1199,7 @@ export default function TransactionsPage() {
                   onChange={setBulkMapAccountId}
                   placeholder="내부계정 선택..."
                   dropUp
+                  onCreateAccount={handleCreateInternalAccount}
                 />
               </div>
               <Button size="sm" onClick={handleBulkMap} disabled={bulkMapping || !bulkMapAccountId}>
@@ -1088,6 +1220,15 @@ export default function TransactionsPage() {
                 disabled={bulkConfirming}
               >
                 {bulkConfirming ? "처리 중..." : "일괄 확정"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-amber-400 border-amber-500/30 hover:bg-amber-500/10"
+                onClick={handleBulkCancel}
+                disabled={bulkCancelling}
+              >
+                {bulkCancelling ? "처리 중..." : "취소 처리"}
               </Button>
             </>
           )}

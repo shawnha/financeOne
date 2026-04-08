@@ -351,7 +351,7 @@
     <span class="badge badge-blue">v1.3</span>
     <span class="badge badge-purple">2026-03-22</span>
     <span class="badge badge-green">Next.js 14 + FastAPI</span>
-    <span class="badge badge-amber">Neon PostgreSQL</span>
+    <span class="badge badge-amber">Supabase PostgreSQL</span>
   </div>
 </div>
 
@@ -394,7 +394,7 @@ Mercury API (HOI)      →  복식부기 검증
 Codef.io (한국법인)        (차변 = 대변)          →  Excel / PDF Export
 ExpenseOne (경비)      →
                         ↓
-                       Neon DB
+                       Supabase DB
                        (16개 테이블)
                         ↓
               Obsidian (패턴 축적)
@@ -410,31 +410,71 @@ ExpenseOne (경비)      →
   <tr><td>프론트엔드</td><td>Next.js 14 (App Router)</td><td>SSR/SSG, 파일 기반 라우팅</td></tr>
   <tr><td>UI 코드 생성</td><td><strong>UI UX Pro Max Skill</strong> → shadcn/ui + Tailwind 코드 자동 생성</td><td>UUPM이 디자인 시스템 생성 후 실제 코드를 shadcn+Tailwind로 작성. Phase 3+에서 Tremor/Magic UI 부분 추가</td></tr>
   <tr><td>백엔드</td><td>FastAPI (Python)</td><td>v1 파서 5종 재활용</td></tr>
-  <tr><td>DB</td><td><strong>Neon PostgreSQL</strong> — 처음부터 Neon 사용</td><td>dev 브랜치와 prod 브랜치 분리</td></tr>
-  <tr><td>AI</td><td>Anthropic Claude API + LLMFit</td><td>계정과목 매핑, 컨텍스트 최적화</td></tr>
+  <tr><td>DB</td><td><strong>Supabase PostgreSQL</strong> (financeone 스키마)</td><td>Session pooler 연결, hanahone-erp 프로젝트, ap-northeast-2</td></tr>
+  <tr><td>AI</td><td>Anthropic Claude API + Slack 컨텍스트 학습</td><td>거래처+description_pattern+vendor+category 조합 매핑 (mapping_rules 학습)</td></tr>
   <tr><td>UI 설계</td><td>UI UX Pro Max Skill</td><td>161개 UX 규칙 자동 적용, 디자인 시스템 생성</td></tr>
-  <tr><td>지식 관리</td><td>Obsidian + notebooklm-py</td><td>AI 자기학습 루프</td></tr>
-  <tr><td>배포</td><td>Vercel (프론트) + Railway (백엔드)</td><td>월 $0, 미사용 시 sleep</td></tr>
-  <tr><td>외부 연동</td><td>Mercury · QuickBooks · Codef.io · ExpenseOne</td><td>Phase 2~4 순차 연동</td></tr>
+  <tr><td>지식 관리</td><td>Obsidian + NotebookLM (Phase 4)</td><td>AI 자기학습 루프 — Phase 4에서 구현</td></tr>
+  <tr><td>배포</td><td>Vercel (프론트) — 백엔드는 로컬 운영 중</td><td>Railway 제외. 백엔드 프로덕션 배포는 추후 결정 (Fly.io / Render 등 검토)</td></tr>
+  <tr><td>외부 연동</td><td>Mercury (Phase 2 ✅) · Codef (샌드박스) · QuickBooks (미구현) · ExpenseOne (Phase 5)</td><td>Phase 2~5 순차 연동</td></tr>
 </table>
 
-<h3>개발 페이즈 요약</h3>
+<h3>개발 페이즈 요약 (2026-04-08 기준)</h3>
 <table>
-  <tr><th>Phase</th><th>기간</th><th>핵심 목표</th><th>완료 기준</th></tr>
-  <tr><td class="p1">1</td><td><strong>3~4일</strong></td><td>현금흐름 대시보드</td><td>오늘 잔고 + 다음달 말 예상 잔고 30초 파악</td></tr>
-  <tr><td class="p1">2</td><td><strong>4~5일</strong></td><td>재무제표 + API 검증</td><td>회계법인 자료와 ±5% 이내, Mercury API 비교 완료</td></tr>
-  <tr><td class="p2">3</td><td><strong>3~4일</strong></td><td>3개 법인 연결</td><td>연결재무제표 자동 생성</td></tr>
-  <tr><td class="p2">4</td><td><strong>1~2일</strong></td><td>Obsidian + NotebookLM</td><td>월 마감 → 오디오 브리핑 자동 생성</td></tr>
-  <tr><td class="p3">5</td><td><strong>1~2일</strong></td><td>n8n 자동화</td><td>정기 수집 + Slack 알림 자동화</td></tr>
-  <tr><td colspan="4" style="text-align:center; color:var(--green); font-weight:600;">총 예상: 약 2~3주 (Claude Code 기반, 인간 직접 코딩 시간 아님)</td></tr>
+  <tr><th>Phase</th><th>상태</th><th>핵심 목표</th><th>완료 기준</th></tr>
+  <tr><td class="p1">1</td><td>✅ <strong>완료</strong></td><td>현금흐름 대시보드</td><td>오늘 잔고 + 다음달 말 예상 잔고 30초 파악 — 달성</td></tr>
+  <tr><td class="p1">2</td><td>🔄 <strong>부분 완료 (~70%)</strong></td><td>재무제표 + API 검증</td><td>재무제표 5종 ✅, Mercury 연동 ✅, Codef 샌드박스 ✅, QuickBooks ❌, ±5% 검증 ❌, 적대적 테스트 ❌</td></tr>
+  <tr><td class="p2">3</td><td>❌ <strong>시작 전</strong></td><td>3개 법인 연결</td><td>연결재무제표 자동 생성, CTA 환산차이</td></tr>
+  <tr><td class="p2">4</td><td>❌ <strong>시작 전</strong></td><td>Obsidian + NotebookLM</td><td>월 마감 → 오디오 브리핑 자동 생성</td></tr>
+  <tr><td class="p3">5</td><td>❌ <strong>시작 전</strong></td><td>n8n 자동화</td><td>정기 수집 + Slack 알림 자동화</td></tr>
+  <tr><td colspan="4" style="text-align:center; color:var(--green); font-weight:600;">현재: Phase 1 완료 + Phase 2 부분 완료. 1~3월 데이터 운영(매핑/검증) 단계</td></tr>
+</table>
+
+<h3>Phase 1 완료 항목 + 추가 작업 (당초 PRD 외)</h3>
+<table>
+  <tr><th>구분</th><th>항목</th><th>상태</th></tr>
+  <tr><td rowspan="6">PRD 계획대로 완료</td><td>FastAPI 라우터 (entity_id 모든 엔드포인트)</td><td>✅</td></tr>
+  <tr><td>대시보드 UI + KPI 카드</td><td>✅</td></tr>
+  <tr><td>현금흐름표 (실제/예상/카드비용 3탭)</td><td>✅</td></tr>
+  <tr><td>Excel 파서 (롯데카드/우리카드/우리은행)</td><td>✅</td></tr>
+  <tr><td>AI 매핑 (mapping_rules + Slack 컨텍스트 학습)</td><td>✅</td></tr>
+  <tr><td>거래내역 / 업로드 / 환율 관리 / 멤버 관리</td><td>✅</td></tr>
+  <tr><td rowspan="10">PRD 계획 외 추가 구현</td><td>Slack 매칭 엔진 (구조화 파싱 + 양방향 매칭)</td><td>✅</td></tr>
+  <tr><td>슬랙 메시지 → 거래 자동 매칭 (AI 신뢰도 점수)</td><td>✅</td></tr>
+  <tr><td>예상 현금흐름 + 일별 시뮬레이션 + 카드 시차보정</td><td>✅</td></tr>
+  <tr><td>전월 반복 가져오기 (forecast 자동 복사)</td><td>✅</td></tr>
+  <tr><td>체크카드 양방향 중복 감지 (우리카드↔우리은행)</td><td>✅</td></tr>
+  <tr><td>거래 취소 처리 (is_cancel + 모든 집계 제외)</td><td>✅</td></tr>
+  <tr><td>멤버 카드번호 자동 매칭 + 이름 변경 시 거래 재연결</td><td>✅</td></tr>
+  <tr><td>내부계정 인라인 추가 (예상/거래내역 페이지)</td><td>✅</td></tr>
+  <tr><td>거래내역 다중 필터 (내부계정/표준계정/회원/출처/타입)</td><td>✅</td></tr>
+  <tr><td>월별 글로벌 동기화 (페이지 간 월 상태 공유)</td><td>✅</td></tr>
+  <tr><td rowspan="4">Phase 1에서 빠진 것</td><td><strong>프로덕션 백엔드 배포</strong> (Railway 제외)</td><td>❌ 보류</td></tr>
+  <tr><td>API 테스트 자동화 (API Tester agent)</td><td>❌</td></tr>
+  <tr><td>접근성 감사 (Accessibility Auditor)</td><td>❌</td></tr>
+  <tr><td>코드 리뷰 (Code Reviewer agent)</td><td>❌</td></tr>
+</table>
+
+<h3>Phase 2 진행 상태 — 빠진 항목</h3>
+<table>
+  <tr><th>항목</th><th>상태</th><th>비고</th></tr>
+  <tr><td>5대 재무제표 자동 생성 (BS/IS/CF/결손금/시산표)</td><td>✅</td><td>statement_generator 구현</td></tr>
+  <tr><td>복식부기 엔진 (debit==credit)</td><td>✅</td><td>bookkeeping_engine</td></tr>
+  <tr><td>Mercury API 연동</td><td>✅</td><td>HOI USD 거래 자동 수집</td></tr>
+  <tr><td>Codef 샌드박스</td><td>✅</td><td>한국 은행 (실연동 미사용)</td></tr>
+  <tr><td>PDF/Excel Export</td><td>🔄</td><td>Excel만 구현</td></tr>
+  <tr><td><strong>QuickBooks 연동</strong></td><td>❌</td><td>HOI 검증/AI 학습용 — 미구현</td></tr>
+  <tr><td><strong>Excel ↔ API 병렬 비교 검증</strong></td><td>❌</td><td>±1% 정확도 비교 미실시</td></tr>
+  <tr><td><strong>적대적 검증 (/codex)</strong></td><td>❌</td><td>복식부기 경계값 테스트 미실시</td></tr>
+  <tr><td><strong>회계법인 데이터와 ±5% 정확도 검증</strong></td><td>❌</td><td>Phase 2 핵심 완료 기준</td></tr>
+  <tr><td>성능 벤치마크</td><td>❌</td><td>대량 거래 시 재무제표 생성 속도 측정</td></tr>
 </table>
 
 <h3>중요 결정 사항</h3>
 <table>
   <tr><th>항목</th><th>결정</th><th>이유</th></tr>
-  <tr><td>DB</td><td><strong>Neon PostgreSQL — 처음부터</strong></td><td>SQLite → PostgreSQL 마이그레이션 시 미묘한 차이(타입, datetime 등)로 버그 발생. Neon dev 브랜치로 로컬/prod 완전 분리. 비용 동일($0).</td></tr>
+  <tr><td>DB</td><td><strong>Supabase PostgreSQL — financeone 스키마</strong></td><td>당초 Neon 계획 → Supabase로 변경. financeone 스키마로 격리. Session pooler 사용. (변경 이유: Supabase 통합 환경)</td></tr>
   <tr><td>API 연동 시점</td><td><strong>Excel 먼저 → Phase 2에서 병렬 비교</strong></td><td>API 결과와 Excel 결과를 나란히 검증 후 결정. 오차 ±1% 이내면 전환, 아니면 Excel 유지.</td></tr>
-  <tr><td>DB 스키마</td><td><strong>Day 1에 16개 테이블 전체 완성</strong></td><td>entity_id 나중에 추가하면 v1처럼 전체 개편 필요. 처음에 설계 완성, 기능은 Phase별 구현.</td></tr>
+  <tr><td>DB 스키마</td><td><strong>현재 21개 테이블 (당초 16개 → 5개 추가)</strong></td><td>entity_id 나중에 추가하면 v1처럼 전체 개편 필요. 처음에 설계 완성, 기능은 Phase별 구현. 추가된 5개: slack_messages, transaction_slack_match, journal_entries, journal_entry_lines, intercompany_pairs, consolidation_adjustments, card_settings.</td></tr>
   <tr><td>UI 품질</td><td><strong>Phase 1부터 UUPM 적용</strong></td><td>161개 UX 규칙(접근성, 애니메이션 등) 자동 적용. Phase 3+에서 프리미엄 컴포넌트 부분 추가.</td></tr>
 </table>
 </section>
@@ -638,20 +678,20 @@ ExpenseOne (경비)      →
   <tr><td>차트</td><td>Recharts</td><td>React 친화적</td></tr>
   <tr><td>아이콘</td><td>Lucide React</td><td>shadcn/ui 기본 세트</td></tr>
   <tr><td>Backend</td><td>FastAPI (Python)</td><td>v1 자산 재활용, Claude API 연동</td></tr>
-  <tr><td>DB</td><td><strong>Neon (PostgreSQL)</strong></td><td>무료, auto-pause, ERP 연동 대비, Vercel 공식 파트너</td></tr>
+  <tr><td>DB</td><td><strong>Supabase (PostgreSQL)</strong></td><td>무료 Free tier, financeone 스키마, Session pooler 사용</td></tr>
   <tr><td>AI 매핑</td><td>Anthropic Claude API</td><td>계정과목 분류, 거래처 패턴 인식</td></tr>
   <tr><td>Excel 파싱</td><td>openpyxl + pandas</td><td>v1 파서 5종 재활용</td></tr>
   <tr><td>지식 관리</td><td>Obsidian + notebooklm-py</td><td>AI 학습 루프 핵심</td></tr>
   <tr><td>컨텍스트 최적화</td><td>LLMFit</td><td>AI 매핑 토큰 비용 절감</td></tr>
   <tr><td>배포 (프론트)</td><td>Vercel — 무료 플랜</td><td>항상 켜짐, Next.js 최적화</td></tr>
-  <tr><td>배포 (백엔드)</td><td>Railway — 무료 플랜</td><td>미사용 시 sleep, 첫 요청 ~30초 웜업</td></tr>
+  <tr><td>배포 (백엔드)</td><td><strong>로컬 운영 중 (Railway 제외)</strong></td><td>프로덕션 배포 보류. 추후 Fly.io/Render 검토 예정. 현재 uvicorn 로컬 실행</td></tr>
   <tr><td>테스트</td><td>Playwright</td><td>재무제표 항등식 E2E 검증</td></tr>
 </table>
 
 <h3>참고 아키텍처 — 오픈소스 회계 프로젝트</h3>
 <div class="callout callout-purple">
   <strong>활용 원칙</strong>
-  기존 오픈소스 회계 플랫폼은 다법인 연결재무제표, K-GAAP, AI 매핑을 지원하지 않아 베이스로 사용 불가. 대신 아래 3개 프로젝트의 로직 패턴을 참고하여 Neon PostgreSQL + FastAPI 위에 직접 구현.
+  기존 오픈소스 회계 플랫폼은 다법인 연결재무제표, K-GAAP, AI 매핑을 지원하지 않아 베이스로 사용 불가. 대신 아래 3개 프로젝트의 로직 패턴을 참고하여 Supabase PostgreSQL + FastAPI 위에 직접 구현.
 </div>
 <table>
   <tr><th>프로젝트</th><th>참고 영역</th><th>활용 방법</th></tr>
@@ -671,23 +711,28 @@ ExpenseOne (경비)      →
     <td>환율 변환 알고리즘/개념 참고 → USD↔KRW 연결재무제표 환산 로직에 적용</td>
   </tr>
 </table>
-<p style="color:var(--text2); font-size:13px;">→ Claude Code에 지시 예시: "Bigcapital의 trial balance 쿼리 패턴을 참고해서 Neon PostgreSQL용 합계잔액시산표 API를 구현해줘"</p>
+<p style="color:var(--text2); font-size:13px;">→ Claude Code에 지시 예시: "Bigcapital의 trial balance 쿼리 패턴을 참고해서 Supabase PostgreSQL용 합계잔액시산표 API를 구현해줘"</p>
 
-<h3>배포 전략 — 비용 $0</h3>
+<h3>배포 전략 — 비용 $0 (현재)</h3>
 <div class="callout callout-green">
-  <strong>전략</strong>
-  개인 사용 도구이므로 팀 공유 불필요. Vercel(프론트 항상 켜짐) + Railway(백엔드 sleep) + Neon(DB auto-pause) 조합으로 월 비용 $0 유지. 나중에 ERP 연동 시 Railway 유료 업그레이드($5/월) 고려.
+  <strong>현재 상태</strong>
+  Vercel(프론트) + Supabase(DB Free tier) + 로컬 백엔드. Railway 제외. 백엔드 프로덕션 배포는 프로젝트 안정화 후 결정 예정.
 </div>
-<pre>개발 (로컬)              배포 (무료)               월 비용
+<pre>개발 (로컬)              배포 (현재)               월 비용
 ──────────────────────   ──────────────────────    ─────
-Neon dev 브랜치   →      Neon prod 브랜치           $0 (auto-pause)
-localhost:8000    →      Railway (FastAPI)          $0 (sleep 모드)
+Supabase (개발용)  →     Supabase (동일 DB)         $0 (Free tier)
+localhost:8000    →      <strong>로컬 운영 중</strong>            $0
 localhost:3000    →      Vercel (Next.js)           $0 (항상 켜짐)
 
-<span style="color:var(--teal)">▶ Neon 브랜치 전략</span>
-  neon/main   → 프로덕션 (Railway 연결)
-  neon/dev    → 로컬 개발 (.env의 DATABASE_URL)
-  neon/test   → Phase 2 API 비교 검증용 (선택)</pre>
+<span style="color:var(--teal)">▶ Supabase 스키마 전략</span>
+  financeone   → 모든 테이블 (격리된 스키마)
+  Session pooler 사용 (직접 연결 X)
+  hanahone-erp 프로젝트 (kxsofwbwzoovnwgxiwgi, ap-northeast-2)
+
+<span style="color:var(--teal)">▶ 백엔드 배포 옵션 (추후 검토)</span>
+  Fly.io       → 무료 플랜 + 한국 리전 가능
+  Render       → 무료 플랜, sleep 모드
+  Railway      → 제외됨 (비용 이슈)</pre>
 
 <h3>UI UX Pro Max Skill — 실제 역할 (중요)</h3>
 <div class="callout callout-blue">
@@ -770,7 +815,7 @@ python3 .claude/skills/ui-ux-pro-max/scripts/search.py \
 
 <div class="callout callout-amber">
   <strong>원칙</strong>
-  모든 테이블에 entity_id 포함. 나중에 추가하면 v1처럼 전체 개편 필요. <strong>처음부터 Neon PostgreSQL 사용</strong> — SQLite와 달리 타입·datetime·트랜잭션 동작이 완전히 일치하므로 dev/prod 차이 없음.
+  모든 테이블에 entity_id 포함. 나중에 추가하면 v1처럼 전체 개편 필요. <strong>Supabase PostgreSQL 사용</strong> (financeone 스키마) — SQLite와 달리 타입·datetime·트랜잭션 동작이 완전히 일치하므로 dev/prod 차이 없음.
 </div>
 
 <h3>1. entities — 법인</h3>
@@ -1293,7 +1338,7 @@ python3 .claude/skills/ui-ux-pro-max/scripts/search.py \
 <text x="631" y="875" font-size="11" fill="#475569" font-family="system-ui,sans-serif">AI 학습</text>
 <line x1="700" y1="870" x2="720" y2="870" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,2"/>
 <text x="728" y="875" font-size="11" fill="#475569" font-family="system-ui,sans-serif">🔗 = 외래키</text>
-<text x="900" y="875" font-size="11" fill="#94a3b8" font-family="system-ui,sans-serif">총 16개 테이블 · Neon PostgreSQL</text>
+<text x="900" y="875" font-size="11" fill="#94a3b8" font-family="system-ui,sans-serif">총 21개 테이블 · Supabase PostgreSQL (financeone 스키마)</text>
 </svg>
 </div>
 </section>
@@ -1643,7 +1688,7 @@ cp -r .claude-obsidian/skills .claude/skills/</pre>
   <tr><td><code>/qa-only</code></td><td>QA 리포트만 (수정 없음)</td><td>중간 점검 시</td></tr>
   <tr><td rowspan="2"><strong>디자인 검증</strong></td><td><code>/design-review</code></td><td>UI 비주얼 QA + 자동 수정</td><td>Phase 1, 2, 3 UI 완료 시</td></tr>
   <tr><td><code>/design-consultation</code></td><td>디자인 시스템 컨설팅</td><td>Phase 1 시작 (MASTER.md 보완)</td></tr>
-  <tr><td rowspan="3"><strong>배포</strong></td><td><code>/setup-deploy</code></td><td>배포 환경 설정 (Vercel/Railway 감지)</td><td>Phase 1 (최초 배포 설정)</td></tr>
+  <tr><td rowspan="3"><strong>배포</strong></td><td><code>/setup-deploy</code></td><td>배포 환경 설정 (Vercel — Railway 제외)</td><td>Phase 1 (Vercel 완료, 백엔드 배포 보류)</td></tr>
   <tr><td><code>/ship</code></td><td>테스트 → 리뷰 → VERSION → CHANGELOG → PR</td><td>모든 Phase 완료 시</td></tr>
   <tr><td><code>/land-and-deploy</code></td><td>PR 머지 → CI → 프로덕션 배포 → 헬스체크</td><td>모든 Phase 배포 시</td></tr>
   <tr><td rowspan="2"><strong>모니터링</strong></td><td><code>/canary</code></td><td>배포 후 카나리 모니터링 (콘솔 에러, 성능)</td><td>Phase 1+ 배포 후</td></tr>
@@ -1676,7 +1721,7 @@ cp -r .claude-obsidian/skills .claude/skills/</pre>
   <tr><td><strong>Accessibility Auditor</strong></td><td>WCAG 감사, 접근성 테스트</td><td>Phase 1, 2, 3 UI 완료 시</td></tr>
   <tr><td rowspan="2"><strong>테스트</strong></td><td><strong>API Tester</strong></td><td>API 검증, 성능 테스트</td><td>Phase 1 (엔드포인트), Phase 2 (Mercury/Codef)</td></tr>
   <tr><td><strong>Performance Benchmarker</strong></td><td>성능 측정, 병목 분석</td><td>Phase 2 (재무제표 생성), Phase 3 (연결 쿼리)</td></tr>
-  <tr><td rowspan="2"><strong>인프라</strong></td><td><strong>DevOps Automator</strong></td><td>CI/CD, 클라우드 운영</td><td>Phase 1 (Vercel/Railway 설정), Phase 5 (n8n 인프라)</td></tr>
+  <tr><td rowspan="2"><strong>인프라</strong></td><td><strong>DevOps Automator</strong></td><td>CI/CD, 클라우드 운영</td><td>Phase 1 (Vercel 설정 완료, 백엔드 배포 보류), Phase 5 (n8n 인프라)</td></tr>
   <tr><td><strong>SRE</strong></td><td>SLO, 모니터링, 장애 대응</td><td>Phase 5 (자동화 파이프라인 안정성)</td></tr>
   <tr><td rowspan="2"><strong>문서/규정</strong></td><td><strong>Technical Writer</strong></td><td>API 문서, README, 튜토리얼</td><td>Phase 4 (월간 리포트 템플릿), Phase 5 (자동화 런북)</td></tr>
   <tr><td><strong>Compliance Auditor</strong></td><td>규정 준수 감사 (K-GAAP, US GAAP)</td><td>Phase 2 (재무제표 양식), Phase 3 (연결 규정)</td></tr>
@@ -1701,7 +1746,7 @@ cp -r .claude-obsidian/skills .claude/skills/</pre>
   <tr><td>검증</td><td>디자인 리뷰</td><td><code>/plan-design-review</code></td><td>MASTER.md 완성도 검증</td></tr>
 </table>
 
-<h4>Phase 1 — 현금흐름 대시보드 (3~4일)</h4>
+<h4>Phase 1 — 현금흐름 대시보드 (3~4일) ✅ 완료 (PRD 외 다수 추가 기능 포함)</h4>
 <table>
   <tr><th>단계</th><th>작업</th><th>Skill / Agent</th><th>지시문</th></tr>
   <tr><td rowspan="3">①설계</td><td>API 아키텍처 설계</td><td><strong>Software Architect</strong> agent + <code>/plan-eng-review</code></td><td>엔드포인트 구조, 데이터 흐름 결정</td></tr>
@@ -1717,13 +1762,13 @@ cp -r .claude-obsidian/skills .claude/skills/</pre>
   <tr><td>접근성 감사</td><td><strong>Accessibility Auditor</strong> agent</td><td>WCAG AA, 금액 숫자 대비 비율</td></tr>
   <tr><td>UI QA</td><td><code>/qa</code> + <code>/design-review</code></td><td>5가지 상태 커버리지, 반응형 테스트</td></tr>
   <tr><td>코드 리뷰</td><td><strong>Code Reviewer</strong> agent + <code>/review</code></td><td>PR 머지 전 최종 리뷰</td></tr>
-  <tr><td rowspan="2">④배포</td><td>배포 환경 설정</td><td><code>/setup-deploy</code> + <strong>DevOps Automator</strong> agent</td><td>Vercel (frontend) + Railway (backend) 최초 설정</td></tr>
+  <tr><td rowspan="2">④배포</td><td>배포 환경 설정</td><td><code>/setup-deploy</code> + <strong>DevOps Automator</strong> agent</td><td><strong>Vercel (frontend) 완료. 백엔드는 로컬 운영 중 (Railway 제외)</strong></td></tr>
   <tr><td>배포 + 모니터링</td><td><code>/ship</code> → <code>/land-and-deploy</code> → <code>/canary</code></td><td>PR 생성 → 머지 → 배포 → 헬스체크</td></tr>
   <tr><td rowspan="2">⑤회고</td><td>CEO 검증</td><td><code>/plan-ceo-review</code></td><td>"30초 안에 잔고 파악" 요구사항 충족 확인</td></tr>
   <tr><td>회고 + 문서화</td><td><code>/retro</code> + <code>/document-release</code></td><td>Phase 1 회고, CHANGELOG/README 동기화</td></tr>
 </table>
 
-<h4>Phase 2 — 재무제표 정확도 (4~5일)</h4>
+<h4>Phase 2 — 재무제표 정확도 (4~5일) 🔄 부분 완료 (~70%)</h4>
 <table>
   <tr><th>단계</th><th>작업</th><th>Skill / Agent</th><th>지시문</th></tr>
   <tr><td rowspan="2">①설계</td><td>복식부기 엔진 아키텍처</td><td><strong>Software Architect</strong> agent + <code>/plan-eng-review</code></td><td>트랜잭션 원자성, 전기이월 로직 설계</td></tr>
@@ -1745,7 +1790,7 @@ cp -r .claude-obsidian/skills .claude/skills/</pre>
   <tr><td>회고 + 문서화</td><td><code>/retro</code> + <code>/document-release</code></td><td>Phase 2 회고, 복식부기 엔진 문서화</td></tr>
 </table>
 
-<h4>Phase 3 — 3개 법인 연결 (3~4일)</h4>
+<h4>Phase 3 — 3개 법인 연결 (3~4일) ❌ 시작 전</h4>
 <table>
   <tr><th>단계</th><th>작업</th><th>Skill / Agent</th><th>지시문</th></tr>
   <tr><td rowspan="2">①설계</td><td>연결 로직 아키텍처</td><td><strong>Software Architect</strong> agent + <code>/plan-eng-review</code></td><td>내부거래 상계, CTA 계산, 환율 처리 설계</td></tr>
@@ -1763,7 +1808,7 @@ cp -r .claude-obsidian/skills .claude/skills/</pre>
   <tr><td>회고 + 문서화</td><td><code>/retro</code> + <code>/document-release</code></td><td>Phase 3 회고, CTA 로직 문서화</td></tr>
 </table>
 
-<h4>Phase 4 — Obsidian + NotebookLM 자동화 (1~2일)</h4>
+<h4>Phase 4 — Obsidian + NotebookLM 자동화 (1~2일) ❌ 시작 전</h4>
 <table>
   <tr><th>단계</th><th>작업</th><th>Skill / Agent</th><th>방법</th></tr>
   <tr><td>①설계</td><td>자동화 파이프라인 설계</td><td><strong>Data Engineer</strong> agent + <code>/plan-eng-review</code></td><td>월간 데이터 추출 → 노트 생성 → NotebookLM 업로드 흐름</td></tr>
@@ -1777,14 +1822,14 @@ cp -r .claude-obsidian/skills .claude/skills/</pre>
   <tr><td>④배포</td><td>배포 + 문서화</td><td><code>/ship</code> + <code>/document-release</code></td><td>자동화 파이프라인 문서화</td></tr>
 </table>
 
-<h4>Phase 5 — n8n 자동화 & 알림 (1~2일)</h4>
+<h4>Phase 5 — n8n 자동화 & 알림 (1~2일) ❌ 시작 전</h4>
 <table>
   <tr><th>단계</th><th>작업</th><th>Skill / Agent</th><th>방법</th></tr>
   <tr><td>①설계</td><td>워크플로우 아키텍처</td><td><strong>n8n-skills</strong> (patterns) + <code>/plan-eng-review</code></td><td>5가지 검증된 패턴 중 선택</td></tr>
   <tr><td rowspan="4">②구현</td><td>스케줄러 설정</td><td><strong>n8n-skills</strong> (expression, node-config)</td><td>cron 표현식 정확한 문법 적용</td></tr>
   <tr><td>Webhook 설정</td><td><strong>n8n-skills</strong> (workflow-patterns)</td><td>ExpenseOne → FinanceOne 연동</td></tr>
   <tr><td>에러 처리 + 알림</td><td><strong>n8n-skills</strong> (validation-expert)</td><td>실패 시 Slack 알림 자동화</td></tr>
-  <tr><td>인프라 관리</td><td><strong>DevOps Automator</strong> agent + <strong>SRE</strong> agent</td><td>n8n 인스턴스 관리, Railway 리소스, 업타임 모니터링</td></tr>
+  <tr><td>인프라 관리</td><td><strong>DevOps Automator</strong> agent + <strong>SRE</strong> agent</td><td>n8n 인스턴스 관리, 백엔드 호스팅 리소스, 업타임 모니터링</td></tr>
   <tr><td rowspan="3">③검증</td><td>워크플로우 보안</td><td><strong>Security Engineer</strong> agent</td><td>Webhook 인증, Slack 토큰 보안</td></tr>
   <tr><td>파이프라인 E2E 테스트</td><td><code>/qa</code></td><td>Codef 수집 → DB 저장 → Slack 알림 전체 흐름</td></tr>
   <tr><td>장애 대응 런북</td><td><code>/investigate</code> + <strong>Technical Writer</strong> agent</td><td>자동화 파이프라인 실패 시 대응 절차 문서화</td></tr>
@@ -1904,8 +1949,9 @@ npx playwright install chromium
 <span class="comment"># LLMFit (Rust CLI — 하드웨어 LLM 호환성 분석)</span>
 brew install llmfit
 
-<span class="comment"># Railway CLI (백엔드 배포)</span>
-brew install railway
+<span class="comment"># 백엔드 배포 CLI — 추후 결정 (Railway 제외)</span>
+<span class="comment"># brew install flyctl  # Fly.io 옵션</span>
+<span class="comment"># brew install render-cli  # Render 옵션</span>
 
 <span class="comment"># Alembic (DB 마이그레이션)</span>
 pip3 install alembic --break-system-packages</pre>
@@ -2033,13 +2079,13 @@ cat > CLAUDE.md << 'EOF'
 - 컴포넌트: shadcn/ui / 차트: Recharts / 아이콘: Lucide
 
 ## DB
-- 스키마: backend/database/schema.sql
-- 연결: DATABASE_URL (Neon dev 브랜치 connection string)
-- 로컬 개발도 Neon dev 브랜치 사용 — SQLite 사용 금지
+- 스키마: backend/database/schema.sql (21개 테이블)
+- 연결: DATABASE_URL (Supabase Session pooler)
+- Supabase 프로젝트: hanahone-erp (financeone 스키마)
 - 3개 법인 초기 데이터: seed.py 실행
 
 ## 스택
-Frontend: Next.js 14 App Router | Backend: FastAPI | DB: Neon PostgreSQL (dev/prod 브랜치 분리)
+Frontend: Next.js 14 App Router | Backend: FastAPI | DB: Supabase PostgreSQL (financeone 스키마)
 
 ## 디렉토리
 - frontend/src/app: Next.js 페이지
@@ -2051,10 +2097,10 @@ Frontend: Next.js 14 App Router | Backend: FastAPI | DB: Neon PostgreSQL (dev/pr
 EOF</pre>
 
 <h3>환경변수 & DB 초기화</h3>
-<pre><span class="comment"># .env 파일 — Neon dev 브랜치 connection string 사용</span>
-<span class="comment"># neon.tech → 프로젝트 생성 → dev 브랜치 → Connection string 복사</span>
+<pre><span class="comment"># .env 파일 — Supabase Session pooler connection string</span>
+<span class="comment"># Supabase Dashboard → Project Settings → Database → Connection string (Session pooler)</span>
 cat > .env << 'EOF'
-DATABASE_URL=postgresql://user:pass@ep-xxx.ap-southeast-1.aws.neon.tech/financeone?sslmode=require
+DATABASE_URL=postgresql://postgres.kxsofwbwzoovnwgxiwgi:PASSWORD@aws-1-ap-northeast-2.pooler.supabase.com:5432/postgres
 ANTHROPIC_API_KEY=sk-ant-...
 SECRET_KEY=your-secret-key-here
 EOF
@@ -2062,12 +2108,14 @@ EOF
 <span class="comment"># .env.local (Next.js)</span>
 echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > frontend/.env.local
 
-<span class="comment"># Neon DB 연결 확인</span>
+<span class="comment"># Supabase DB 연결 확인</span>
 cd backend
 python3 -c "
 import psycopg2, os
 conn = psycopg2.connect(os.environ['DATABASE_URL'])
-print('✅ Neon 연결 성공')
+cur = conn.cursor()
+cur.execute('SET search_path TO financeone, public')
+print('✅ Supabase 연결 성공 (financeone 스키마)')
 conn.close()
 "
 
@@ -2075,7 +2123,7 @@ conn.close()
 alembic init alembic
 alembic revision --autogenerate -m "init schema"
 alembic upgrade head
-echo "✅ DB 스키마 생성 완료 (Neon)"
+echo "✅ DB 스키마 생성 완료 (Supabase financeone)"
 
 <span class="comment"># 초기 데이터 시드 (K-GAAP 계정과목 + 3개 법인)</span>
 python3 seed.py
@@ -2101,10 +2149,10 @@ git add . && git commit -m "init: FinanceOne v2 project setup"</pre>
   <li><strong>Vercel CLI</strong> 설치 (<code>npm install -g vercel</code>)</li>
   <li><strong>Playwright</strong> 설치 & Chromium 다운로드</li>
   <li><strong>LLMFit</strong> 설치 (<code>brew install llmfit</code>)</li>
-  <li><strong>Railway CLI</strong> 설치 (<code>brew install railway</code>)</li>
+  <li><strong>백엔드 호스팅 CLI</strong> — 추후 결정 (Fly.io / Render 등, Railway 제외)</li>
   <li><strong>Alembic</strong> 설치 (<code>pip3 install alembic</code>)</li>
-  <li><strong>Neon 프로젝트 생성</strong> — neon.tech에서 dev 브랜치 connection string 발급</li>
-  <li><strong>.env에 DATABASE_URL</strong> 입력 (Neon dev 브랜치)</li>
+  <li><strong>Supabase 프로젝트</strong> — hanahone-erp (kxsofwbwzoovnwgxiwgi, ap-northeast-2)</li>
+  <li><strong>.env에 DATABASE_URL</strong> 입력 (Supabase Session pooler)</li>
   <li><strong>Alembic 마이그레이션</strong> 완료 (<code>alembic upgrade head</code>)</li>
   <li><strong>seed.py 실행</strong> 완료 (K-GAAP 계정과목 + 3개 법인)</li>
   <li>Antigravity에서 <strong>CLAUDE.md 확인</strong> 후 코딩 시작!</li>
@@ -2132,7 +2180,7 @@ git add . && git commit -m "init: FinanceOne v2 project setup"</pre>
       <div class="phase-title">현금흐름 대시보드</div>
       <div class="phase-dur">3~4일 | Day 1: DB 스키마 완성, Day 2~3: 대시보드 동작, Day 4: E2E 검증</div>
       <ul class="phase-items">
-        <li>프로젝트 셋업 & Neon DB 스키마 전체 생성 (entity_id 포함)</li>
+        <li>프로젝트 셋업 & Supabase DB 스키마 전체 생성 (entity_id 포함)</li>
         <li>법인 선택 UI — UUPM Financial Dashboard 스타일 적용</li>
         <li>잔고 스냅샷 입력 + 예측 수입/지출 (고정비 반복)</li>
         <li>현금흐름 대시보드 (Recharts, 예측 vs 실제)</li>
@@ -2242,7 +2290,7 @@ git add . && git commit -m "init: FinanceOne v2 project setup"</pre>
     <td><strong>Phase 4+</strong></td>
     <td>Webhook 또는 DB 직접 연동</td>
     <td>추후</td>
-    <td>둘 다 Vercel + Neon 구조이므로, 승인 완료 시 ExpenseOne → FinanceOne API 자동 POST. 또는 같은 Neon DB를 공유 스키마로 직접 조회.</td>
+    <td>둘 다 Vercel + Supabase 구조이므로, 승인 완료 시 ExpenseOne → FinanceOne API 자동 POST. 또는 같은 Supabase DB를 공유 스키마로 직접 조회.</td>
   </tr>
 </table>
 
@@ -2465,7 +2513,7 @@ params = {
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │  [HOI]                           [한국 법인]                     │
-│  Mercury API ──────────────────▶ Neon DB                        │
+│  Mercury API ──────────────────▶ Supabase DB                    │
 │  QuickBooks API (재무 검증)        Codef.io API ───────────────▶ │
 │                                  ExpenseOne Webhook ──────────▶ │
 │                                                                  │

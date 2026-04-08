@@ -15,11 +15,39 @@ AI_MODEL = "claude-haiku-4-5-20251001"
 # ── 1. 정확 일치 ──────────────────────────────────────────────
 
 
-def exact_match(cur, *, entity_id: int, counterparty: str | None) -> dict | None:
-    """counterparty로 mapping_rules 정확 일치 조회."""
+def exact_match(cur, *, entity_id: int, counterparty: str | None, description: str | None = None) -> dict | None:
+    """counterparty로 mapping_rules 정확 일치 조회.
+
+    Slack 컨텍스트(description_pattern)가 있는 규칙을 우선 매칭.
+    description이 주어지면 description_pattern과 비교하여 가장 적합한 규칙 선택.
+    """
     if not counterparty:
         return None
 
+    # 1차: description 있으면 description_pattern이 일치하는 규칙 우선
+    if description:
+        cur.execute(
+            """
+            SELECT internal_account_id, standard_account_id, confidence
+            FROM mapping_rules
+            WHERE entity_id = %s AND counterparty_pattern = %s AND confidence >= 0.8
+              AND description_pattern IS NOT NULL
+              AND %s ILIKE '%%' || description_pattern || '%%'
+            ORDER BY confidence DESC, hit_count DESC
+            LIMIT 1
+            """,
+            [entity_id, counterparty, description],
+        )
+        row = cur.fetchone()
+        if row:
+            return {
+                "internal_account_id": row[0],
+                "standard_account_id": row[1],
+                "confidence": float(row[2]),
+                "match_type": "exact_contextual",
+            }
+
+    # 2차: fallback — description_pattern 없는 기본 규칙
     cur.execute(
         """
         SELECT internal_account_id, standard_account_id, confidence
@@ -61,16 +89,32 @@ def similar_match(
     cur.execute(
         """
         SELECT internal_account_id, standard_account_id,
-               similarity(counterparty_pattern, %s) AS sim,
-               counterparty_pattern
+               GREATEST(
+                   similarity(counterparty_pattern, %s),
+                   CASE WHEN description_pattern IS NOT NULL
+                        THEN similarity(description_pattern, %s) * 0.8
+                        ELSE 0 END,
+                   CASE WHEN vendor IS NOT NULL
+                        THEN similarity(vendor, %s) * 0.9
+                        ELSE 0 END
+               ) AS sim,
+               counterparty_pattern, description_pattern, vendor
         FROM mapping_rules
         WHERE entity_id = %s
-          AND similarity(counterparty_pattern, %s) >= %s
+          AND (
+              similarity(counterparty_pattern, %s) >= %s
+              OR (description_pattern IS NOT NULL AND similarity(description_pattern, %s) >= %s)
+              OR (vendor IS NOT NULL AND similarity(vendor, %s) >= %s)
+          )
           AND confidence >= 0.5
         ORDER BY sim DESC, confidence DESC, hit_count DESC
         LIMIT 1
         """,
-        [search_text, entity_id, search_text, SIMILAR_THRESHOLD],
+        [search_text, search_text, search_text,
+         entity_id,
+         search_text, SIMILAR_THRESHOLD,
+         search_text, SIMILAR_THRESHOLD,
+         search_text, SIMILAR_THRESHOLD],
     )
     row = cur.fetchone()
     if not row:
@@ -246,7 +290,7 @@ def auto_map_transaction(
         return None
 
     # 1. 정확 일치
-    result = exact_match(cur, entity_id=entity_id, counterparty=counterparty)
+    result = exact_match(cur, entity_id=entity_id, counterparty=counterparty, description=description)
     if result:
         return result
 
@@ -273,29 +317,59 @@ def auto_map_transaction(
 # ── 학습 ──────────────────────────────────────────────────────
 
 
-def learn_mapping_rule(cur, *, entity_id: int, counterparty: str | None, internal_account_id: int) -> None:
-    """사용자의 계정 선택을 mapping_rules에 UPSERT."""
+def learn_mapping_rule(
+    cur, *, entity_id: int, counterparty: str | None, internal_account_id: int,
+    description_pattern: str | None = None, vendor: str | None = None, category: str | None = None,
+) -> None:
+    """사용자의 계정 선택을 mapping_rules에 UPSERT.
+
+    Slack 컨텍스트가 있으면 거래처+description_pattern 조합으로 복수 규칙 지원.
+    같은 거래처라도 Slack 설명이 다르면 다른 내부계정으로 매핑 가능.
+    """
     if not counterparty:
         return
 
-    cur.execute(
-        """
-        SELECT id, internal_account_id, confidence, hit_count
-        FROM mapping_rules
-        WHERE entity_id = %s AND counterparty_pattern = %s
-        LIMIT 1
-        """,
-        [entity_id, counterparty],
-    )
+    # Slack 컨텍스트가 있으면 거래처+description 조합으로 검색
+    if description_pattern:
+        cur.execute(
+            """
+            SELECT id, internal_account_id, confidence, hit_count
+            FROM mapping_rules
+            WHERE entity_id = %s AND counterparty_pattern = %s AND description_pattern = %s
+            LIMIT 1
+            """,
+            [entity_id, counterparty, description_pattern],
+        )
+    else:
+        # Slack 없는 경우: 거래처만 + description_pattern IS NULL 매칭
+        cur.execute(
+            """
+            SELECT id, internal_account_id, confidence, hit_count
+            FROM mapping_rules
+            WHERE entity_id = %s AND counterparty_pattern = %s AND description_pattern IS NULL
+            LIMIT 1
+            """,
+            [entity_id, counterparty],
+        )
     existing = cur.fetchone()
+
+    # Slack 컨텍스트 업데이트 SQL 조각
+    slack_sets = ""
+    slack_params: list = []
+    if vendor:
+        slack_sets += ", vendor = %s"
+        slack_params.append(vendor)
+    if category:
+        slack_sets += ", category = %s"
+        slack_params.append(category)
 
     if existing:
         rule_id, existing_account_id, confidence, hit_count = existing
         if existing_account_id == internal_account_id:
             new_confidence = min(1.0, float(confidence) + 0.05)
             cur.execute(
-                "UPDATE mapping_rules SET hit_count = %s, confidence = %s, updated_at = NOW() WHERE id = %s",
-                [hit_count + 1, new_confidence, rule_id],
+                f"UPDATE mapping_rules SET hit_count = %s, confidence = %s{slack_sets}, updated_at = NOW() WHERE id = %s",
+                [hit_count + 1, new_confidence] + slack_params + [rule_id],
             )
         else:
             cur.execute(
@@ -307,23 +381,23 @@ def learn_mapping_rule(cur, *, entity_id: int, counterparty: str | None, interna
 
             if std_id is not None:
                 cur.execute(
-                    """
+                    f"""
                     UPDATE mapping_rules
                     SET internal_account_id = %s, standard_account_id = %s,
-                        confidence = 0.8, hit_count = 1, updated_at = NOW()
+                        confidence = 0.8, hit_count = 1{slack_sets}, updated_at = NOW()
                     WHERE id = %s
                     """,
-                    [internal_account_id, std_id, rule_id],
+                    [internal_account_id, std_id] + slack_params + [rule_id],
                 )
             else:
                 cur.execute(
-                    """
+                    f"""
                     UPDATE mapping_rules
                     SET internal_account_id = %s,
-                        confidence = 0.8, hit_count = 1, updated_at = NOW()
+                        confidence = 0.8, hit_count = 1{slack_sets}, updated_at = NOW()
                     WHERE id = %s
                     """,
-                    [internal_account_id, rule_id],
+                    [internal_account_id] + slack_params + [rule_id],
                 )
     else:
         cur.execute(
@@ -338,8 +412,9 @@ def learn_mapping_rule(cur, *, entity_id: int, counterparty: str | None, interna
 
         cur.execute(
             """
-            INSERT INTO mapping_rules (entity_id, counterparty_pattern, internal_account_id, standard_account_id, confidence, hit_count)
-            VALUES (%s, %s, %s, %s, 0.8, 1)
+            INSERT INTO mapping_rules (entity_id, counterparty_pattern, internal_account_id, standard_account_id,
+                                       confidence, hit_count, description_pattern, vendor, category)
+            VALUES (%s, %s, %s, %s, 0.8, 1, %s, %s, %s)
             """,
-            [entity_id, counterparty, internal_account_id, std_id],
+            [entity_id, counterparty, internal_account_id, std_id, description_pattern, vendor, category],
         )

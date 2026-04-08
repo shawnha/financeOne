@@ -193,17 +193,37 @@ def update_transaction(
         journal_entry_id = None
         journal_error = None
 
-        # 매핑 학습: internal_account_id 변경 시 mapping_rules UPSERT
+        # 매핑 학습: internal_account_id 변경 시 mapping_rules UPSERT (Slack 컨텍스트 포함)
         if body.internal_account_id is not None:
             # 거래의 counterparty + entity_id 조회
             cur.execute("SELECT counterparty, entity_id FROM transactions WHERE id = %s", [tx_id])
             tx_info = cur.fetchone()
             if tx_info and tx_info[0]:
+                # Slack 매칭된 메시지에서 컨텍스트 가져오기
+                slack_desc, slack_vendor, slack_category = None, None, None
+                cur.execute(
+                    """SELECT sm.parsed_structured, tsm.item_description
+                       FROM transaction_slack_match tsm
+                       JOIN slack_messages sm ON sm.id = tsm.slack_message_id
+                       WHERE tsm.transaction_id = %s AND tsm.is_confirmed = true
+                       LIMIT 1""",
+                    [tx_id],
+                )
+                slack_row = cur.fetchone()
+                if slack_row:
+                    ps = slack_row[0] if isinstance(slack_row[0], dict) else {}
+                    slack_desc = slack_row[1] or ps.get("summary")
+                    slack_vendor = ps.get("vendor")
+                    slack_category = ps.get("category")
+
                 learn_mapping_rule(
                     cur,
                     entity_id=tx_info[1],
                     counterparty=tx_info[0],
                     internal_account_id=body.internal_account_id,
+                    description_pattern=slack_desc,
+                    vendor=slack_vendor,
+                    category=slack_category,
                 )
 
             # 내부계정의 표준계정도 자동 설정
@@ -396,6 +416,29 @@ def bulk_map(body: BulkMap, conn: PgConnection = Depends(get_db)):
         raise
 
 
+@router.post("/bulk-cancel")
+def bulk_cancel(body: BulkConfirm, conn: PgConnection = Depends(get_db)):
+    """선택된 거래를 취소 처리 (is_cancel 토글)"""
+    if not body.ids:
+        raise HTTPException(400, "No IDs provided")
+    cur = conn.cursor()
+    try:
+        placeholders = ",".join(["%s"] * len(body.ids))
+        cur.execute(
+            f"UPDATE transactions SET is_cancel = NOT is_cancel, updated_at = NOW() WHERE id IN ({placeholders}) RETURNING id, is_cancel",
+            body.ids,
+        )
+        results = cur.fetchall()
+        conn.commit()
+        cur.close()
+        cancelled = [r[0] for r in results if r[1]]
+        restored = [r[0] for r in results if not r[1]]
+        return {"cancelled": len(cancelled), "restored": len(restored), "cancelled_ids": cancelled, "restored_ids": restored}
+    except Exception:
+        conn.rollback()
+        raise
+
+
 @router.post("/bulk-confirm")
 def bulk_confirm(body: BulkConfirm, conn: PgConnection = Depends(get_db)):
     if not body.ids:
@@ -506,7 +549,7 @@ def get_transaction(
     cur.execute(
         """
         SELECT t.id, t.date, t.counterparty, t.description, t.amount, t.type,
-               t.source_type, t.mapping_source, t.mapping_confidence,
+               t.entity_id, t.source_type, t.mapping_source, t.mapping_confidence,
                ia.name as internal_account_name, sa.name as standard_account_name
         FROM transactions t
         LEFT JOIN internal_accounts ia ON t.internal_account_id = ia.id

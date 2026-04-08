@@ -24,7 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { EntityTabs } from "@/components/entity-tabs"
 import { MonthPicker } from "@/components/month-picker"
 import { fetchAPI } from "@/lib/api"
-import { formatKRW } from "@/lib/format"
+import { formatKRW, formatByEntity } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import {
@@ -144,6 +144,7 @@ interface MatchCandidate {
   date: string
   description: string
   amount: number
+  entity_id?: number | null
   counterparty: string
   confidence: number
   match_type: string
@@ -510,7 +511,7 @@ function CompactMessageRow({
             if (amount === null && structTotal == null) return ""
             const currency = message.parsed_structured?.currency || message.parsed_currency
             if (currency === "USD") {
-              const krwAmount = message.parsed_amount_krw ?? (message.parsed_structured as Record<string, unknown>)?.total_amount_krw as number | undefined
+              const krwAmount = (message.parsed_structured as Record<string, unknown>)?.total_amount_krw as number | undefined ?? message.parsed_amount_krw
               return (
                 <span className="flex flex-col items-end">
                   <span>${(amount ?? 0).toLocaleString()}</span>
@@ -739,7 +740,7 @@ function CandidatesList({
                 </div>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="font-mono font-semibold text-sm tabular-nums">
-                    {formatKRW(candidate.amount)}
+                    {formatByEntity(candidate.amount, candidate.entity_id != null ? String(candidate.entity_id) : null)}
                   </span>
                   <span className="text-xs text-muted-foreground">
                     신뢰도:
@@ -778,11 +779,11 @@ function ConfirmedPanel({
   onUndoMatch: () => void
 }) {
   const isIgnored = message.is_cancelled
-  const [txDetail, setTxDetail] = useState<{ id: number; date: string; counterparty: string | null; description: string | null; amount: number; type: string } | null>(null)
+  const [txDetail, setTxDetail] = useState<{ id: number; date: string; counterparty: string | null; description: string | null; amount: number; entity_id?: number | null; type: string } | null>(null)
 
   useEffect(() => {
     if (message.matched_transaction_id) {
-      fetchAPI<{ id: number; date: string; counterparty: string | null; description: string | null; amount: number; type: string }>(
+      fetchAPI<{ id: number; date: string; counterparty: string | null; description: string | null; amount: number; entity_id?: number | null; type: string }>(
         `/transactions/${message.matched_transaction_id}`
       ).then(setTxDetail).catch(() => setTxDetail(null))
     }
@@ -827,7 +828,7 @@ function ConfirmedPanel({
               <div className="flex justify-between">
                 <span className="text-muted-foreground">금액</span>
                 <span className={txDetail.type === "in" ? "text-green-400" : "text-red-400"}>
-                  {formatKRW(txDetail.amount)}
+                  {formatByEntity(txDetail.amount, txDetail.entity_id != null ? String(txDetail.entity_id) : null)}
                 </span>
               </div>
             </div>
@@ -889,9 +890,9 @@ function CandidatePanel({
     })
   }, [])
 
-  const selectedSearchTotal = searchResults
-    .filter(r => selectedSearchIds.has(r.id))
-    .reduce((sum, r) => sum + r.amount, 0)
+  const selectedSearchItems = searchResults.filter(r => selectedSearchIds.has(r.id))
+  const selectedSearchTotal = selectedSearchItems.reduce((sum, r) => sum + r.amount, 0)
+  const selectedSearchEntityId = selectedSearchItems[0]?.entity_id
 
   const doSearch = useCallback(async (query: string) => {
     if (!query.trim()) return
@@ -1045,7 +1046,18 @@ function CandidatePanel({
         <h3 className="text-sm font-semibold">매칭 후보</h3>
 
         {isMultiItem ? (
-          <Tabs defaultValue="total">
+          <Tabs
+            defaultValue="total"
+            onValueChange={(v) => {
+              // 탭 전환 시 개별 매칭 상태 리셋 — "전체 매칭" 탭에서 직접 검색 확정 시
+              // stale activeItemIndex로 인해 개별 매칭으로 잘못 분기되는 버그 방지
+              if (v === "total") {
+                setActiveItemIndex(null)
+                setItemCandidates([])
+                setSelectedItemCandidateId(null)
+              }
+            }}
+          >
             <TabsList className="w-full">
               <TabsTrigger value="total" className="flex-1">전체 매칭</TabsTrigger>
               <TabsTrigger value="items" className="flex-1">
@@ -1272,8 +1284,26 @@ function CandidatePanel({
                             )}
                             <span className="truncate">{r.counterparty} {r.description}</span>
                             <span className="ml-auto font-mono font-semibold tabular-nums whitespace-nowrap">
-                              {formatKRW(r.amount)}
+                              {formatByEntity(r.amount, r.entity_id != null ? String(r.entity_id) : null)}
                             </span>
+                            {isChecked && (
+                              <Button
+                                size="sm"
+                                className="shrink-0 h-6 px-2 text-xs bg-[hsl(var(--accent))] text-accent-foreground hover:bg-[hsl(var(--accent))]/90"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  if (activeItemIndex !== null) {
+                                    const item = items[activeItemIndex]
+                                    confirmItemMatch(r.id, activeItemIndex, item.description)
+                                  } else {
+                                    onConfirm(r.id)
+                                  }
+                                }}
+                              >
+                                <Check className="h-3 w-3 mr-0.5" />
+                                확정
+                              </Button>
+                            )}
                           </div>
                         </div>
                       )
@@ -1285,7 +1315,7 @@ function CandidatePanel({
                     <div className="flex items-center justify-between rounded-lg border border-white/[0.06] bg-secondary/20 p-2">
                       <div className="text-xs">
                         <span className="text-muted-foreground">선택 {selectedSearchIds.size}건 합계: </span>
-                        <span className="font-mono font-bold tabular-nums">{formatKRW(selectedSearchTotal)}</span>
+                        <span className="font-mono font-bold tabular-nums">{formatByEntity(selectedSearchTotal, selectedSearchEntityId != null ? String(selectedSearchEntityId) : null)}</span>
                       </div>
                       <Button
                         size="sm"

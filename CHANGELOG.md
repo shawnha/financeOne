@@ -2,6 +2,34 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-04-08 — Slack 컨텍스트 매핑 + UX 개선
+
+### Added
+- mapping_rules에 Slack 컨텍스트 컬럼 추가 (description_pattern, vendor, category)
+- 거래내역에서 내부계정 변경 시 Slack 매칭 정보 자동 학습
+- 거래처+description 조합으로 복수 매핑 규칙 지원 (같은 거래처도 항목별 다른 계정 가능)
+- 거래내역 일괄 취소 처리 버튼 (is_cancel 토글)
+- 거래내역 내부계정 필터 드롭다운
+- 멤버 카드번호 매칭 fallback (이름 매칭 실패 시 card_number로 연결)
+- 멤버 이름/카드번호 변경 시 기존 거래 자동 재연결
+- 체크카드 양방향 중복 감지 (우리은행 ↔ 우리카드)
+- 예상 페이지 + 거래내역에서 내부계정 인라인 추가 (AccountCombobox)
+- Warnings 카드 (잔고 부족 + 예산 초과 통합, 접기/펼치기)
+- 거래 단건 조회 API에 entity_id 추가
+
+### Changed
+- is_cancel 필터를 모든 집계 쿼리에 적용 (대시보드, 현금흐름 14곳, 분개, 법인간 거래)
+- 잔고 부족 경고: 매일 반복 → 처음 마이너스 되는 날만 1건
+- Slack 매칭 카드 상단 KRW 금액: parsed_structured.total_amount_krw 우선
+- 매칭 후보 통화 표시: t.currency 대신 entity_id 기반 (HOI=USD, 한국=KRW)
+- Slack 동기화 속도 개선: 변경 없는 메시지(텍스트+reply_count+structured 동일) 완전 스킵
+- useGlobalMonth: 초기값을 localStorage에서 즉시 읽기 (페이지 네비게이션 시 월 동기화 개선)
+- PRD: Neon → Supabase, Railway 제외 반영, Phase 1/2 진행 상태 표시
+
+### Fixed
+- 8건 기존 체크우리 중복 거래 취소 처리 (Slack/거래 정합성 회복)
+- 75개 매핑 규칙에 Slack 컨텍스트 소급 적용 (12월~3월)
+
 ## [0.7.1] - 2026-03-31 — 다중 항목 개별 매칭
 
 ### Added

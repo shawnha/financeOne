@@ -119,20 +119,32 @@ async def upload_transactions(
                     cur.execute("UPDATE raw_upload_rows SET parse_status = 'duplicate', skip_reason = 'dedup' WHERE id = %s", [raw_row_id])
                 continue
 
-            # 체크카드 중복: 은행 거래가 DB에 존재할 때만
+            # 체크카드 중복: 은행 "체크우리"를 항상 스킵 (카드가 더 상세)
             is_dup = False
-            if tx.is_check_card:
+            if tx.is_check_card and tx.source_type == 'woori_bank':
+                # 은행 업로드 시: 같은 금액의 카드 거래가 있으면 은행 "체크우리" 스킵
                 cur.execute(
                     """
                     SELECT id FROM transactions
                     WHERE entity_id = %s AND date = %s AND amount = %s
-                      AND source_type = 'woori_bank'
-                      AND description LIKE '체크우리%%'
+                      AND source_type = 'woori_card'
                     LIMIT 1
                     """,
                     [entity_id, tx.date, tx.amount],
                 )
                 is_dup = cur.fetchone() is not None
+            elif tx.is_check_card and tx.source_type == 'woori_card':
+                # 카드 업로드 시: 은행에 "체크우리"가 있으면 은행 쪽을 취소 처리하고 카드는 유지
+                cur.execute(
+                    """
+                    UPDATE transactions SET is_cancel = true, updated_at = NOW()
+                    WHERE entity_id = %s AND date = %s AND amount = %s
+                      AND source_type = 'woori_bank'
+                      AND description LIKE '체크우리%%'
+                      AND is_cancel IS NOT TRUE
+                    """,
+                    [entity_id, tx.date, tx.amount],
+                )
 
             if is_dup:
                 duplicate_count += 1
@@ -144,7 +156,7 @@ async def upload_transactions(
             if tx.is_cancel:
                 cancel_count += 1
 
-            # Resolve member_id
+            # Resolve member_id: 이름 매칭 → 카드번호 매칭 fallback
             member_id = None
             if tx.member_name:
                 cur.execute(
@@ -154,6 +166,14 @@ async def upload_transactions(
                 member_row = cur.fetchone()
                 if member_row:
                     member_id = member_row[0]
+            if member_id is None and tx.card_number:
+                cur.execute(
+                    "SELECT id FROM members WHERE entity_id = %s AND %s = ANY(card_numbers) AND is_active = true LIMIT 1",
+                    [entity_id, tx.card_number],
+                )
+                card_row = cur.fetchone()
+                if card_row:
+                    member_id = card_row[0]
 
             cur.execute(
                 """

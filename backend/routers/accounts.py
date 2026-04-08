@@ -444,7 +444,33 @@ def update_member(
             raise HTTPException(status_code=404, detail="Member not found")
         cols = [d[0] for d in cur.description]
         row = dict(zip(cols, result))
+
+        # 멤버 변경 시 카드번호/이름 기반으로 기존 거래 재연결
+        entity_id = row["entity_id"]
+        card_numbers = row.get("card_numbers") or []
+        member_name = row["name"]
+        relinked = 0
+        # 카드번호로 미연결 거래 연결
+        if card_numbers:
+            placeholders = ",".join(["%s"] * len(card_numbers))
+            cur.execute(
+                f"""UPDATE transactions SET member_id = %s
+                    WHERE entity_id = %s AND card_number IN ({placeholders})
+                      AND (member_id IS NULL OR member_id != %s)""",
+                [member_id, entity_id] + card_numbers + [member_id],
+            )
+            relinked += cur.rowcount
+        # parsed_member_name으로 미연결 거래 연결
+        cur.execute(
+            """UPDATE transactions SET member_id = %s
+               WHERE entity_id = %s AND parsed_member_name = %s
+                 AND (member_id IS NULL OR member_id != %s)""",
+            [member_id, entity_id, member_name, member_id],
+        )
+        relinked += cur.rowcount
+
         conn.commit()
+        row["relinked_transactions"] = relinked
         return row
     except HTTPException:
         conn.rollback()

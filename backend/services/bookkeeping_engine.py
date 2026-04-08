@@ -131,6 +131,7 @@ def create_journal_from_transaction(
                t.counterparty, t.standard_account_id, t.is_confirmed
         FROM transactions t
         WHERE t.id = %s
+          AND (t.is_cancel IS NOT TRUE)
         """,
         [transaction_id],
     )

@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useRef, useEffect, useMemo } from "react"
+import { useState, useRef, useEffect, useMemo, useCallback } from "react"
 import { createPortal } from "react-dom"
-import { Search, ChevronDown, X } from "lucide-react"
+import { Search, ChevronDown, X, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface AccountOption {
@@ -26,6 +26,8 @@ interface AccountComboboxProps {
   autoOpen?: boolean
   /** Open dropdown upward (for bottom bars) */
   dropUp?: boolean
+  /** Callback to create a new account inline. If provided, shows "+ 새 계정 추가" button */
+  onCreateAccount?: (name: string, parentId: number | null) => Promise<AccountOption | null>
 }
 
 export function AccountCombobox({
@@ -37,6 +39,7 @@ export function AccountCombobox({
   compact = false,
   autoOpen = false,
   dropUp = false,
+  onCreateAccount,
 }: AccountComboboxProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
@@ -213,6 +216,44 @@ export function AccountCombobox({
 
   const ROOT_CODES = ["INC", "EXP"]
 
+  // Inline create state
+  const [creating, setCreating] = useState(false)
+  const [newName, setNewName] = useState("")
+  const [newParentId, setNewParentId] = useState<number | null>(null)
+  const [createLoading, setCreateLoading] = useState(false)
+  const newNameRef = useRef<HTMLInputElement>(null)
+
+  // Get selectable parent categories (depth=1, has children)
+  const parentCategories = useMemo(() => {
+    return treeOrdered.filter(o => {
+      const depth = depthMap.get(o.id) ?? 0
+      return depth === 1 && treeOrdered.some(c => c.parent_id === o.id)
+    })
+  }, [treeOrdered, depthMap])
+
+  const handleCreate = useCallback(async () => {
+    if (!newName.trim() || !onCreateAccount) return
+    setCreateLoading(true)
+    try {
+      const created = await onCreateAccount(newName.trim(), newParentId)
+      if (created) {
+        onChange(String(created.id))
+        setOpen(false)
+        setSearch("")
+        setCreating(false)
+        setNewName("")
+        setNewParentId(null)
+      }
+    } finally {
+      setCreateLoading(false)
+    }
+  }, [newName, newParentId, onCreateAccount, onChange])
+
+  // Focus new name input when creating
+  useEffect(() => {
+    if (creating) setTimeout(() => newNameRef.current?.focus(), 50)
+  }, [creating])
+
   // Selected display
   const selected = options.find((o) => String(o.id) === value)
 
@@ -236,11 +277,11 @@ export function AccountCombobox({
 
       {/* Options list */}
       <div className="max-h-[240px] overflow-y-auto py-1">
-        {filtered.length === 0 ? (
+        {filtered.length === 0 && !creating ? (
           <div className="px-3 py-4 text-center text-xs text-muted-foreground">
             검색 결과가 없습니다
           </div>
-        ) : (
+        ) : !creating ? (
           filtered.map((opt) => {
             const depth = depthMap.get(opt.id) ?? 0
             const isGroupHeader = ROOT_CODES.includes(opt.code)
@@ -312,8 +353,61 @@ export function AccountCombobox({
               </button>
             )
           })
+        ) : (
+          /* Inline create form */
+          <div className="px-3 py-2 space-y-2">
+            <input
+              ref={newNameRef}
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleCreate() }}
+              placeholder="새 계정 이름"
+              className="w-full bg-muted/30 rounded px-2 py-1.5 text-xs outline-none border border-border focus:border-accent"
+            />
+            <select
+              value={newParentId ?? ""}
+              onChange={(e) => setNewParentId(e.target.value ? Number(e.target.value) : null)}
+              className="w-full bg-muted/30 rounded px-2 py-1.5 text-xs outline-none border border-border"
+            >
+              <option value="">상위 계정 선택 (선택사항)</option>
+              {parentCategories.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            <div className="flex gap-1.5">
+              <button
+                type="button"
+                onClick={handleCreate}
+                disabled={!newName.trim() || createLoading}
+                className="flex-1 bg-accent text-accent-foreground rounded px-2 py-1 text-xs font-medium disabled:opacity-50"
+              >
+                {createLoading ? "생성 중..." : "추가"}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setCreating(false); setNewName(""); setNewParentId(null) }}
+                className="px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+              >
+                취소
+              </button>
+            </div>
+          </div>
         )}
       </div>
+
+      {/* Create button at bottom */}
+      {onCreateAccount && !creating && (
+        <div className="border-t border-border px-3 py-1.5">
+          <button
+            type="button"
+            onClick={() => { setCreating(true); setNewName(search) }}
+            className="w-full flex items-center gap-1.5 text-xs text-accent hover:text-accent/80 py-1"
+          >
+            <Plus className="h-3 w-3" />
+            새 계정 추가{search && ` "${search}"`}
+          </button>
+        </div>
+      )}
     </div>,
     portalContainer!,
   ) : null

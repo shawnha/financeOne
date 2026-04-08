@@ -258,6 +258,81 @@ const DEFAULT_CARD_COLOR = { stroke: "#8B5CF6", fill: "rgba(139,92,246,0.3)", la
 
 // ── Forecast Balance Chart (daily-schedule API) ──────
 
+// ── Warnings Card (잔고 부족 + 예산 초과 통합) ─────────
+
+function WarningsCard({
+  alerts,
+  overBudget,
+  entityId,
+  formatByEntity,
+}: {
+  alerts: Array<{ message: string; deficit: number }>
+  overBudget: Array<{ category: string; forecast: number; actual: number; diff_pct: number }>
+  entityId: string | null
+  formatByEntity: (amount: number, entityId: string | null) => string
+}) {
+  const [expanded, setExpanded] = useState(true)
+  const totalWarnings = alerts.length + overBudget.length
+
+  return (
+    <Card className="bg-red-500/10 border-red-500/30 rounded-xl overflow-hidden" role="alert">
+      {/* Header — always visible, toggles expand */}
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-red-500/5 transition-colors"
+      >
+        <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
+        <span className="text-sm font-medium text-red-400 flex-1">
+          경고 {totalWarnings}건
+        </span>
+        {expanded ? (
+          <ChevronDown className="h-4 w-4 text-red-400/60" />
+        ) : (
+          <ChevronRight className="h-4 w-4 text-red-400/60" />
+        )}
+      </button>
+
+      {expanded && (
+        <div className="px-4 pb-4 space-y-3">
+          {/* 잔고 부족 섹션 */}
+          {alerts.length > 0 && (
+            <div>
+              <p className="text-[11px] font-medium text-red-400/80 uppercase tracking-wider mb-1.5">잔고 부족 예상</p>
+              <div className="space-y-1">
+                {alerts.map((alert, i) => (
+                  <p key={i} className="text-xs text-red-300">
+                    {alert.message} (부족액: {formatByEntity(alert.deficit, entityId)})
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 구분선 */}
+          {alerts.length > 0 && overBudget.length > 0 && (
+            <div className="border-t border-red-500/20" />
+          )}
+
+          {/* 예산 초과 섹션 */}
+          {overBudget.length > 0 && (
+            <div>
+              <p className="text-[11px] font-medium text-red-400/80 uppercase tracking-wider mb-1.5">예산 초과 항목</p>
+              <div className="space-y-1">
+                {overBudget.map((item, i) => (
+                  <p key={i} className="text-xs text-red-300">
+                    {item.category}: 예상 {formatByEntity(item.forecast, entityId)} &rarr; 실제 {formatByEntity(item.actual, entityId)} (+{item.diff_pct}%)
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  )
+}
+
 // ── Variance Bridge ──────────────────────────────────
 
 function VarianceBridge({ entityId, year, month }: { entityId: string | null; year: number; month: number }) {
@@ -1074,6 +1149,25 @@ function ForecastModal({
                     }}
                     placeholder="계정 선택"
                     showCode
+                    onCreateAccount={async (name, parentId) => {
+                      const code = name.toUpperCase().replace(/[^A-Z가-힣0-9]/g, "").slice(0, 20) || `NEW_${Date.now()}`
+                      const res = await fetchAPI<{ id: number; code: string; name: string; parent_id?: number | null; is_recurring?: boolean }>(
+                        "/accounts/internal",
+                        {
+                          method: "POST",
+                          body: JSON.stringify({
+                            entity_id: Number(entityId),
+                            code,
+                            name,
+                            parent_id: parentId,
+                          }),
+                        },
+                      )
+                      // 목록 새로고침
+                      const updated = await fetchAPI<InternalAccount[]>(`/accounts/internal?entity_id=${entityId}`, { cache: "no-store" })
+                      setInternalAccounts(updated)
+                      return { id: res.id, code: res.code, name: res.name ?? name, parent_id: res.parent_id, is_recurring: res.is_recurring }
+                    }}
                   />
                 </div>
                 {isParentAccount && !isEdit && (
@@ -1486,32 +1580,14 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
         카드/은행 데이터 업로드마다 &quot;실제 진행&quot; 컬럼이 업데이트됩니다. 월말에 예상과 실제를 비교합니다.
       </div>
 
-      {/* Alerts from daily schedule (DESIGN-2) */}
-      {schedule?.alerts && schedule.alerts.length > 0 && (
-        <Card className="bg-red-500/10 border-red-500/30 rounded-xl p-4" role="alert" aria-live="polite">
-          <div className="flex items-center gap-2 mb-2">
-            <AlertCircle className="h-4 w-4 text-red-400" />
-            <span className="text-sm font-medium text-red-400">잔고 부족 예상</span>
-          </div>
-          <div className="space-y-1">
-            {schedule.alerts.slice(0, 3).map((alert, i) => (
-              <p key={i} className="text-xs text-red-300">
-                {alert.message} (부족액: {formatByEntity(alert.deficit, entityId)})
-              </p>
-            ))}
-            {schedule.alerts.length > 3 && (
-              <p className="text-xs text-red-300/70">외 {schedule.alerts.length - 3}건 더 보기</p>
-            )}
-          </div>
-          <div className="flex gap-2 mt-3 max-sm:flex-col">
-            <Button variant="outline" size="sm" className="text-xs border-red-500/30 text-red-400 hover:bg-red-500/10">
-              예상 항목 조정
-            </Button>
-            <Button variant="outline" size="sm" className="text-xs border-red-500/30 text-red-400 hover:bg-red-500/10">
-              입금 추가
-            </Button>
-          </div>
-        </Card>
+      {/* Warnings card — 잔고 부족 + 예산 초과 통합 */}
+      {((schedule?.alerts && schedule.alerts.length > 0) || (data.over_budget && data.over_budget.length > 0)) && (
+        <WarningsCard
+          alerts={schedule?.alerts || []}
+          overBudget={data.over_budget || []}
+          entityId={entityId}
+          formatByEntity={formatByEntity}
+        />
       )}
 
       {/* Forecast vs Actual balance chart (daily-schedule API) */}
@@ -2155,23 +2231,6 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
 
       {/* Variance Bridge */}
       <VarianceBridge entityId={entityId} year={y} month={m} />
-
-      {/* Over-budget warning */}
-      {data.over_budget && data.over_budget.length > 0 && (
-        <Card className="bg-red-500/10 border-red-500/30 rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <AlertCircle className="h-4 w-4 text-red-400" />
-            <span className="text-sm font-medium text-red-400">예산 초과 항목</span>
-          </div>
-          <div className="space-y-1">
-            {data.over_budget.map((item, i) => (
-              <p key={i} className="text-xs text-red-300">
-                {item.category}: 예상 {formatByEntity(item.forecast, entityId)} &rarr; 실제 {formatByEntity(item.actual, entityId)} (+{item.diff_pct}%)
-              </p>
-            ))}
-          </div>
-        </Card>
-      )}
 
 
       {/* Edit Modal */}
