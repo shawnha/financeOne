@@ -1,9 +1,10 @@
-"""외부 API 연동 라우터 — Mercury, Codef"""
+"""외부 API 연동 라우터 — Mercury, Codef, QuickBooks Online"""
 
 import os
 import re
 import logging
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, field_validator
 from typing import Optional
 from psycopg2.extensions import connection as PgConnection
@@ -188,6 +189,196 @@ def codef_sync_card(
         # TODO: Parse and insert card approvals into transactions
         conn.commit()
         return {"total_fetched": len(approvals), "synced": 0, "note": "Card sync parsing not yet implemented"}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        client.close()
+
+
+# --- QuickBooks Online ---
+
+class QBOSyncRequest(BaseModel):
+    entity_id: int = 1
+    start_date: Optional[str] = None
+
+    @field_validator("start_date")
+    @classmethod
+    def validate_start_date(cls, v: str | None) -> str | None:
+        if v and not re.match(r"^\d{4}-\d{2}-\d{2}$", v):
+            raise ValueError("Date must be YYYY-MM-DD format")
+        return v
+
+
+class QBOSeedRequest(BaseModel):
+    entity_id: int = 1
+
+
+def _get_qbo_client():
+    """QBO 클라이언트 생성."""
+    from backend.services.integrations.qbo import QBOClient
+    client_id = os.environ.get("QUICKBOOKS_CLIENT_ID", "")
+    client_secret = os.environ.get("QUICKBOOKS_CLIENT_SECRET", "")
+    if not client_id or not client_secret:
+        raise HTTPException(400, "QuickBooks credentials not configured")
+    redirect_uri = os.environ.get(
+        "QUICKBOOKS_REDIRECT_URI",
+        "http://localhost:8000/api/integrations/quickbooks/callback",
+    )
+    return QBOClient(client_id, client_secret, redirect_uri)
+
+
+@router.get("/quickbooks/status")
+def quickbooks_status(
+    entity_id: int = 1,
+    conn: PgConnection = Depends(get_db),
+):
+    """QBO 연결 상태 확인."""
+    cur = conn.cursor()
+    # realm_id 확인
+    cur.execute(
+        "SELECT value FROM settings WHERE key = 'qbo_realm_id' AND entity_id = %s",
+        [entity_id],
+    )
+    realm_row = cur.fetchone()
+
+    # last sync 확인
+    cur.execute(
+        "SELECT MAX(synced_at) FROM qbo_accounts WHERE entity_id = %s",
+        [entity_id],
+    )
+    sync_row = cur.fetchone()
+
+    # account count
+    cur.execute(
+        "SELECT count(*) FROM qbo_accounts WHERE entity_id = %s",
+        [entity_id],
+    )
+    count_row = cur.fetchone()
+
+    cur.close()
+
+    connected = bool(realm_row and realm_row[0])
+    return {
+        "connected": connected,
+        "realm_id": realm_row[0] if realm_row else None,
+        "last_sync": sync_row[0].isoformat() if sync_row and sync_row[0] else None,
+        "accounts": count_row[0] if count_row else 0,
+    }
+
+
+@router.get("/quickbooks/authorize")
+def quickbooks_authorize(
+    entity_id: int = 1,
+    conn: PgConnection = Depends(get_db),
+):
+    """OAuth authorize URL 생성 + CSRF state 저장."""
+    from backend.services.integrations.qbo import generate_csrf_state, _save_tokens
+    client = _get_qbo_client()
+
+    state = generate_csrf_state(entity_id)
+    # state를 settings에 저장
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO settings (key, value, entity_id, updated_at)
+        VALUES ('qbo_oauth_state', %s, %s, NOW())
+        ON CONFLICT (key, entity_id) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+        """,
+        [state, entity_id],
+    )
+    cur.close()
+    conn.commit()
+
+    auth_url = client.get_auth_url(state)
+    client.close()
+    return {"auth_url": auth_url}
+
+
+@router.get("/quickbooks/callback")
+def quickbooks_callback(
+    code: str = "",
+    state: str = "",
+    realmId: str = "",
+    conn: PgConnection = Depends(get_db),
+):
+    """OAuth callback — code → tokens 교환 → settings 저장 → frontend redirect."""
+    from backend.services.integrations.qbo import validate_csrf_state, _save_tokens
+
+    if not code or not state or not realmId:
+        return RedirectResponse("http://localhost:3000/settings?qbo=error&reason=missing_params")
+
+    # CSRF 검증: state에서 entity_id 추출
+    parts = state.split(":", 1)
+    if len(parts) != 2:
+        return RedirectResponse("http://localhost:3000/settings?qbo=error&reason=invalid_state")
+
+    try:
+        entity_id = int(parts[0])
+    except ValueError:
+        return RedirectResponse("http://localhost:3000/settings?qbo=error&reason=invalid_state")
+
+    # 저장된 state와 비교
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT value FROM settings WHERE key = 'qbo_oauth_state' AND entity_id = %s",
+        [entity_id],
+    )
+    stored_row = cur.fetchone()
+    cur.close()
+
+    if not stored_row or stored_row[0] != state:
+        return RedirectResponse("http://localhost:3000/settings?qbo=error&reason=csrf_mismatch")
+
+    # Token exchange
+    client = _get_qbo_client()
+    try:
+        tokens = client.exchange_code(code, realmId)
+        tokens["realm_id"] = realmId
+        _save_tokens(conn, entity_id, tokens)
+        conn.commit()
+        return RedirectResponse(f"http://localhost:3000/settings?qbo=connected")
+    except Exception as e:
+        logger.exception("QBO callback failed")
+        conn.rollback()
+        return RedirectResponse(f"http://localhost:3000/settings?qbo=error&reason=token_exchange")
+    finally:
+        client.close()
+
+
+@router.post("/quickbooks/sync")
+def quickbooks_sync(
+    body: QBOSyncRequest,
+    conn: PgConnection = Depends(get_db),
+):
+    """QBO accounts + transactions 동기화."""
+    client = _get_qbo_client()
+    try:
+        acct_result = client.sync_accounts(conn, body.entity_id)
+        txn_result = client.sync_transactions(conn, body.entity_id, body.start_date)
+        conn.commit()
+        return {
+            "accounts": acct_result,
+            "transactions": txn_result,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        client.close()
+
+
+@router.post("/quickbooks/seed-rules")
+def quickbooks_seed_rules(
+    body: QBOSeedRequest,
+    conn: PgConnection = Depends(get_db),
+):
+    """mapping_rules 시드 (80% 룰 + gaap_mapping 경유)."""
+    client = _get_qbo_client()
+    try:
+        result = client.seed_mapping_rules(conn, body.entity_id)
+        conn.commit()
+        return result
     except Exception:
         conn.rollback()
         raise

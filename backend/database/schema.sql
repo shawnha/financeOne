@@ -1,5 +1,5 @@
 -- FinanceOne v2 — DB Schema (Supabase PostgreSQL)
--- 21개 테이블 (14 + slack + journal + intercompany_pairs + consolidation_adjustments + card_settings)
+-- 23개 테이블 (14 + slack + journal + intercompany_pairs + consolidation_adjustments + card_settings + qbo_accounts + qbo_transaction_lines)
 -- Schema: financeone (hanahone-erp Supabase project)
 
 CREATE SCHEMA IF NOT EXISTS financeone;
@@ -245,6 +245,7 @@ CREATE TABLE IF NOT EXISTS mapping_rules (
   description_pattern  TEXT,            -- Slack 항목 설명 (예: "클로드 코드 API")
   vendor               TEXT,            -- Slack 파싱 거래처 (예: "Anthropic")
   category             TEXT,            -- Slack 파싱 카테고리 (예: "구독")
+  source               TEXT DEFAULT 'manual',  -- 'manual' | 'qbo_seed' | 'ai'
   created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -424,5 +425,35 @@ CREATE TABLE IF NOT EXISTS card_settings (
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_card_settings_no_cardnum
   ON card_settings (entity_id, source_type) WHERE card_number IS NULL;
+
+-- 22. qbo_accounts — QuickBooks Chart of Accounts
+CREATE TABLE IF NOT EXISTS qbo_accounts (
+  id               SERIAL PRIMARY KEY,
+  entity_id        INTEGER NOT NULL REFERENCES entities(id),
+  qbo_id           TEXT NOT NULL,
+  name             TEXT NOT NULL,
+  account_type     TEXT,
+  account_sub_type TEXT,
+  full_name        TEXT,
+  synced_at        TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(entity_id, qbo_id)
+);
+
+-- 23. qbo_transaction_lines — QBO 라인 레벨 거래
+CREATE TABLE IF NOT EXISTS qbo_transaction_lines (
+  id              SERIAL PRIMARY KEY,
+  entity_id       INTEGER NOT NULL REFERENCES entities(id),
+  qbo_txn_id      TEXT NOT NULL,
+  txn_type        TEXT,
+  txn_date        DATE,
+  payee           TEXT,
+  account_name    TEXT,
+  qbo_account_id  TEXT,
+  line_number     INTEGER DEFAULT 1,
+  memo            TEXT,
+  amount          NUMERIC(15,2),
+  synced_at       TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(entity_id, qbo_txn_id, qbo_account_id, line_number)
+);
 
 COMMIT;
