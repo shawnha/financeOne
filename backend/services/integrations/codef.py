@@ -284,21 +284,39 @@ class CodefClient:
         return connected_id
 
     # ── 은행 ────────────────────────────────────────────────
+    def get_bank_account_list(self, connected_id: str) -> dict:
+        """우리은행 보유계좌 조회. 첫 호출로 계좌번호 확보 후 거래내역 조회 가능."""
+        return self._request(
+            "/v1/kr/bank/b/account/account-list",
+            {"connectedId": connected_id, "organization": ORG_CODES["woori_bank"]},
+        )
+
     def get_bank_transactions(
         self,
         connected_id: str,
         start_date: str,
         end_date: str,
+        account: str,
+        order_by: str = "0",
+        inquiry_type: str = "1",
     ) -> list[dict]:
-        """우리은행 법인 거래내역 조회 (YYYYMMDD)."""
+        """우리은행 법인 거래내역 조회 (YYYYMMDD).
+
+        Args:
+            account: 계좌번호 (하이픈 제거 13자리)
+            order_by: '0'=오래된순, '1'=최신순
+            inquiry_type: '1'=일반조회 (default)
+        """
         return self._request(
             "/v1/kr/bank/b/account/transaction-list",
             {
                 "connectedId": connected_id,
                 "organization": ORG_CODES["woori_bank"],
+                "account": account,
                 "startDate": start_date,
                 "endDate": end_date,
-                "clientType": "B",
+                "orderBy": order_by,
+                "inquiryType": inquiry_type,
             },
         ).get("resTrHistoryList", [])
 
@@ -309,9 +327,22 @@ class CodefClient:
         connected_id: str,
         start_date: str,
         end_date: str,
+        account: Optional[str] = None,
     ) -> dict:
-        """우리은행 거래를 transactions 테이블에 동기화."""
-        raw_list = self.get_bank_transactions(connected_id, start_date, end_date)
+        """우리은행 거래를 transactions 테이블에 동기화.
+
+        account 미지정 시 계좌목록 조회 후 첫 KRW 입출금 계좌 자동 사용.
+        """
+        if not account:
+            acct_list = self.get_bank_account_list(connected_id)
+            deposit = acct_list.get("resDepositTrust", [])
+            if not deposit:
+                raise CodefError("등록된 입출금 계좌 없음")
+            account = deposit[0]["resAccount"]
+
+        raw_list = self.get_bank_transactions(
+            connected_id, start_date, end_date, account=account,
+        )
         cur = conn.cursor()
         synced = 0
         duplicates = 0
@@ -325,16 +356,20 @@ class CodefClient:
                 duplicates += 1
                 continue
 
+            # 체크카드 표시 (Excel 파서와 동일 — '체크우리' 적요)
+            is_check_card_memo = tx.get("memo") == "체크우리"
+
             cur.execute(
                 """
                 INSERT INTO transactions
                     (entity_id, date, amount, currency, type, description,
-                     counterparty, source_type, is_confirmed, is_cancel)
-                VALUES (%s, %s, %s, 'KRW', %s, %s, %s, 'codef_woori_bank', FALSE, FALSE)
+                     counterparty, source_type, is_confirmed, is_cancel, note)
+                VALUES (%s, %s, %s, 'KRW', %s, %s, %s, 'codef_woori_bank', FALSE, FALSE, %s)
                 """,
                 [
                     entity_id, tx["date"], float(tx["amount"]),
                     tx["type"], tx["description"], tx["counterparty"],
+                    f"체크카드" if is_check_card_memo else None,
                 ],
             )
             synced += 1
@@ -528,40 +563,48 @@ def _mask_card_number(raw: str) -> Optional[str]:
 
 
 def _normalize_bank_row(item: dict) -> Optional[dict]:
-    """Codef 은행 응답 → 정규화된 dict.
+    """Codef 우리은행 응답 → 정규화된 dict.
 
-    주요 필드:
+    실제 Codef 응답 구조 (우리은행 기업, 0020):
         resAccountTrDate: YYYYMMDD 거래일
-        resAccountIn:  입금액 (non-empty면 입금)
-        resAccountOut: 출금액
-        resAccountTrAmount: 거래금액 (in 또는 out 중 값 있는 쪽)
-        resAccountDesc:  적요
-        resAccountDesc1/2/3: 상세 적요 (counterparty 후보)
+        resAccountTrTime: HHMMSS 거래시각
+        resAccountIn:  입금액 ("0" 또는 금액 문자열)
+        resAccountOut: 출금액 ("0" 또는 금액 문자열)
+        resAccountDesc1: (대부분 비어있음)
+        resAccountDesc2: 적요 (예: '인터넷', '체크우리') — Excel '적요'에 해당
+        resAccountDesc3: 거래처명 — Excel '기재내용'에 해당
+        resAccountDesc4: 영업점/지점 (예: '아크로비스타금융센터')
+        resAfterTranBalance: 거래 후 잔액
+
+    Excel 파서와 일관된 필드 매핑:
+        memo = Desc2, counterparty = Desc3, description = "memo counterparty"
     """
     tx_date = _parse_codef_date(str(item.get("resAccountTrDate", "")))
     if not tx_date:
         return None
 
-    in_raw = item.get("resAccountIn", "") or ""
-    out_raw = item.get("resAccountOut", "") or ""
-    amount_raw = item.get("resAccountTrAmount", "") or in_raw or out_raw
+    in_amount = _parse_amount(item.get("resAccountIn", ""))
+    out_amount = _parse_amount(item.get("resAccountOut", ""))
 
-    amount = _parse_amount(amount_raw)
-    if amount == 0:
+    # in/out 둘 다 0이면 의미 없음
+    if in_amount == 0 and out_amount == 0:
         return None
 
-    # 입금/출금 결정 — in 필드에 값이 있으면 입금
-    in_amount = _parse_amount(in_raw)
-    tx_type = "in" if in_amount > 0 else "out"
+    if in_amount > 0:
+        amount = in_amount
+        tx_type = "in"
+    else:
+        amount = out_amount
+        tx_type = "out"
 
-    # 적요 우선순위: Desc1 > Desc > Desc2
-    desc1 = str(item.get("resAccountDesc1", "")).strip()
-    desc = str(item.get("resAccountDesc", "")).strip()
-    desc2 = str(item.get("resAccountDesc2", "")).strip()
-    desc3 = str(item.get("resAccountDesc3", "")).strip()
+    desc2 = str(item.get("resAccountDesc2", "") or "").strip()  # 적요/메모
+    desc3 = str(item.get("resAccountDesc3", "") or "").strip()  # 거래처
+    desc4 = str(item.get("resAccountDesc4", "") or "").strip()  # 영업점
 
-    description = desc1 or desc or desc2 or desc3 or "(적요 없음)"
-    counterparty = desc1 or desc2 or desc or "(미확인)"
+    counterparty = desc3 or desc4 or desc2 or "(미확인)"
+    description = f"{desc2} {desc3}".strip() or counterparty
+
+    balance_after = _parse_amount(item.get("resAfterTranBalance", ""))
 
     return {
         "date": tx_date,
@@ -569,6 +612,9 @@ def _normalize_bank_row(item: dict) -> Optional[dict]:
         "type": tx_type,
         "description": description[:500],
         "counterparty": counterparty[:200],
+        "memo": desc2[:100] or None,
+        "branch": desc4[:100] or None,
+        "balance_after": float(balance_after) if balance_after > 0 else None,
     }
 
 

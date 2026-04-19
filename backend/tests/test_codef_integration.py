@@ -77,41 +77,69 @@ def test_normalize_bank_row_incoming():
     item = {
         "resAccountTrDate": "20260315",
         "resAccountIn": "50000",
-        "resAccountOut": "",
-        "resAccountTrAmount": "50000",
-        "resAccountDesc1": "고객ABC 입금",
-        "resAccountDesc": "이체",
+        "resAccountOut": "0",
+        "resAccountDesc2": "이체",
+        "resAccountDesc3": "고객ABC",
     }
     result = _normalize_bank_row(item)
     assert result is not None
     assert result["date"] == "2026-03-15"
     assert result["amount"] == Decimal("50000")
     assert result["type"] == "in"
-    assert "고객ABC" in result["counterparty"]
+    assert result["counterparty"] == "고객ABC"
+    assert "이체" in result["description"]
 
 
 def test_normalize_bank_row_outgoing():
     item = {
         "resAccountTrDate": "20260315",
-        "resAccountIn": "",
+        "resAccountIn": "0",
         "resAccountOut": "1000000",
-        "resAccountTrAmount": "1000000",
-        "resAccountDesc": "월세 송금",
+        "resAccountDesc2": "인터넷",
+        "resAccountDesc3": "월세 송금",
+        "resAccountDesc4": "강남지점",
     }
     result = _normalize_bank_row(item)
     assert result is not None
     assert result["type"] == "out"
     assert result["amount"] == Decimal("1000000")
+    assert result["counterparty"] == "월세 송금"
+    assert result["memo"] == "인터넷"
+    assert result["branch"] == "강남지점"
+
+
+def test_normalize_bank_row_with_balance():
+    item = {
+        "resAccountTrDate": "20260315",
+        "resAccountIn": "0",
+        "resAccountOut": "5000",
+        "resAccountDesc3": "test",
+        "resAfterTranBalance": "12345678",
+    }
+    result = _normalize_bank_row(item)
+    assert result["balance_after"] == 12345678.0
 
 
 def test_normalize_bank_row_invalid_date():
-    item = {"resAccountTrDate": "", "resAccountTrAmount": "1000"}
+    item = {"resAccountTrDate": "", "resAccountIn": "1000"}
     assert _normalize_bank_row(item) is None
 
 
-def test_normalize_bank_row_zero_amount():
-    item = {"resAccountTrDate": "20260315", "resAccountTrAmount": "0"}
+def test_normalize_bank_row_both_zero():
+    item = {"resAccountTrDate": "20260315", "resAccountIn": "0", "resAccountOut": "0"}
     assert _normalize_bank_row(item) is None
+
+
+def test_normalize_bank_row_check_card_memo():
+    item = {
+        "resAccountTrDate": "20260315",
+        "resAccountIn": "0",
+        "resAccountOut": "5000",
+        "resAccountDesc2": "체크우리",
+        "resAccountDesc3": "스타벅스",
+    }
+    result = _normalize_bank_row(item)
+    assert result["memo"] == "체크우리"
 
 
 # ── 카드 정규화 ────────────────────────────────────
