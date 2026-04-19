@@ -161,7 +161,8 @@ def test_normalize_card_row_approval():
     assert result["type"] == "out"
     assert result["is_cancel"] is False
     assert result["counterparty"] == "스타벅스 서초점"
-    assert result["card_number"] == "****3456"
+    # API 응답 카드번호는 이미 마스킹 형태 (5275********1840)이므로 그대로 보존
+    assert result["card_number"] == "1234-5678-9012-3456"
     assert result["member_name"] == "홍길동"
 
 
@@ -342,7 +343,10 @@ def test_sync_card_approvals_inserts_and_dedups():
         },
     ]
 
-    with patch.object(client, "get_card_approvals", return_value=approvals), \
+    # 새 sync_card_approvals: get_card_list 1회 + 카드별 get_card_approvals
+    fake_cards = [{"resCardNo": "1234********3456", "resCardName": "TEST"}]
+    with patch.object(client, "get_card_list", return_value=fake_cards), \
+         patch.object(client, "get_card_approvals", return_value=approvals), \
          patch("backend.services.mapping_service.auto_map_transaction", return_value=None):
         conn = MagicMock()
         cur = MagicMock()

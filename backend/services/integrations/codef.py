@@ -209,7 +209,7 @@ class CodefClient:
             raise CodefError("No access_token in response")
         return self._token
 
-    def _request(self, endpoint: str, params: dict) -> dict:
+    def _request(self, endpoint: str, params: dict):
         token = self._get_token()
         # Codef 공식 SDK 패턴: body 전체를 URL-encoded JSON 문자열로 전송
         # (Content-Type: application/json 유지, data=quote(json.dumps(body)))
@@ -263,7 +263,8 @@ class CodefClient:
             if extra:
                 full_msg += f" | {extra}"
             raise CodefError(f"Codef error: {full_msg}")
-        return body if isinstance(body, dict) else {}
+        # data는 dict 또는 list 모두 가능 (예: card-list는 list)
+        return body if body is not None else {}
 
     # ── connected_id 관리 ───────────────────────────────────
     def create_connected_id(self, accounts: list[dict]) -> str:
@@ -484,31 +485,70 @@ class CodefClient:
         }
 
     # ── 카드 ────────────────────────────────────────────────
+    def get_card_list(self, connected_id: str, card_type: str) -> list[dict]:
+        """등록된 카드 목록 조회 — 카드번호·이름·종류 포함.
+
+        Codef 응답 예시:
+            [{
+                "resCardName": "CORPORATE Classic",
+                "resCardNo": "5275********1840",
+                "resCardType": "신용",
+                "resUserNm": "주식회사 한아원",
+                "resSleepYN": "N",
+            }, ...]
+        """
+        org_code = ORG_CODES.get(card_type)
+        if not org_code:
+            raise CodefError(f"Unknown card type: {card_type}")
+        data = self._request(
+            "/v1/kr/card/b/account/card-list",
+            {"connectedId": connected_id, "organization": org_code},
+        )
+        return data if isinstance(data, list) else []
+
     def get_card_approvals(
         self,
         connected_id: str,
         start_date: str,
         end_date: str,
         card_type: str = "lotte_card",
+        card_no: Optional[str] = None,
     ) -> list[dict]:
-        """카드 승인내역 조회 (롯데/우리/신한).
+        """카드 승인내역 조회.
 
         Args:
-            card_type: "lotte_card" | "woori_card" | "shinhan_card"
+            card_type: ORG_CODES 키 (lotte_card 등)
+            card_no: 카드번호 (마스킹 가능, 예: '5275********1840').
+                     None이면 첫번째 보유카드 자동 선택.
         """
         org_code = ORG_CODES.get(card_type)
         if not org_code:
             raise CodefError(f"Unknown card type: {card_type}")
 
-        return self._request(
+        if not card_no:
+            cards = self.get_card_list(connected_id, card_type)
+            if not cards:
+                raise CodefError(f"{card_type} 보유 카드 없음")
+            card_no = cards[0]["resCardNo"]
+
+        data = self._request(
             "/v1/kr/card/b/account/approval-list",
             {
                 "connectedId": connected_id,
                 "organization": org_code,
                 "startDate": start_date,
                 "endDate": end_date,
+                "inquiryType": "0",
+                "orderBy": "0",
+                "cardNo": card_no,
             },
-        ).get("resApprovalList", [])
+        )
+        # Codef 카드 응답: data가 list 직접이거나 dict.resApprovalList
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return data.get("resApprovalList", [])
+        return []
 
     def sync_card_approvals(
         self,
@@ -526,7 +566,33 @@ class CodefClient:
         if card_type not in CARD_ORGS:
             raise CodefError(f"Unknown card type: {card_type}")
 
-        raw_list = self.get_card_approvals(connected_id, start_date, end_date, card_type)
+        # 등록된 모든 카드 자동 발견 → 카드별 승인내역 통합
+        cards = self.get_card_list(connected_id, card_type)
+        if not cards:
+            raise CodefError(f"{card_type}: 보유 카드 없음 (card-list 빈 응답)")
+
+        raw_list: list[dict] = []
+        cards_summary: list[dict] = []
+        for card in cards:
+            card_no = card.get("resCardNo", "")
+            card_name = card.get("resCardName", "")
+            try:
+                approvals = self.get_card_approvals(
+                    connected_id, start_date, end_date, card_type, card_no=card_no,
+                )
+            except CodefError as e:
+                logger.warning("card %s (%s) approval-list 실패: %s", card_no, card_name, e)
+                approvals = []
+            # 각 row에 카드 식별 메타 부착
+            for a in approvals:
+                a["_codefCardNo"] = card_no
+                a["_codefCardName"] = card_name
+            raw_list.extend(approvals)
+            cards_summary.append({
+                "card_no": card_no, "card_name": card_name,
+                "fetched": len(approvals),
+            })
+
         source_type = f"codef_{card_type}"
 
         cur = conn.cursor()
@@ -638,11 +704,13 @@ class CodefClient:
 
         cur.close()
         logger.info(
-            "Codef card sync: entity=%d, card=%s, fetched=%d, synced=%d, dup=%d, cancel=%d, auto_mapped=%d, check_cancelled=%d",
-            entity_id, card_type, len(raw_list), synced, duplicates, cancels, auto_mapped, check_card_cancelled,
+            "Codef card sync: entity=%d, card=%s, cards=%d, fetched=%d, synced=%d, dup=%d, cancel=%d, auto_mapped=%d, check_cancelled=%d",
+            entity_id, card_type, len(cards), len(raw_list), synced, duplicates, cancels, auto_mapped, check_card_cancelled,
         )
         return {
             "card_type": card_type,
+            "cards_count": len(cards),
+            "cards": cards_summary,
             "synced": synced,
             "duplicates": duplicates,
             "cancels": cancels,
@@ -823,7 +891,9 @@ def _normalize_card_row(item: dict) -> Optional[dict]:
         or "(미확인)"
     ).strip()
 
-    card_no = _mask_card_number(str(item.get("resCardNo", "")))
+    # 카드번호: API 응답 자체가 마스킹된 형태 (예: 5275********1840)
+    raw_card = str(item.get("resCardNo") or item.get("_codefCardNo") or "").strip()
+    card_no = raw_card if raw_card else None
     member = str(item.get("resUserName", "") or item.get("resMemberName", "")).strip() or None
 
     description = counterparty + (" (취소)" if is_cancel else "")
