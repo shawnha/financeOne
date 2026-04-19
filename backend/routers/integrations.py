@@ -175,21 +175,24 @@ class CodefConnectionDeleteRequest(BaseModel):
 
 
 class CodefAccountSpec(BaseModel):
-    """Codef /v1/account/create 요청 단위. id/pw 로그인 또는 공동인증서."""
+    """Codef /v1/account/create 요청 단위. id/pw 로그인 또는 공동인증서.
+
+    우리은행(0020) 등 일부 기관은 공동인증서 의무 — loginType='0' + derFile + keyFile + password 필수.
+    """
     organization: str
     business_type: str = "BK"  # BK=bank, CD=card
     client_type: str = "B"  # B=법인, P=개인
-    login_type: str = "1"  # "0"=cert, "1"=id/pw
+    login_type: str = "1"  # "0"=공동인증서, "1"=id/pw
 
-    # id/pw 로그인
+    # id/pw 로그인 (loginType=1)
     login_id: Optional[str] = None
-    login_password: Optional[str] = None  # plain — 서버에서 base64 인코딩
+    login_password: Optional[str] = None  # plain → 서버에서 RSA+base64
 
-    # 공동인증서 로그인 (프로덕션)
-    cert_file_b64: Optional[str] = None  # 이미 base64 encoded signCert.der
-    key_file_b64: Optional[str] = None   # 이미 base64 encoded signPri.key
-    cert_password: Optional[str] = None  # plain — base64 인코딩 후 전송
-    cert_type: Optional[str] = None  # 예: "001" 등 Codef 명세
+    # 공동인증서 (loginType=0)
+    # Codef SDK 표준 필드명: derFile, keyFile, password(=cert 비번)
+    der_file_b64: Optional[str] = None   # base64-encoded signCert.der
+    key_file_b64: Optional[str] = None   # base64-encoded signPri.key
+    cert_password: Optional[str] = None  # plain → 서버에서 RSA+base64
 
     @field_validator("organization")
     @classmethod
@@ -383,18 +386,15 @@ def codef_connect(
                 account["id"] = spec.login_id
                 account["password"] = encrypt_password(spec.login_password)
             else:
-                if not is_production():
-                    logger.warning("cert auth requested in non-production env")
-                if not (spec.cert_file_b64 and spec.key_file_b64 and spec.cert_password):
+                # 공동인증서 — Codef SDK 표준 필드: derFile, keyFile, password
+                if not (spec.der_file_b64 and spec.key_file_b64 and spec.cert_password):
                     raise HTTPException(
                         400,
-                        "cert_file_b64 + key_file_b64 + cert_password required for cert auth",
+                        "der_file_b64 + key_file_b64 + cert_password required for cert auth",
                     )
-                account["certFile"] = spec.cert_file_b64
+                account["derFile"] = spec.der_file_b64
                 account["keyFile"] = spec.key_file_b64
-                account["certPassword"] = encrypt_password(spec.cert_password)
-                if spec.cert_type:
-                    account["certType"] = spec.cert_type
+                account["password"] = encrypt_password(spec.cert_password)
 
             account_list.append(account)
     except CodefError as e:

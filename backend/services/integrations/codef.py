@@ -187,20 +187,40 @@ class CodefClient:
 
         result = data.get("result", {})
         result_code = result.get("code", "")
+        body = data.get("data", {})
+
+        # /v1/account/create 는 부분 성공 가능 — errorList에 실패 기관별 사유
+        # result.code=CF-00000이어도 errorList에 내용 있을 수 있음 (부분 성공)
+        error_list = body.get("errorList") if isinstance(body, dict) else None
+        if error_list:
+            first = error_list[0]
+            item_code = first.get("code", "")
+            item_msg = first.get("message", "")
+            item_extra = first.get("extraMessage", "")
+            masked_params = _mask_sensitive(params)
+            logger.warning(
+                "Codef per-account error: code=%s msg=%s extra=%s payload=%s",
+                item_code, item_msg, item_extra, masked_params,
+            )
+            # 전체 응답도 실패로 취급
+            full = f"{item_code} - {item_msg}"
+            if item_extra:
+                full += f" | {item_extra}"
+            raise CodefError(f"Codef 계정 등록 실패: {full}")
+
         if result_code != "CF-00000":
             msg = result.get("message", "")
             extra = result.get("extraMessage", "") or result.get("extraInfo", "")
-            # 진단 로그 — payload는 비밀번호 마스킹 후
             masked_params = _mask_sensitive(params)
             logger.warning(
                 "Codef non-OK response: code=%s msg=%s extra=%s endpoint=%s payload=%s data=%s",
-                result_code, msg, extra, endpoint, masked_params, data.get("data"),
+                result_code, msg, extra, endpoint, masked_params, body,
             )
             full_msg = f"{result_code} - {msg}"
             if extra:
                 full_msg += f" | {extra}"
             raise CodefError(f"Codef error: {full_msg}")
-        return data.get("data", {})
+        return body if isinstance(body, dict) else {}
 
     # ── connected_id 관리 ───────────────────────────────────
     def create_connected_id(self, accounts: list[dict]) -> str:

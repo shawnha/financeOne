@@ -89,8 +89,13 @@ function SettingsContent() {
   const [codefStatus, setCodefStatus] = useState<CodefStatus | null>(null)
   const [codefEntityId, setCodefEntityId] = useState(2)
   const [codefConnectOrg, setCodefConnectOrg] = useState<CodefOrg | null>(null)
+  const [codefAuthMode, setCodefAuthMode] = useState<"idpw" | "cert">("idpw")
   const [codefLoginId, setCodefLoginId] = useState("")
   const [codefLoginPw, setCodefLoginPw] = useState("")
+  const [codefCertPw, setCodefCertPw] = useState("")
+  const [codefDerFileB64, setCodefDerFileB64] = useState("")
+  const [codefKeyFileB64, setCodefKeyFileB64] = useState("")
+  const [codefCertFileName, setCodefCertFileName] = useState("")
   const [codefSyncStart, setCodefSyncStart] = useState(() => {
     const d = new Date()
     return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}01`
@@ -176,32 +181,62 @@ function SettingsContent() {
     }
   }
 
+  const resetCodefForm = () => {
+    setCodefLoginId("")
+    setCodefLoginPw("")
+    setCodefCertPw("")
+    setCodefDerFileB64("")
+    setCodefKeyFileB64("")
+    setCodefCertFileName("")
+    setCodefConnectOrg(null)
+    setCodefAuthMode("idpw")
+  }
+
+  const handleCertFile = async (
+    file: File,
+    kind: "der" | "key",
+  ) => {
+    const buf = await file.arrayBuffer()
+    const b64 = btoa(
+      new Uint8Array(buf).reduce((s, b) => s + String.fromCharCode(b), ""),
+    )
+    if (kind === "der") setCodefDerFileB64(b64)
+    else setCodefKeyFileB64(b64)
+    setCodefCertFileName((prev) =>
+      prev ? `${prev}, ${file.name}` : file.name,
+    )
+  }
+
   const connectCodefOrg = async () => {
     if (!codefConnectOrg) return
     setTesting("codef-connect")
     setCodefError(null)
     try {
       const isBank = codefConnectOrg === "woori_bank"
+      const account: Record<string, unknown> = {
+        organization: codefConnectOrg,
+        business_type: isBank ? "BK" : "CD",
+        client_type: "B",
+      }
+      if (codefAuthMode === "idpw") {
+        account.login_type = "1"
+        account.login_id = codefLoginId
+        account.login_password = codefLoginPw
+      } else {
+        account.login_type = "0"
+        account.der_file_b64 = codefDerFileB64
+        account.key_file_b64 = codefKeyFileB64
+        account.cert_password = codefCertPw
+      }
       await fetchAPI("/integrations/codef/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           entity_id: codefEntityId,
-          accounts: [
-            {
-              organization: codefConnectOrg,
-              business_type: isBank ? "BK" : "CD",
-              client_type: "B",
-              login_type: "1",
-              login_id: codefLoginId,
-              login_password: codefLoginPw,
-            },
-          ],
+          accounts: [account],
         }),
       })
-      setCodefLoginId("")
-      setCodefLoginPw("")
-      setCodefConnectOrg(null)
+      resetCodefForm()
       await loadCodefStatus()
     } catch (err) {
       setCodefError(err instanceof Error ? err.message : "연결 실패")
@@ -412,13 +447,25 @@ function SettingsContent() {
           </p>
 
           <div className="flex gap-2 items-center">
-            <label className="text-xs text-muted-foreground">entity_id</label>
-            <Input
-              type="number"
-              value={codefEntityId}
-              onChange={(e) => setCodefEntityId(Number(e.target.value) || 2)}
-              className="w-20 h-8 text-xs"
-            />
+            <label className="text-xs text-muted-foreground">법인</label>
+            <div className="flex rounded-md overflow-hidden border border-border">
+              {[
+                { id: 2, name: "한아원코리아" },
+                { id: 3, name: "한아원리테일" },
+              ].map((e) => (
+                <button
+                  key={e.id}
+                  onClick={() => setCodefEntityId(e.id)}
+                  className={`px-3 py-1 text-xs transition-colors ${
+                    codefEntityId === e.id
+                      ? "bg-accent/20 text-accent"
+                      : "bg-transparent text-muted-foreground hover:bg-secondary/50"
+                  }`}
+                >
+                  {e.name}
+                </button>
+              ))}
+            </div>
             <Button
               variant="outline"
               size="sm"
@@ -432,6 +479,9 @@ function SettingsContent() {
               )}
             </Button>
           </div>
+          <p className="text-xs text-muted-foreground/70 -mt-2">
+            법인별로 은행·카드 연결이 독립적이에요 — 한아원코리아와 한아원리테일은 각자 별도 연결.
+          </p>
 
           {codefStatus && !codefStatus.configured && (
             <div className="text-sm text-red-500">
@@ -541,33 +591,109 @@ function SettingsContent() {
               </div>
 
               {codefConnectOrg && (
-                <div className="space-y-2 rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3">
-                  <div className="text-sm font-medium">{codefConnectOrg} 연결</div>
-                  <p className="text-xs text-muted-foreground">
-                    {codefStatus.environment === "production"
-                      ? "⚠️ 프로덕션 — id/pw 외 공동인증서도 필요할 수 있습니다. API 직접 호출 권장."
-                      : "샌드박스 — Codef 테스트 id/pw 입력"}
-                  </p>
-                  <Input
-                    placeholder="login id"
-                    value={codefLoginId}
-                    onChange={(e) => setCodefLoginId(e.target.value)}
-                    className="h-8 text-sm"
-                  />
-                  <Input
-                    type="password"
-                    placeholder="login password"
-                    value={codefLoginPw}
-                    onChange={(e) => setCodefLoginPw(e.target.value)}
-                    className="h-8 text-sm"
-                  />
+                <div className="space-y-3 rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-medium">{codefConnectOrg} 연결</div>
+                    <div className="flex rounded-md overflow-hidden border border-border">
+                      {[
+                        { key: "idpw" as const, label: "ID/PW" },
+                        { key: "cert" as const, label: "공동인증서" },
+                      ].map((m) => (
+                        <button
+                          key={m.key}
+                          onClick={() => setCodefAuthMode(m.key)}
+                          className={`px-2 py-1 text-xs ${
+                            codefAuthMode === m.key
+                              ? "bg-accent/20 text-accent"
+                              : "bg-transparent text-muted-foreground hover:bg-secondary/50"
+                          }`}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {codefConnectOrg === "woori_bank" && codefAuthMode === "idpw" && (
+                    <p className="text-xs text-yellow-500">
+                      ⚠️ 우리은행 기업뱅킹은 Codef에서 공동인증서 필수입니다. ID/PW로는 실패합니다.
+                    </p>
+                  )}
+
+                  {codefAuthMode === "idpw" ? (
+                    <>
+                      <Input
+                        placeholder="기관 사이트 login id"
+                        value={codefLoginId}
+                        onChange={(e) => setCodefLoginId(e.target.value)}
+                        className="h-8 text-sm"
+                      />
+                      <Input
+                        type="password"
+                        placeholder="기관 사이트 login password"
+                        value={codefLoginPw}
+                        onChange={(e) => setCodefLoginPw(e.target.value)}
+                        className="h-8 text-sm"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs text-muted-foreground">
+                        공동인증서 경로: <code>~/NPKI/yessign/USER/cn=*/</code> — signCert.der(인증서) + signPri.key(개인키)
+                      </p>
+                      <div>
+                        <label className="text-xs text-muted-foreground block mb-1">
+                          signCert.der (공동인증서 파일)
+                        </label>
+                        <input
+                          type="file"
+                          accept=".der,application/octet-stream"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0]
+                            if (f) handleCertFile(f, "der")
+                          }}
+                          className="text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground block mb-1">
+                          signPri.key (개인키 파일)
+                        </label>
+                        <input
+                          type="file"
+                          accept=".key,application/octet-stream"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0]
+                            if (f) handleCertFile(f, "key")
+                          }}
+                          className="text-xs"
+                        />
+                      </div>
+                      <Input
+                        type="password"
+                        placeholder="공동인증서 비밀번호"
+                        value={codefCertPw}
+                        onChange={(e) => setCodefCertPw(e.target.value)}
+                        className="h-8 text-sm"
+                      />
+                      {codefCertFileName && (
+                        <p className="text-xs text-muted-foreground/70">
+                          선택됨: {codefCertFileName}
+                        </p>
+                      )}
+                    </>
+                  )}
+
                   <div className="flex gap-2">
                     <Button
                       variant="default"
                       size="sm"
                       onClick={connectCodefOrg}
                       disabled={
-                        testing === "codef-connect" || !codefLoginId || !codefLoginPw
+                        testing === "codef-connect" ||
+                        (codefAuthMode === "idpw"
+                          ? !codefLoginId || !codefLoginPw
+                          : !codefDerFileB64 || !codefKeyFileB64 || !codefCertPw)
                       }
                     >
                       {testing === "codef-connect" ? (
@@ -578,11 +704,7 @@ function SettingsContent() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => {
-                        setCodefConnectOrg(null)
-                        setCodefLoginId("")
-                        setCodefLoginPw("")
-                      }}
+                      onClick={resetCodefForm}
                     >
                       취소
                     </Button>
