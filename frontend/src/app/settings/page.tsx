@@ -110,6 +110,22 @@ const CODEF_ORG_ORDER: CodefOrg[] = [
 
 const CODEF_BANK_ORGS = new Set<CodefOrg>(["woori_bank", "ibk_bank"])
 
+interface GowidStatus {
+  configured: boolean
+  connected: boolean
+  last_sync?: string | null
+  synced_count?: number
+}
+
+interface GowidSyncResult {
+  synced: number
+  duplicates: number
+  auto_mapped: number
+  unmapped: number
+  skipped: number
+  by_issuer: Record<string, number>
+}
+
 interface ExpenseOneStatus {
   configured: boolean
   connected: boolean
@@ -159,6 +175,17 @@ function SettingsContent() {
   const [qboStatus, setQboStatus] = useState<ConnectionStatus | null>(null)
   const [qboSyncResult, setQboSyncResult] = useState<QBOSyncResult | null>(null)
   const [qboSeedResult, setQboSeedResult] = useState<QBOSeedResult | null>(null)
+  const [gowidStatus, setGowidStatus] = useState<GowidStatus | null>(null)
+  const [gowidSyncResult, setGowidSyncResult] = useState<GowidSyncResult | null>(null)
+  const [gowidError, setGowidError] = useState<string | null>(null)
+  const [gowidStart, setGowidStart] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`
+  })
+  const [gowidEnd, setGowidEnd] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+  })
   const [expenseoneStatus, setExpenseoneStatus] = useState<ExpenseOneStatus | null>(null)
   const [expenseoneSyncResult, setExpenseoneSyncResult] = useState<ExpenseOneSyncResult | null>(null)
   const [expenseoneError, setExpenseoneError] = useState<string | null>(null)
@@ -170,6 +197,38 @@ function SettingsContent() {
       .then(setExpenseoneStatus)
       .catch(() => setExpenseoneStatus({ configured: false, connected: false, error: "fetch failed" }))
   }, [])
+
+  // Gowid 초기 status 로드
+  useEffect(() => {
+    fetchAPI<GowidStatus>("/integrations/gowid/status?entity_id=2")
+      .then(setGowidStatus)
+      .catch(() => setGowidStatus({ configured: false, connected: false }))
+  }, [])
+
+  const syncGowid = async () => {
+    setTesting("gowid-sync")
+    setGowidError(null)
+    setGowidSyncResult(null)
+    try {
+      const r = await fetchAPI<GowidSyncResult>("/integrations/gowid/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entity_id: 2,
+          start_date: gowidStart,
+          end_date: gowidEnd,
+        }),
+      })
+      setGowidSyncResult(r)
+      // status 새로고침
+      fetchAPI<GowidStatus>("/integrations/gowid/status?entity_id=2")
+        .then(setGowidStatus).catch(() => {})
+    } catch (err) {
+      setGowidError(err instanceof Error ? err.message : "동기화 실패")
+    } finally {
+      setTesting(null)
+    }
+  }
 
   // Codef 초기 status 로드
   useEffect(() => {
@@ -1008,6 +1067,98 @@ function SettingsContent() {
                 </p>
               )}
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Gowid (법인카드 차선책) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Wifi className="h-5 w-5" />
+            Gowid 법인카드 (차선책)
+            {gowidStatus?.connected && (
+              <span className="text-xs rounded px-2 py-0.5 ml-2 bg-emerald-500/20 text-emerald-400">
+                connected
+              </span>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Codef 롯데카드 직접 연결이 차단된 동안 우회 경로. 고위드 OpenAPI로 법인카드 거래(롯데/우리/신한 등) 통합 sync.
+            Codef 정상화되면 끊을 수 있음.
+          </p>
+          {!gowidStatus?.configured && (
+            <p className="text-xs text-yellow-500">
+              GOWID_API_KEY 환경변수 미설정
+            </p>
+          )}
+          {gowidStatus?.configured && (
+            <>
+              <div className="grid grid-cols-2 gap-3 text-xs text-muted-foreground">
+                <div>
+                  <span className="text-muted-foreground/70">동기화된 거래</span>
+                  <p className="font-mono text-sm text-foreground tabular-nums">
+                    {gowidStatus.synced_count ?? 0}건
+                  </p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground/70">마지막 동기화</span>
+                  <p className="text-sm text-foreground">
+                    {gowidStatus.last_sync
+                      ? new Date(gowidStatus.last_sync).toLocaleString("ko-KR")
+                      : "—"}
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2 items-center">
+                <Input
+                  value={gowidStart}
+                  onChange={(e) => setGowidStart(e.target.value)}
+                  className="w-32 h-8 text-xs font-mono"
+                  placeholder="2026-04-01"
+                />
+                <span className="text-xs text-muted-foreground">~</span>
+                <Input
+                  value={gowidEnd}
+                  onChange={(e) => setGowidEnd(e.target.value)}
+                  className="w-32 h-8 text-xs font-mono"
+                  placeholder="2026-04-20"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={syncGowid}
+                  disabled={testing === "gowid-sync"}
+                >
+                  {testing === "gowid-sync" ? (
+                    <RefreshCw className="h-4 w-4 animate-spin mr-1" />
+                  ) : null}
+                  동기화
+                </Button>
+              </div>
+              {gowidError && (
+                <div className="text-sm text-red-500">
+                  <XCircle className="inline h-4 w-4 mr-1" />
+                  {gowidError}
+                </div>
+              )}
+              {gowidSyncResult && (
+                <div className="text-sm space-y-1 rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3">
+                  <p className="text-foreground">
+                    신규 <span className="text-green-400">{gowidSyncResult.synced}</span>건,
+                    자동매핑 <span className="text-green-400">{gowidSyncResult.auto_mapped}</span>건,
+                    중복 <span className="text-muted-foreground">{gowidSyncResult.duplicates}</span>건
+                  </p>
+                  {Object.entries(gowidSyncResult.by_issuer || {}).length > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      카드사별: {Object.entries(gowidSyncResult.by_issuer).map(([k, v]) => `${k} ${v}`).join(" · ")}
+                    </p>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

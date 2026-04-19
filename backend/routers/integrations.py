@@ -710,6 +710,96 @@ def quickbooks_seed_rules(
         client.close()
 
 
+# --- Gowid (법인카드 차선책) ---
+
+
+class GowidSyncRequest(BaseModel):
+    entity_id: int = 2
+    start_date: str  # ISO YYYY-MM-DD
+    end_date: str
+
+    @field_validator("start_date", "end_date")
+    @classmethod
+    def _iso_date(cls, v: str) -> str:
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", v):
+            raise ValueError("date must be YYYY-MM-DD")
+        return v
+
+
+def _get_gowid_client():
+    from backend.services.integrations.gowid import GowidClient
+    key = os.environ.get("GOWID_API_KEY", "").strip()
+    if not key:
+        raise HTTPException(400, "GOWID_API_KEY not configured")
+    return GowidClient(key)
+
+
+@router.get("/gowid/status")
+def gowid_status(
+    entity_id: int = 2,
+    conn: PgConnection = Depends(get_db),
+):
+    """Gowid 연결 상태 + 마지막 sync 시각."""
+    configured = bool(os.environ.get("GOWID_API_KEY"))
+
+    if not configured:
+        return {
+            "configured": False, "connected": False,
+            "last_sync": None, "synced_count": 0,
+        }
+
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT COUNT(*), MAX(updated_at)
+        FROM transactions
+        WHERE entity_id = %s AND source_type = 'gowid_card'
+        """,
+        [entity_id],
+    )
+    row = cur.fetchone()
+    cur.close()
+
+    try:
+        client = _get_gowid_client()
+        connected = client.health()
+        client.close()
+    except Exception:
+        connected = False
+
+    return {
+        "configured": True,
+        "connected": connected,
+        "synced_count": row[0] if row else 0,
+        "last_sync": row[1].isoformat() if row and row[1] else None,
+    }
+
+
+@router.post("/gowid/sync")
+def gowid_sync(
+    body: GowidSyncRequest,
+    conn: PgConnection = Depends(get_db),
+):
+    """Gowid 거래 동기화."""
+    from backend.services.integrations.gowid import GowidError
+    client = _get_gowid_client()
+    try:
+        result = client.sync_expenses(
+            conn, body.entity_id, body.start_date, body.end_date,
+        )
+        conn.commit()
+        return result
+    except GowidError as e:
+        conn.rollback()
+        raise HTTPException(400, f"Gowid sync 실패: {str(e)}")
+    except Exception as e:
+        conn.rollback()
+        logger.exception("Gowid sync failed")
+        raise HTTPException(500, f"내부 오류: {type(e).__name__}")
+    finally:
+        client.close()
+
+
 # --- ExpenseOne ---
 
 class ExpenseOneSyncRequest(BaseModel):
