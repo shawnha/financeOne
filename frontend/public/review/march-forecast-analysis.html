@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3월 카드 Forecast 분석 — 한아원코리아</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Pretendard', sans-serif; background: #0a0a0a; color: #e5e5e5; padding: 40px; line-height: 1.6; }
+  .container { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+  h2 { font-size: 20px; font-weight: 600; margin: 40px 0 16px; color: #fafafa; border-bottom: 1px solid #333; padding-bottom: 8px; }
+  h3 { font-size: 16px; font-weight: 600; margin: 24px 0 12px; color: #a3a3a3; }
+  .subtitle { color: #737373; font-size: 14px; margin-bottom: 32px; }
+  .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 32px; }
+  .summary-card { background: #171717; border: 1px solid #262626; border-radius: 12px; padding: 20px; }
+  .summary-card .label { font-size: 12px; color: #737373; text-transform: uppercase; letter-spacing: 0.5px; }
+  .summary-card .big { font-size: 24px; font-weight: 700; margin-top: 8px; }
+  .summary-card .sub { font-size: 13px; color: #737373; margin-top: 4px; }
+  .plus { color: #22c55e; }
+  .minus { color: #ef4444; }
+  .warn { color: #f59e0b; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 24px; font-size: 13px; }
+  th { text-align: left; padding: 10px 12px; background: #171717; border-bottom: 2px solid #333; color: #a3a3a3; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  td { padding: 8px 12px; border-bottom: 1px solid #1f1f1f; font-variant-numeric: tabular-nums; }
+  tr:hover td { background: #1a1a1a; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+  .tag-in { background: #052e16; color: #4ade80; }
+  .tag-out { background: #2a0a0a; color: #f87171; }
+  .tag-missing { background: #422006; color: #fbbf24; }
+  .tag-ok { background: #052e16; color: #4ade80; }
+  .tag-card { background: #1e1b4b; color: #a78bfa; }
+  .tag-lotte { background: #1e1b4b; color: #a78bfa; }
+  .tag-woori { background: #172554; color: #60a5fa; }
+  .num { text-align: right; }
+  .gap-box { font-size: 16px; font-weight: 600; padding: 16px 20px; background: #1c1917; border-left: 3px solid #f59e0b; border-radius: 0 8px 8px 0; margin: 16px 0; }
+  .bar-wrap { margin: 16px 0; }
+  .bar-label { display: flex; justify-content: space-between; font-size: 12px; color: #a3a3a3; margin-bottom: 4px; }
+  .bar { height: 32px; border-radius: 6px; overflow: hidden; background: #262626; position: relative; }
+  .bar-fill { height: 100%; display: flex; align-items: center; padding-left: 8px; font-size: 11px; font-weight: 600; color: white; }
+  .bar-forecast { background: #3b82f6; }
+  .bar-actual { background: #f59e0b; }
+  .action-box { background: #171717; border: 1px solid #262626; border-radius: 12px; padding: 24px; margin: 16px 0; }
+  .action-box h4 { font-size: 15px; font-weight: 600; margin-bottom: 12px; color: #fafafa; }
+  .action-box p { font-size: 13px; color: #a3a3a3; margin-bottom: 8px; }
+  .action-box ol, .action-box ul { margin-left: 20px; font-size: 13px; color: #d4d4d4; }
+  .action-box li { margin-bottom: 6px; }
+  .action-box code { background: #262626; padding: 2px 6px; border-radius: 4px; font-size: 12px; color: #fbbf24; }
+  .step-num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: #3b82f6; color: white; border-radius: 50%; font-size: 12px; font-weight: 700; margin-right: 8px; }
+  .note { background: #172554; border: 1px solid #1e3a5f; border-radius: 8px; padding: 12px 16px; margin: 12px 0; font-size: 13px; color: #93c5fd; }
+  .divider { border: none; border-top: 1px solid #262626; margin: 32px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>3월 예상 vs 실제 — 카드 중심 분석</h1>
+<p class="subtitle">한아원코리아 (2026년 3월)</p>
+
+<!-- 핵심 요약 -->
+<div class="summary-grid">
+  <div class="summary-card">
+    <div class="label">카드 예상 (forecast)</div>
+    <div class="big" style="color:#3b82f6;">9,787,017</div>
+    <div class="sub">3개 항목 (식비, 교통, 사무용품)</div>
+  </div>
+  <div class="summary-card">
+    <div class="label">카드 실제 사용</div>
+    <div class="big" style="color:#f59e0b;">40,272,418</div>
+    <div class="sub">29개 항목, 660건</div>
+  </div>
+  <div class="summary-card">
+    <div class="label">카드 forecast 누락</div>
+    <div class="big class" style="color:#ef4444;">-30,485,401</div>
+    <div class="sub">커버리지 24% (3/29 항목)</div>
+  </div>
+</div>
+
+<div class="gap-box">
+  카드 forecast에 <strong>3개 항목</strong>만 등록되어 있어서 <strong>26개 항목, 약 3,049만원</strong>이 빠져 있습니다.
+</div>
+
+<!-- 비주얼 바 -->
+<div class="bar-wrap">
+  <div class="bar-label"><span>카드 Forecast 커버리지</span><span>24%</span></div>
+  <div class="bar"><div class="bar-fill bar-forecast" style="width:24%;">980만</div></div>
+  <div class="bar"><div class="bar-fill bar-actual" style="width:100%;">4,027만 (실제)</div></div>
+  <div style="display:flex;gap:16px;margin-top:6px;font-size:11px;color:#737373;">
+    <span><span style="display:inline-block;width:10px;height:10px;background:#3b82f6;border-radius:2px;margin-right:4px;vertical-align:middle;"></span>예상</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:2px;margin-right:4px;vertical-align:middle;"></span>실제</span>
+  </div>
+</div>
+
+<div class="note">
+  참고: 정식결제(1,806만)와 선결제(1,703만)는 <strong>2월 카드대금 정산</strong>으로, 3월 카드 사용과 별개입니다.
+  카드 시차보정에서 처리되므로 이 분석에서는 제외합니다.
+</div>
+
+<!-- Forecast에 있는 카드 항목 -->
+<h2>Forecast에 있는 카드 항목 (3개)</h2>
+
+<table>
+  <thead><tr><th>항목</th><th class="num">예상</th><th class="num">실제</th><th class="num">차이</th><th>정확도</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>식비</td><td class="num">7,990,717</td><td class="num">8,371,298</td>
+      <td class="num warn">+380,581</td><td><span class="tag tag-ok">95%</span></td>
+    </tr>
+    <tr>
+      <td>교통</td><td class="num">1,657,600</td><td class="num">1,753,700</td>
+      <td class="num warn">+96,100</td><td><span class="tag tag-ok">94%</span></td>
+    </tr>
+    <tr>
+      <td>사무용품/소모품</td><td class="num">138,700</td><td class="num">20,000</td>
+      <td class="num plus">-118,700</td><td><span class="tag tag-ok">-</span></td>
+    </tr>
+    <tr style="border-top:2px solid #333;font-weight:600;">
+      <td>소계</td><td class="num">9,787,017</td><td class="num">10,144,998</td>
+      <td class="num">+357,981</td><td><span class="tag tag-ok">96%</span></td>
+    </tr>
+  </tbody>
+</table>
+<p style="font-size:13px;color:#4ade80;">등록된 항목은 정확도가 높습니다. 문제는 등록 안 된 항목들입니다.</p>
+
+<!-- Forecast에 없는 카드 항목 -->
+<h2>Forecast에 없는 카드 항목 (26개) — 3,013만원 누락</h2>
+
+<table>
+  <thead><tr><th>항목</th><th>카드</th><th class="num">3월 실제</th><th>건수</th><th>매월 반복?</th><th>권장</th></tr></thead>
+  <tbody>
+    <tr style="background:#1c1917;">
+      <td><strong>기타 구독</strong></td><td><span class="tag tag-lotte">롯데</span> <span class="tag tag-woori">우리</span></td>
+      <td class="num"><strong>9,441,377</strong></td><td>52건</td><td>매월</td><td class="warn"><strong>반복 등록 필수</strong></td>
+    </tr>
+    <tr style="background:#1c1917;">
+      <td><strong>AI SaaS</strong></td><td><span class="tag tag-lotte">롯데</span> <span class="tag tag-woori">우리</span></td>
+      <td class="num"><strong>5,299,272</strong></td><td>47건</td><td>매월</td><td class="warn"><strong>반복 등록 필수</strong></td>
+    </tr>
+    <tr style="background:#1c1917;">
+      <td><strong>출장</strong></td><td><span class="tag tag-lotte">롯데</span> <span class="tag tag-woori">우리</span></td>
+      <td class="num"><strong>4,612,143</strong></td><td>51건</td><td>매월</td><td class="warn"><strong>반복 등록 필수</strong></td>
+    </tr>
+    <tr style="background:#1c1917;">
+      <td><strong>ODD 광고비</strong></td><td><span class="tag tag-lotte">롯데</span> <span class="tag tag-woori">우리</span></td>
+      <td class="num"><strong>4,872,751</strong></td><td>67건</td><td>매월</td><td class="warn"><strong>반복 등록 필수</strong></td>
+    </tr>
+    <tr>
+      <td>회식</td><td><span class="tag tag-lotte">롯데</span></td>
+      <td class="num">1,473,000</td><td>2건</td><td>비정기</td><td>예상 추가 권장</td>
+    </tr>
+    <tr style="background:#1c1917;">
+      <td><strong>간식/커피</strong></td><td><span class="tag tag-lotte">롯데</span></td>
+      <td class="num"><strong>802,479</strong></td><td>62건</td><td>매월</td><td class="warn"><strong>반복 등록 필수</strong></td>
+    </tr>
+    <tr style="background:#1c1917;">
+      <td><strong>리테일식비</strong></td><td><span class="tag tag-lotte">롯데</span></td>
+      <td class="num"><strong>592,100</strong></td><td>26건</td><td>매월</td><td class="warn"><strong>반복 등록 필수</strong></td>
+    </tr>
+    <tr style="background:#1c1917;">
+      <td><strong>Admin 구독</strong></td><td><span class="tag tag-lotte">롯데</span> <span class="tag tag-woori">우리</span></td>
+      <td class="num"><strong>610,594</strong></td><td>2건</td><td>매월</td><td class="warn"><strong>반복 등록 필수</strong></td>
+    </tr>
+    <tr style="background:#1c1917;">
+      <td><strong>주차/주유</strong></td><td><span class="tag tag-lotte">롯데</span></td>
+      <td class="num"><strong>583,400</strong></td><td>37건</td><td>매월</td><td class="warn"><strong>반복 등록 필수</strong></td>
+    </tr>
+    <tr>
+      <td>제작 외주</td><td><span class="tag tag-lotte">롯데</span></td>
+      <td class="num">572,000</td><td>3건</td><td>비정기</td><td>발생 시 등록</td>
+    </tr>
+    <tr>
+      <td>사무용품</td><td><span class="tag tag-lotte">롯데</span></td>
+      <td class="num">366,900</td><td>8건</td><td>비정기</td><td>예상 추가 권장</td>
+    </tr>
+    <tr>
+      <td>마트약국 광고비</td><td><span class="tag tag-woori">우리</span></td>
+      <td class="num">300,000</td><td>1건</td><td>비정기</td><td>발생 시 등록</td>
+    </tr>
+    <tr style="background:#1c1917;">
+      <td><strong>api 결제</strong></td><td><span class="tag tag-lotte">롯데</span></td>
+      <td class="num"><strong>284,015</strong></td><td>5건</td><td>매월</td><td class="warn"><strong>반복 등록 필수</strong></td>
+    </tr>
+    <tr>
+      <td>워크샵</td><td><span class="tag tag-lotte">롯데</span></td>
+      <td class="num">67,800</td><td>3건</td><td>비정기</td><td>발생 시 등록</td>
+    </tr>
+    <tr>
+      <td>ODD</td><td><span class="tag tag-lotte">롯데</span></td>
+      <td class="num">67,259</td><td>2건</td><td>비정기</td><td>소액</td>
+    </tr>
+    <tr style="background:#1c1917;">
+      <td><strong>정수기 렌탈</strong></td><td><span class="tag tag-woori">우리</span></td>
+      <td class="num"><strong>43,900</strong></td><td>1건</td><td>매월</td><td class="warn"><strong>반복 등록</strong></td>
+    </tr>
+    <tr style="background:#1c1917;">
+      <td><strong>가전 렌탈</strong></td><td><span class="tag tag-lotte">롯데</span></td>
+      <td class="num"><strong>38,700</strong></td><td>2건</td><td>매월</td><td class="warn"><strong>반복 등록</strong></td>
+    </tr>
+    <tr>
+      <td>배송비</td><td><span class="tag tag-lotte">롯데</span></td>
+      <td class="num">31,630</td><td>3건</td><td>비정기</td><td>소액</td>
+    </tr>
+    <tr>
+      <td>기타</td><td><span class="tag tag-lotte">롯데</span></td>
+      <td class="num">54,900</td><td>4건</td><td>비정기</td><td>소액</td>
+    </tr>
+    <tr>
+      <td>사무용품/소모품</td><td><span class="tag tag-lotte">롯데</span></td>
+      <td class="num">20,000</td><td>1건</td><td>비정기</td><td>소액</td>
+    </tr>
+    <tr>
+      <td>세금/공과</td><td><span class="tag tag-lotte">롯데</span></td>
+      <td class="num">13,200</td><td>4건</td><td>비정기</td><td>소액</td>
+    </tr>
+    <tr style="border-top:2px solid #333;font-weight:600;">
+      <td>누락 합계</td><td></td>
+      <td class="num minus">30,127,420</td><td>660건</td><td></td><td></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- 핵심: 반복 등록하면 얼마나 개선되는지 -->
+<h2>반복 항목 11개만 등록하면</h2>
+
+<div class="summary-grid">
+  <div class="summary-card">
+    <div class="label">현재 카드 커버리지</div>
+    <div class="big" style="color:#ef4444;">24%</div>
+    <div class="sub">3개 항목 / 980만</div>
+  </div>
+  <div class="summary-card">
+    <div class="label">11개 추가 후</div>
+    <div class="big" style="color:#22c55e;">93%</div>
+    <div class="sub">14개 항목 / 3,747만</div>
+  </div>
+  <div class="summary-card">
+    <div class="label">남는 미예상</div>
+    <div class="big" style="color:#a3a3a3;">~293만</div>
+    <div class="sub">비정기 소액 (허용 범위)</div>
+  </div>
+</div>
+
+<table>
+  <thead><tr><th>추가할 항목</th><th class="num">3월 실제</th><th class="num">추천 예상금액</th><th>비고</th></tr></thead>
+  <tbody>
+    <tr><td>기타 구독</td><td class="num">9,441,377</td><td class="num">9,400,000</td><td>SaaS 구독료 (다수)</td></tr>
+    <tr><td>AI SaaS</td><td class="num">5,299,272</td><td class="num">5,300,000</td><td>Claude, OpenAI 등</td></tr>
+    <tr><td>ODD 광고비</td><td class="num">4,872,751</td><td class="num">4,800,000</td><td>Meta/Google Ads</td></tr>
+    <tr><td>출장</td><td class="num">4,612,143</td><td class="num">4,600,000</td><td>항공/숙박/일비</td></tr>
+    <tr><td>간식/커피</td><td class="num">802,479</td><td class="num">800,000</td><td>사내 간식</td></tr>
+    <tr><td>Admin 구독</td><td class="num">610,594</td><td class="num">600,000</td><td>관리 도구</td></tr>
+    <tr><td>리테일식비</td><td class="num">592,100</td><td class="num">600,000</td><td>리테일팀 식비</td></tr>
+    <tr><td>주차/주유</td><td class="num">583,400</td><td class="num">580,000</td><td>법인차량</td></tr>
+    <tr><td>api 결제</td><td class="num">284,015</td><td class="num">280,000</td><td>API 사용료</td></tr>
+    <tr><td>정수기 렌탈</td><td class="num">43,900</td><td class="num">44,000</td><td>고정비</td></tr>
+    <tr><td>가전 렌탈</td><td class="num">38,700</td><td class="num">39,000</td><td>고정비</td></tr>
+    <tr style="border-top:2px solid #333;font-weight:600;">
+      <td>추가 합계</td><td class="num">27,180,731</td><td class="num">27,043,000</td><td></td>
+    </tr>
+  </tbody>
+</table>
+
+<hr class="divider">
+
+<!-- 은행 지출 forecast도 간단히 -->
+<h2>참고: 은행 지출 Forecast (시차보정 제외)</h2>
+<p style="font-size:13px;color:#a3a3a3;margin-bottom:12px;">은행 이체 항목은 비교적 정확하지만, 누락 항목이 있습니다</p>
+
+<table>
+  <thead><tr><th>항목</th><th class="num">예상</th><th class="num">실제</th><th>상태</th></tr></thead>
+  <tbody>
+    <tr><td>급여</td><td class="num">38,175,346</td><td class="num">36,564,033</td><td><span class="tag tag-ok">96%</span></td></tr>
+    <tr><td>임차료</td><td class="num">9,114,930</td><td class="num">8,892,950</td><td><span class="tag tag-ok">97%</span></td></tr>
+    <tr><td>4대보험</td><td class="num">7,191,730</td><td class="num">8,048,200</td><td><span class="tag tag-ok">89%</span></td></tr>
+    <tr><td>국세/지방세</td><td class="num">3,206,980</td><td class="num">813,790</td><td><span class="tag tag-missing">75% 과다</span></td></tr>
+    <tr><td>개발 외주</td><td class="num">3,000,250</td><td class="num">3,000,000</td><td><span class="tag tag-ok">100%</span></td></tr>
+    <tr style="background:#1c1917;"><td>통관</td><td class="num">-</td><td class="num">24,410,198</td><td><span class="tag tag-missing">누락</span></td></tr>
+    <tr style="background:#1c1917;"><td>기타 (은행)</td><td class="num">-</td><td class="num">19,728,400</td><td><span class="tag tag-missing">누락</span></td></tr>
+    <tr style="background:#1c1917;"><td>패키징 외주</td><td class="num">-</td><td class="num">6,600,250</td><td><span class="tag tag-missing">누락</span></td></tr>
+    <tr style="background:#1c1917;"><td>퇴직금</td><td class="num">-</td><td class="num">6,021,200</td><td><span class="tag tag-missing">누락</span></td></tr>
+  </tbody>
+</table>
+<p style="font-size:13px;color:#a3a3a3;">통관/기타/퇴직금/패키징은 비정기라 발생 확정 시 수동 등록 필요.</p>
+
+<hr class="divider">
+
+<!-- 수입 forecast -->
+<h2>참고: 수입 Forecast</h2>
+<table>
+  <thead><tr><th>항목</th><th class="num">예상</th><th class="num">실제</th><th>상태</th></tr></thead>
+  <tbody>
+    <tr><td>시스템 사용료</td><td class="num">22,000,000</td><td class="num">33,000,000</td><td><span class="tag tag-missing">+1,100만</span></td></tr>
+    <tr><td>인프라 구축비</td><td class="num">10,000,000</td><td class="num">10,000,000</td><td><span class="tag tag-ok">100%</span></td></tr>
+    <tr style="background:#1c1917;"><td>스마트스토어</td><td class="num">-</td><td class="num">31,063,343</td><td><span class="tag tag-missing">누락 — 반복 등록 권장</span></td></tr>
+    <tr style="background:#1c1917;"><td>차입금</td><td class="num">-</td><td class="num">40,000,000</td><td><span class="tag tag-missing">비정기</span></td></tr>
+    <tr style="background:#1c1917;"><td>사업권 계약금</td><td class="num">-</td><td class="num">20,000,000</td><td><span class="tag tag-missing">비정기</span></td></tr>
+  </tbody>
+</table>
+
+<hr class="divider">
+
+<!-- How to 가이드 -->
+<h2>Forecast 항목 등록 방법</h2>
+
+<div class="action-box">
+  <h4><span class="step-num">1</span> 내부계정을 "반복"으로 설정</h4>
+  <p>먼저 해당 내부계정의 반복 속성을 켜야 합니다.</p>
+  <ol>
+    <li><strong>내부 계정</strong> 페이지 (<code>localhost:3000/accounts</code>) 접속</li>
+    <li>비용 트리에서 해당 계정 찾기 (예: "기타 구독", "AI SaaS")</li>
+    <li>계정 클릭 → 편집 → <strong>"반복" 체크</strong> → 저장</li>
+  </ol>
+  <p style="color:#93c5fd;">반복으로 설정된 계정만 "전월 반복 가져오기"에 포함됩니다.</p>
+</div>
+
+<div class="action-box">
+  <h4><span class="step-num">2</span> 예상 탭에서 항목 추가</h4>
+  <ol>
+    <li><strong>현금흐름</strong> 페이지 (<code>localhost:3000/cashflow</code>) 접속</li>
+    <li><strong>"예상" 탭</strong> 클릭</li>
+    <li>해당 월 선택</li>
+    <li>지출 섹션에서 <strong>"+ 항목 추가"</strong> 클릭</li>
+    <li>내부계정 선택 → 예상 금액 입력 → 결제방식 <code>card</code> 선택 → 저장</li>
+  </ol>
+</div>
+
+<div class="action-box">
+  <h4><span class="step-num">3</span> 매월 초: "전월 반복 가져오기"</h4>
+  <p>새로운 달이 시작되면:</p>
+  <ol>
+    <li>현금흐름 → 예상 탭 → 해당 월 선택</li>
+    <li><strong>"전월 반복 가져오기"</strong> 버튼 클릭</li>
+    <li>반복 설정된 항목이 자동 복사됨</li>
+    <li>금액 변동이 있으면 수정</li>
+  </ol>
+</div>
+
+<div style="margin-top:40px;padding:20px;background:#052e16;border:1px solid #166534;border-radius:12px;">
+  <h4 style="margin-bottom:12px;color:#4ade80;">요약: 이것만 하면 됩니다</h4>
+  <ol style="font-size:14px;margin-left:20px;color:#d1fae5;">
+    <li style="margin-bottom:8px;">내부계정 11개를 <strong>"반복"으로 설정</strong> (기타구독, AI SaaS, 출장, 광고비, 간식, 리테일식비, Admin구독, 주차/주유, api결제, 정수기, 가전렌탈)</li>
+    <li style="margin-bottom:8px;">4월 예상에 위 11개 항목 <strong>추가 + 금액 입력</strong></li>
+    <li style="margin-bottom:8px;">스마트스토어(수입)도 반복 등록</li>
+    <li style="margin-bottom:8px;">비정기 대형 항목(통관, 퇴직금 등)은 <strong>확정 시 수동 등록</strong></li>
+  </ol>
+  <p style="font-size:13px;color:#86efac;margin-top:12px;">이렇게 하면 카드 커버리지 24% → 93%, 전체 forecast 정확도 대폭 개선.</p>
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>is_recurring 설계 논의 — FinanceOne</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Pretendard', sans-serif; background: #0a0a0a; color: #e5e5e5; padding: 40px; line-height: 1.7; }
+  .container { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
+  h2 { font-size: 18px; font-weight: 600; margin: 36px 0 14px; color: #fafafa; border-bottom: 1px solid #333; padding-bottom: 8px; }
+  .subtitle { color: #737373; font-size: 14px; margin-bottom: 28px; }
+  .box { background: #171717; border: 1px solid #262626; border-radius: 12px; padding: 24px; margin: 16px 0; }
+  .box h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+  .box p, .box li { font-size: 13px; color: #d4d4d4; }
+  .box ul, .box ol { margin-left: 20px; }
+  .box li { margin-bottom: 6px; }
+  .gap-box { padding: 16px 20px; background: #1c1917; border-left: 3px solid #f59e0b; border-radius: 0 8px 8px 0; margin: 16px 0; font-size: 14px; }
+  .good-box { padding: 16px 20px; background: #052e16; border-left: 3px solid #22c55e; border-radius: 0 8px 8px 0; margin: 16px 0; font-size: 14px; }
+  .bad-box { padding: 16px 20px; background: #2a0a0a; border-left: 3px solid #ef4444; border-radius: 0 8px 8px 0; margin: 16px 0; font-size: 14px; }
+  code { background: #262626; padding: 2px 6px; border-radius: 4px; font-size: 12px; color: #fbbf24; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 13px; }
+  th { text-align: left; padding: 10px 12px; background: #171717; border-bottom: 2px solid #333; color: #a3a3a3; font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  td { padding: 8px 12px; border-bottom: 1px solid #1f1f1f; }
+  tr:hover td { background: #1a1a1a; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+  .tag-yes { background: #052e16; color: #4ade80; }
+  .tag-no { background: #422006; color: #fbbf24; }
+  .tag-bug { background: #2a0a0a; color: #f87171; }
+  .diagram { background: #111; border: 1px solid #333; border-radius: 8px; padding: 20px; margin: 16px 0; font-family: monospace; font-size: 12px; line-height: 1.8; white-space: pre; overflow-x: auto; color: #a3a3a3; }
+  .diagram .highlight { color: #f59e0b; }
+  .diagram .good { color: #4ade80; }
+  .diagram .bad { color: #f87171; }
+  .vs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  .vs-card { background: #171717; border: 1px solid #262626; border-radius: 12px; padding: 20px; }
+  .vs-card h4 { font-size: 14px; margin-bottom: 10px; }
+  .vs-card .label { font-size: 11px; color: #737373; text-transform: uppercase; margin-bottom: 4px; }
+  .option-card { background: #171717; border: 2px solid #262626; border-radius: 12px; padding: 24px; margin: 16px 0; transition: border-color 0.2s; }
+  .option-card:hover { border-color: #525252; }
+  .option-card.recommended { border-color: #3b82f6; }
+  .option-card h4 { font-size: 15px; margin-bottom: 8px; }
+  .option-card .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; margin-left: 8px; }
+  .badge-rec { background: #1e3a5f; color: #60a5fa; }
+  .option-card p { font-size: 13px; color: #a3a3a3; margin-bottom: 6px; }
+  .pros-cons { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; font-size: 12px; }
+  .pros li { color: #4ade80; }
+  .cons li { color: #f87171; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>is_recurring 설계 논의</h1>
+<p class="subtitle">"고정"으로 체크했는데 왜 forecast에 안 나오지?</p>
+
+<!-- 문제 정의 -->
+<h2>1. 현재 어떻게 동작하는가</h2>
+
+<div class="diagram">
+<span class="highlight">내부계정 관리</span>에서 "고정" 체크
+        │
+        ▼
+  internal_accounts.<span class="highlight">is_recurring</span> = TRUE
+        │
+        │  <span class="bad">✗ forecast에 자동 반영 없음</span>
+        │
+        ▼
+  <span class="highlight">예상 탭</span>에서 수동으로 항목 추가  ← <span class="bad">여기서 빠뜨리면 영원히 누락</span>
+        │
+        ▼
+  forecasts 테이블에 행 생성 (is_recurring = TRUE)
+        │
+        ▼
+  다음 달: <span class="good">"전월 반복 가져오기"</span> 클릭
+        │
+        ▼
+  forecasts.<span class="highlight">is_recurring</span> = TRUE인 행만 복사
+        │
+        │  <span class="bad">✗ internal_accounts.is_recurring은 무시</span>
+        ▼
+  새 달 forecast 생성
+</div>
+
+<div class="bad-box">
+  <strong>문제:</strong> <code>is_recurring</code>이 두 곳에 존재합니다.
+  내부계정(internal_accounts)과 예상(forecasts) 각각에 있고, <strong>서로 연결되어 있지 않습니다.</strong><br>
+  내부계정에서 "고정"을 체크해도 forecast에는 아무 일도 일어나지 않습니다.
+</div>
+
+<!-- 사용자 기대 vs 현실 -->
+<h2>2. 기대 vs 현실</h2>
+
+<div class="vs-grid">
+  <div class="vs-card">
+    <div class="label">사용자 기대</div>
+    <h4 style="color:#4ade80;">"고정 = 매달 자동으로 forecast에 포함"</h4>
+    <p style="font-size:13px;color:#a3a3a3;">
+      임차료를 "고정"으로 체크하면,<br>
+      4월 예상을 열었을 때 임차료가<br>
+      이미 들어가 있어야 한다.
+    </p>
+  </div>
+  <div class="vs-card">
+    <div class="label">실제 동작</div>
+    <h4 style="color:#f87171;">"고정 = 전월 복사 시 필터 조건일 뿐"</h4>
+    <p style="font-size:13px;color:#a3a3a3;">
+      "전월 반복 가져오기" 버튼을 눌러야 하고,<br>
+      <strong>전월 forecast에 없으면 복사 자체가 안 됨.</strong><br>
+      최초 1회 수동 등록이 반드시 필요.
+    </p>
+  </div>
+</div>
+
+<div class="gap-box">
+  결과: 22개 반복 계정 중 <strong>11개</strong>가 forecast에 빠져 있음. 이 11개의 3월 실제 지출 합계: <strong>약 3,100만원</strong>
+</div>
+
+<!-- 이것이 설계 결함인가? -->
+<h2>3. 이것은 설계 결함인가?</h2>
+
+<div class="box">
+  <h3>설계 결함이라고 볼 수 있는 이유</h3>
+  <ul>
+    <li><strong>기대 불일치:</strong> "고정"이라는 UI 라벨은 "매달 고정적으로 나간다"를 의미. 하지만 실제로는 forecast 생성과 무관</li>
+    <li><strong>이중 상태:</strong> 같은 개념(반복 여부)이 두 테이블에 따로 존재하며 동기화 안 됨</li>
+    <li><strong>빠뜨리기 쉬움:</strong> 새 반복 계정 추가 → 내부계정에서 "고정" 체크 → 예상에 수동 등록을 깜빡함 → 해당 항목이 영원히 forecast에서 누락</li>
+    <li><strong>실제 피해:</strong> 3월 forecast 정확도가 24%(카드)인 주요 원인</li>
+  </ul>
+</div>
+
+<div class="box">
+  <h3>하지만 현재 방식이 의도적일 수 있는 이유</h3>
+  <ul>
+    <li><strong>금액 문제:</strong> "고정"은 "반복 발생"이지, "금액이 매달 같다"는 아님. AI SaaS 구독은 매달 다름 (사용량에 따라). 자동 생성하려면 금액을 어디서 가져올지 정해야 함</li>
+    <li><strong>검토 강제:</strong> 매월 수동으로 확인하고 금액을 조정하는 것이 더 정확한 forecast를 만들 수 있음</li>
+    <li><strong>오염 방지:</strong> 실적 없는 계정이 자동으로 forecast에 들어가면 noise가 됨 (예: "패키징 외주"가 3개월째 0원인데 매달 forecast에 나옴)</li>
+  </ul>
+</div>
+
+<!-- 핵심 트레이드오프 -->
+<h2>4. 핵심 트레이드오프</h2>
+
+<div class="diagram">
+  <span class="good">자동 생성</span>                         <span class="highlight">수동 관리 (현재)</span>
+
+  장점:                                장점:
+  • 빠뜨림 없음                         • 금액을 매달 검토
+  • 새 반복 계정 추가 시 즉시 반영        • 불필요한 항목 없음
+  • is_recurring의 의미가 명확            • 사용자가 완전한 통제
+
+  단점:                                단점:
+  • 금액을 어디서 가져올까?              • <span class="bad">11개 항목 누락 (실제 발생)</span>
+  • 0원인 달에도 항목이 보임              • <span class="bad">forecast 정확도 24% (카드)</span>
+  • "이 항목 왜 있지?" 피로감              • <span class="bad">is_recurring의 존재 이유 불명확</span>
+</div>
+
+<!-- 선택지 -->
+<h2>5. 세 가지 접근법</h2>
+
+<div class="option-card recommended">
+  <h4>A. 자동 생성 + 검토 UI <span class="badge badge-rec">추천</span></h4>
+  <p>매월 초 forecast 열 때, <code>is_recurring=TRUE</code>인데 해당 월 forecast에 없는 계정을 자동 감지 → "추가 제안" 배너로 표시 → 사용자가 한 번에 확인/추가/무시 선택</p>
+  <div class="pros-cons">
+    <div>
+      <strong style="color:#a3a3a3;">장점</strong>
+      <ul class="pros">
+        <li>빠뜨림 방지</li>
+        <li>금액을 사용자가 직접 확인</li>
+        <li>강제 삽입 아님 — 제안일 뿐</li>
+        <li>is_recurring의 의미가 명확해짐</li>
+      </ul>
+    </div>
+    <div>
+      <strong style="color:#a3a3a3;">단점</strong>
+      <ul class="cons">
+        <li>UI 추가 필요 (제안 배너)</li>
+        <li>제안 금액 기준 필요 (전월 실적? 평균?)</li>
+      </ul>
+    </div>
+  </div>
+  <div style="margin-top:12px;padding:12px;background:#0f172a;border-radius:8px;font-size:12px;color:#93c5fd;">
+    <strong>동작 방식:</strong><br>
+    예상 탭 열기 → "반복 항목 중 3개가 빠져있습니다" 배너 → [전부 추가] [하나씩 확인] [무시]<br>
+    금액 기준: 최근 3개월 평균 (실적 없으면 0원으로 표시 + 입력 요청)
+  </div>
+</div>
+
+<div class="option-card">
+  <h4>B. 완전 자동 생성 (Silent)</h4>
+  <p><code>is_recurring=TRUE</code> 계정은 매월 forecast에 자동 삽입. 금액은 전월 실적 또는 최근 3개월 평균. 사용자가 삭제할 수 있음.</p>
+  <div class="pros-cons">
+    <div>
+      <ul class="pros">
+        <li>가장 간단 — 빠뜨림 완전 제거</li>
+        <li>"전월 반복 가져오기" 불필요</li>
+      </ul>
+    </div>
+    <div>
+      <ul class="cons">
+        <li>실적 없는 항목도 들어감 (noise)</li>
+        <li>금액이 자동이라 검증 안 하고 넘길 수 있음</li>
+        <li>"이 항목 왜 있지?" 피로감</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="option-card">
+  <h4>C. 현재 유지 + 경고 추가</h4>
+  <p>현재 수동 방식 유지. 단, <code>is_recurring=TRUE</code>인데 forecast에 없는 항목이 있으면 경고 표시.</p>
+  <div class="pros-cons">
+    <div>
+      <ul class="pros">
+        <li>변경 최소 — 경고 UI만 추가</li>
+        <li>사용자 통제 유지</li>
+      </ul>
+    </div>
+    <div>
+      <ul class="cons">
+        <li>여전히 수동 등록 필요</li>
+        <li>경고를 무시하면 동일 문제 반복</li>
+        <li>is_recurring의 이중 상태 미해결</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- is_recurring이 진짜 필요한가? -->
+<h2>6. 더 깊은 질문: is_recurring이 두 곳에 필요한가?</h2>
+
+<div class="box">
+  <p>현재 이중 상태의 근본 원인:</p>
+  <table>
+    <thead><tr><th>위치</th><th>역할</th><th>필요한가?</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>internal_accounts.is_recurring</code></td>
+        <td>"이 계정은 매달 발생하는 항목이다"</td>
+        <td><span class="tag tag-yes">필요</span> — 계정의 성격을 정의</td>
+      </tr>
+      <tr>
+        <td><code>forecasts.is_recurring</code></td>
+        <td>"이 forecast 행을 다음 달로 복사할까"</td>
+        <td><span class="tag tag-no">불필요할 수 있음</span> — internal_accounts에서 파생 가능</td>
+      </tr>
+    </tbody>
+  </table>
+  <p style="margin-top:12px;">
+    만약 <strong>Option A</strong>를 선택하면, <code>forecasts.is_recurring</code>은 더 이상 필요 없습니다.<br>
+    "전월 반복 가져오기"도 <code>internal_accounts.is_recurring</code>을 직접 참조하면 됩니다.<br>
+    단일 진실 소스: <strong>internal_accounts.is_recurring</strong>
+  </p>
+</div>
+
+<div class="diagram">
+  <span class="good">Option A 적용 후:</span>
+
+  내부계정에서 "고정" 체크
+        │
+        ▼
+  internal_accounts.<span class="good">is_recurring</span> = TRUE  ← <span class="good">단일 진실 소스</span>
+        │
+        ▼
+  예상 탭 열기
+        │
+        ▼
+  자동 감지: is_recurring=TRUE인데 forecast 없는 항목
+        │
+        ▼
+  <span class="good">"반복 항목 N개가 빠져있습니다"</span> 배너 표시
+        │
+        ├── [전부 추가] → 최근 3개월 평균으로 자동 생성
+        ├── [하나씩 확인] → 개별 확인 UI
+        └── [무시] → 이번 달은 스킵
+</div>
+
+<div style="margin-top:40px;padding:20px;background:#171717;border-radius:12px;border:1px solid #262626;">
+  <h4 style="margin-bottom:12px;">결론</h4>
+  <p style="font-size:14px;color:#d4d4d4;">
+    현재 구조는 <strong>설계 결함</strong>입니다. "고정"이라는 라벨이 약속하는 것과 시스템이 하는 것이 다릅니다.<br><br>
+    <strong>추천: Option A</strong> — 자동 감지 + 제안 배너. 강제 삽입은 아니지만, 빠뜨린 항목을 확실히 잡아줍니다.<br>
+    <code>forecasts.is_recurring</code>은 폐기하고, <code>internal_accounts.is_recurring</code>을 단일 진실 소스로 사용합니다.
+  </p>
+</div>
+
+</div>
+</body>
+</html>

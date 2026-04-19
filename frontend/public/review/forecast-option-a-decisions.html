@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Forecast Option A — 결정 포인트 리뷰</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Pretendard', sans-serif; background: #0a0a0a; color: #e5e5e5; padding: 40px; line-height: 1.65; }
+  .container { max-width: 1040px; margin: 0 auto; padding-bottom: 200px; }
+  h1 { font-size: 28px; font-weight: 700; margin-bottom: 6px; }
+  h2 { font-size: 20px; font-weight: 600; margin: 44px 0 14px; color: #fafafa; }
+  h2 .num { color: #3b82f6; margin-right: 8px; font-variant-numeric: tabular-nums; }
+  h3 { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: #d4d4d4; }
+  .subtitle { color: #737373; font-size: 14px; margin-bottom: 28px; }
+  .meta { font-size: 12px; color: #737373; margin-bottom: 36px; padding: 14px 18px; background: #0f1419; border: 1px solid #1f2937; border-radius: 8px; }
+  .meta strong { color: #60a5fa; }
+  .problem { padding: 16px 20px; background: #1c1917; border-left: 3px solid #f59e0b; border-radius: 0 8px 8px 0; margin: 14px 0 20px; font-size: 13px; color: #d4d4d4; }
+  .problem strong { color: #fbbf24; }
+  code { background: #1f1f1f; padding: 2px 6px; border-radius: 4px; font-size: 12px; color: #fbbf24; }
+  .options { display: grid; gap: 12px; }
+  .option { background: #121212; border: 1.5px solid #262626; border-radius: 12px; padding: 18px 22px; cursor: pointer; transition: all 0.15s; position: relative; display: flex; gap: 14px; align-items: flex-start; }
+  .option:hover { border-color: #404040; background: #171717; }
+  .option input[type=radio] { margin-top: 4px; accent-color: #3b82f6; transform: scale(1.2); }
+  .option.recommended { border-color: #1e40af; background: linear-gradient(135deg, #0a1633 0%, #121212 60%); }
+  .option input[type=radio]:checked ~ .option-body { }
+  .option:has(input:checked) { border-color: #3b82f6; box-shadow: 0 0 0 1px #3b82f6 inset; }
+  .option-body { flex: 1; }
+  .option-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+  .option-id { font-weight: 700; color: #60a5fa; font-size: 15px; }
+  .option-title { font-size: 14px; font-weight: 600; color: #f5f5f5; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 10px; font-weight: 600; letter-spacing: 0.3px; text-transform: uppercase; }
+  .badge-rec { background: #1e3a5f; color: #93c5fd; }
+  .badge-risk { background: #422006; color: #fbbf24; }
+  .badge-block { background: #2a0a0a; color: #f87171; }
+  .option p { font-size: 12.5px; color: #a3a3a3; margin-bottom: 4px; }
+  .option .trade { display: flex; gap: 14px; margin-top: 10px; font-size: 11.5px; flex-wrap: wrap; }
+  .trade-item { padding: 3px 9px; background: #1f1f1f; border-radius: 6px; color: #a3a3a3; }
+  .trade-item strong { color: #e5e5e5; }
+  .rec-note { margin-top: 14px; padding: 10px 14px; background: #0c1c2e; border-left: 2px solid #3b82f6; border-radius: 0 6px 6px 0; font-size: 12.5px; color: #93c5fd; }
+  .rec-note strong { color: #60a5fa; }
+  .summary-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #121212; border-top: 2px solid #3b82f6; padding: 16px 40px; box-shadow: 0 -4px 20px rgba(0,0,0,0.5); z-index: 100; }
+  .summary-inner { max-width: 1040px; margin: 0 auto; display: flex; align-items: center; gap: 20px; justify-content: space-between; flex-wrap: wrap; }
+  .summary-text { flex: 1; min-width: 300px; }
+  .summary-text .label { font-size: 11px; color: #737373; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .summary-text .code { font-family: 'SF Mono', 'JetBrains Mono', monospace; font-size: 15px; color: #60a5fa; font-weight: 600; letter-spacing: 1px; }
+  .summary-text .progress { font-size: 12px; color: #a3a3a3; margin-top: 3px; }
+  .copy-btn { padding: 11px 22px; background: #3b82f6; color: #fff; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+  .copy-btn:hover { background: #2563eb; }
+  .copy-btn:active { transform: scale(0.98); }
+  .copy-btn.copied { background: #16a34a; }
+  .scope-banner { background: #052e16; border: 1px solid #14532d; border-radius: 10px; padding: 16px 20px; margin-bottom: 32px; font-size: 13px; color: #86efac; display: flex; align-items: center; gap: 12px; }
+  .scope-banner .icon { font-size: 18px; }
+  .scope-banner strong { color: #4ade80; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.7 } }
+  .option:has(input:checked) .option-id { animation: pulse 1.2s ease-in-out 2; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Forecast Option A — 결정 포인트 리뷰</h1>
+  <div class="subtitle">매월 반복 감지 배너 · 아키텍처·UX 결정 6건</div>
+
+  <div class="meta">
+    <strong>리뷰 범위</strong>: /plan-eng-review 진행 중 · Scope Reduction 적용됨 (a만, b 는 TODOS)<br>
+    <strong>다음 단계</strong>: 이 페이지에서 각 결정 선택 → 하단 "결정 코드" 복사해서 채팅창에 붙여넣기 → Section 2~4 리뷰 계속
+  </div>
+
+  <div class="scope-banner">
+    <span class="icon">✓</span>
+    <span><strong>Scope Reduction 확정</strong> — 이번 PR은 "누락 감지 + 배너 + 일괄 추가" 만.
+    <code>copy-recurring</code> 로직 수정(is_recurring 단일 진실 소스)은 Phase 3/4 로 defer.</span>
+  </div>
+
+  <!-- ======================= Decision 1 ======================= -->
+  <h2><span class="num">1.</span>type ('in'/'out') 추론 전략</h2>
+  <div class="problem">
+    <strong>문제</strong>: <code>internal_accounts</code> 테이블에 <code>type</code> 컬럼이 없는데
+    <code>forecasts</code> UNIQUE constraint 는 <code>(entity_id, year, month, internal_account_id, type)</code> 에 포함.
+    → missing-recurring API 가 type 없이는 forecast 행을 만들 수 없음. 어떻게 추론할지.
+  </div>
+  <div class="options">
+
+    <label class="option recommended">
+      <input type="radio" name="d1" value="1A" data-default>
+      <div class="option-body">
+        <div class="option-head">
+          <span class="option-id">1A</span>
+          <span class="option-title">최근 3개월 transactions 다수결 (majority vote)</span>
+          <span class="badge badge-rec">추천</span>
+        </div>
+        <p>각 <code>internal_account_id</code> 의 최근 3개월 거래에서 <code>type='in'</code> vs <code>'out'</code> 카운트 → 다수결</p>
+        <p>정확도 ~99% (환불/조정만 소수 섞임). 거래 0건이면 NULL → 배너에 "타입 미확정" 배지.</p>
+        <div class="trade">
+          <span class="trade-item"><strong>Human:</strong> ~15분</span>
+          <span class="trade-item"><strong>CC:</strong> ~3분</span>
+          <span class="trade-item"><strong>Completeness:</strong> 9/10</span>
+          <span class="trade-item"><strong>Layer:</strong> 1 (standard SQL)</span>
+        </div>
+      </div>
+    </label>
+
+    <label class="option">
+      <input type="radio" name="d1" value="1B">
+      <div class="option-body">
+        <div class="option-head">
+          <span class="option-id">1B</span>
+          <span class="option-title">standard_accounts 분류 경유 (자산/부채/수익/비용)</span>
+          <span class="badge badge-block">블로킹 위험</span>
+        </div>
+        <p>internal → standard_account_id → type 매핑 (수익→in, 비용→out)</p>
+        <p>⚠ 많은 internal_account 의 <code>standard_account_id</code> 가 NULL. TASK 7 (표준계정 정리) 선행 필요.</p>
+        <div class="trade">
+          <span class="trade-item"><strong>Human:</strong> ~30분</span>
+          <span class="trade-item"><strong>CC:</strong> ~8분</span>
+          <span class="trade-item"><strong>Completeness:</strong> 7/10</span>
+          <span class="trade-item"><strong>Blocker:</strong> 표준계정 커버리지</span>
+        </div>
+      </div>
+    </label>
+
+    <label class="option">
+      <input type="radio" name="d1" value="1C">
+      <div class="option-body">
+        <div class="option-head">
+          <span class="option-id">1C</span>
+          <span class="option-title">internal_accounts.type 컬럼 추가 (완전 구현)</span>
+          <span class="badge badge-risk">Scope 초과</span>
+        </div>
+        <p>마이그레이션 + 기존 row 를 1A 방식으로 backfill + 내부계정 UI 에 in/out 토글</p>
+        <p>단일 진실 소스 완성. 다만 방금 합의한 Scope Reduction 원칙과 반대 방향.</p>
+        <div class="trade">
+          <span class="trade-item"><strong>Human:</strong> ~1h</span>
+          <span class="trade-item"><strong>CC:</strong> ~15분</span>
+          <span class="trade-item"><strong>Completeness:</strong> 10/10</span>
+          <span class="trade-item"><strong>Risk:</strong> UI 추가 범위 확장</span>
+        </div>
+      </div>
+    </label>
+  </div>
+  <div class="rec-note"><strong>추천:</strong> 1A — DRY + minimal diff. 기존 transactions 데이터만으로 충분. 1B 는 블로킹, 1C 는 이번 범위 초과.</div>
+
+  <!-- ======================= Decision 2 ======================= -->
+  <h2><span class="num">2.</span>배너 Dismissal 저장 위치</h2>
+  <div class="problem">
+    <strong>문제</strong>: 사용자가 "이번 달 무시" 눌렀을 때 어디에 저장할지.
+    브라우저별 분리 vs 서버 통일.
+  </div>
+  <div class="options">
+    <label class="option recommended">
+      <input type="radio" name="d2" value="2A" data-default>
+      <div class="option-body">
+        <div class="option-head">
+          <span class="option-id">2A</span>
+          <span class="option-title">localStorage (브라우저별)</span>
+          <span class="badge badge-rec">추천</span>
+        </div>
+        <p>키 예: <code>dismissed-missing-{entity_id}-{year}-{month}</code></p>
+        <p>사용자 1-2명, 1기기 사용이라 중복 알림 거의 없음. 서버 코드 0 추가.</p>
+        <div class="trade">
+          <span class="trade-item"><strong>Human:</strong> ~5분</span>
+          <span class="trade-item"><strong>CC:</strong> ~1분</span>
+          <span class="trade-item"><strong>Completeness:</strong> 8/10</span>
+          <span class="trade-item"><strong>한계:</strong> 다기기 시 동기화 안 됨</span>
+        </div>
+      </div>
+    </label>
+    <label class="option">
+      <input type="radio" name="d2" value="2B">
+      <div class="option-body">
+        <div class="option-head">
+          <span class="option-id">2B</span>
+          <span class="option-title">settings 테이블 (서버 저장)</span>
+        </div>
+        <p>key: <code>dismissed_missing_recurring_{ym}</code>, entity_id 스코프</p>
+        <p>다기기 통일. 그러나 API endpoint 추가 필요 (GET/POST). 오버스펙.</p>
+        <div class="trade">
+          <span class="trade-item"><strong>Human:</strong> ~30분</span>
+          <span class="trade-item"><strong>CC:</strong> ~8분</span>
+          <span class="trade-item"><strong>Completeness:</strong> 9/10</span>
+        </div>
+      </div>
+    </label>
+  </div>
+  <div class="rec-note"><strong>추천:</strong> 2A — 사용자 규모(1-2명) 대비 오버엔지니어링 방지. 향후 필요 시 settings 로 마이그레이션 쉬움.</div>
+
+  <!-- ======================= Decision 3 ======================= -->
+  <h2><span class="num">3.</span>suggested_amount 0원 케이스 처리</h2>
+  <div class="problem">
+    <strong>문제</strong>: internal_account 가 is_recurring=TRUE 지만 최근 3개월 거래 0건 → 제안 금액 0원.
+    [전부 추가] 눌렀을 때 어떻게 처리할지.
+  </div>
+  <div class="options">
+    <label class="option recommended">
+      <input type="radio" name="d3" value="3A" data-default>
+      <div class="option-body">
+        <div class="option-head">
+          <span class="option-id">3A</span>
+          <span class="option-title">insert 하되 UI에 "거래 없음 — 금액 확인" 경고 배지</span>
+          <span class="badge badge-rec">추천</span>
+        </div>
+        <p>0원 forecast 생성 → 예상 잔고엔 영향 0, 사용자가 UI에서 직접 금액 입력 가능</p>
+        <p>가시성 최대화. 누락 방지.</p>
+      </div>
+    </label>
+    <label class="option">
+      <input type="radio" name="d3" value="3B">
+      <div class="option-body">
+        <div class="option-head">
+          <span class="option-id">3B</span>
+          <span class="option-title">insert 안 하고 수동 입력 유도</span>
+        </div>
+        <p>배너에만 "금액 미정 — 직접 입력" 표시, 행 생성 보류</p>
+        <p>깨끗하지만 사용자가 놓칠 위험 있음.</p>
+      </div>
+    </label>
+    <label class="option">
+      <input type="radio" name="d3" value="3C">
+      <div class="option-body">
+        <div class="option-head">
+          <span class="option-id">3C</span>
+          <span class="option-title">제안 목록에서 아예 제외</span>
+        </div>
+        <p>최근 거래 0건이면 missing-recurring 응답에서 제외</p>
+        <p>정말 필요한 케이스를 사용자가 모르고 지나칠 위험.</p>
+      </div>
+    </label>
+  </div>
+  <div class="rec-note"><strong>추천:</strong> 3A — 사용자 가시성 최대화. 0원 행은 수정 핸들. 데이터 누락 방지.</div>
+
+  <!-- ======================= Decision 4 ======================= -->
+  <h2><span class="num">4.</span>기존 "전월 반복 가져오기" 버튼 공존</h2>
+  <div class="problem">
+    <strong>문제</strong>: 배너 도입 후 기존 버튼과 기능 겹침. 사용자 혼란 가능.
+    (forecast-tab.tsx:1681-1705)
+  </div>
+  <div class="options">
+    <label class="option recommended">
+      <input type="radio" name="d4" value="4A" data-default>
+      <div class="option-body">
+        <div class="option-head">
+          <span class="option-id">4A</span>
+          <span class="option-title">버튼 유지 (용도 달라서 공존 가능)</span>
+          <span class="badge badge-rec">추천</span>
+        </div>
+        <p>버튼 = "전월 실적 금액으로 다시 복사" (refresh 용도). 배너 = "누락된 반복 추가"</p>
+        <p>기능 분리. 버튼은 이미 실적 기반 금액 덮어쓰기에 유용.</p>
+      </div>
+    </label>
+    <label class="option">
+      <input type="radio" name="d4" value="4B">
+      <div class="option-body">
+        <div class="option-head">
+          <span class="option-id">4B</span>
+          <span class="option-title">버튼 제거 (배너로 완전 대체)</span>
+        </div>
+        <p>UI 단순화. 그러나 "전월 금액 기반 refresh" 기능 손실.</p>
+      </div>
+    </label>
+    <label class="option">
+      <input type="radio" name="d4" value="4C">
+      <div class="option-body">
+        <div class="option-head">
+          <span class="option-id">4C</span>
+          <span class="option-title">버튼을 배너 액션에 흡수 (배너에 "전월 금액으로" 옵션 추가)</span>
+        </div>
+        <p>배너 안에 [최근 3개월 평균] / [전월 실적] 선택 라디오</p>
+        <p>풍부하지만 UI 복잡도 증가.</p>
+      </div>
+    </label>
+  </div>
+  <div class="rec-note"><strong>추천:</strong> 4A — 기능 목적이 다름. 배너는 "누락 fix", 버튼은 "금액 refresh". 분리된 채로 둠.</div>
+
+  <!-- ======================= Decision 5 ======================= -->
+  <h2><span class="num">5.</span>suggested_amount 계산 공식</h2>
+  <div class="problem">
+    <strong>문제</strong>: 최근 3개월 평균을 어떻게 계산할지.
+    같은 internal_account에 in/out 섞여 있을 수 있음 (환불).
+  </div>
+  <div class="options">
+    <label class="option recommended">
+      <input type="radio" name="d5" value="5B" data-default>
+      <div class="option-body">
+        <div class="option-head">
+          <span class="option-id">5B</span>
+          <span class="option-title">Majority type 의 absolute amount 평균 (월별 합 / 3)</span>
+          <span class="badge badge-rec">추천</span>
+        </div>
+        <p>1A 추론한 majority type ('in' 또는 'out') 에 해당하는 거래만 월별 합계 → 3으로 나눔</p>
+        <p>환불·역방향 거래 제외. 대표성 가장 높음.</p>
+      </div>
+    </label>
+    <label class="option">
+      <input type="radio" name="d5" value="5A">
+      <div class="option-body">
+        <div class="option-head">
+          <span class="option-id">5A</span>
+          <span class="option-title">NET 평균 (in - out, signed)</span>
+        </div>
+        <p>모든 거래 합산 (in은 +, out은 -). 절대값.</p>
+        <p>환불 많은 계정에서 왜곡.</p>
+      </div>
+    </label>
+    <label class="option">
+      <input type="radio" name="d5" value="5C">
+      <div class="option-body">
+        <div class="option-head">
+          <span class="option-id">5C</span>
+          <span class="option-title">최대 월 금액 (보수적 예측)</span>
+        </div>
+        <p>3개월 중 월별 합계 최대값 → 현금흐름 여유있게 예측</p>
+        <p>평균보다 과대 추정. 보수적 재무관리엔 유리.</p>
+      </div>
+    </label>
+  </div>
+  <div class="rec-note"><strong>추천:</strong> 5B — 대표성·실제성 최고. 5A는 환불 왜곡, 5C는 과대추정 (사용자 취향).</div>
+
+  <!-- ======================= Decision 6 ======================= -->
+  <h2><span class="num">6.</span>테스트 커버리지 — E2E 포함 여부</h2>
+  <div class="problem">
+    <strong>문제</strong>: 배너 + 2개 API 의 테스트 범위. pytest unit 만 vs Playwright E2E 추가.
+  </div>
+  <div class="options">
+    <label class="option recommended">
+      <input type="radio" name="d6" value="6A" data-default>
+      <div class="option-body">
+        <div class="option-head">
+          <span class="option-id">6A</span>
+          <span class="option-title">Backend pytest + Frontend 수동 확인</span>
+          <span class="badge badge-rec">추천</span>
+        </div>
+        <p>missing-recurring 쿼리 로직 + add UPSERT 동작 + 0원 케이스 + type 추론 (4-5 unit test)</p>
+        <p>프론트는 gstack browse 로 수동 확인. 내부 툴 규모 기준 적절.</p>
+      </div>
+    </label>
+    <label class="option">
+      <input type="radio" name="d6" value="6B">
+      <div class="option-body">
+        <div class="option-head">
+          <span class="option-id">6B</span>
+          <span class="option-title">+ Playwright E2E (배너 → [전부 추가] → forecast row 확인)</span>
+        </div>
+        <p>전체 사용자 흐름 자동 테스트. 리그레션 방지 강함.</p>
+        <p>소요 추가 ~30분. 내부 툴 규모 대비 과도할 수 있음.</p>
+      </div>
+    </label>
+  </div>
+  <div class="rec-note"><strong>추천:</strong> 6A — 내부 툴, 사용자 1-2명. unit + 수동 E2E 확인이 비용 대비 효과 최적.</div>
+
+</div>
+
+<!-- ============== 고정 결정 바 (하단) ============== -->
+<div class="summary-bar">
+  <div class="summary-inner">
+    <div class="summary-text">
+      <div class="label">결정 코드 (채팅에 붙여넣기)</div>
+      <div class="code" id="decisionCode">— 결정 대기 중 —</div>
+      <div class="progress" id="progressText">0 / 6 결정</div>
+    </div>
+    <button class="copy-btn" id="copyBtn" onclick="copyDecision()">복사</button>
+  </div>
+</div>
+
+<script>
+  const ids = ['d1', 'd2', 'd3', 'd4', 'd5', 'd6'];
+
+  document.querySelectorAll('input[data-default]').forEach(r => r.checked = true);
+
+  function updateSummary() {
+    const vals = ids.map(id => {
+      const r = document.querySelector(`input[name=${id}]:checked`);
+      return r ? r.value : '·';
+    });
+    const code = vals.join(' · ');
+    document.getElementById('decisionCode').textContent = code;
+    const filled = vals.filter(v => v !== '·').length;
+    document.getElementById('progressText').textContent = `${filled} / 6 결정`;
+  }
+
+  document.querySelectorAll('input[type=radio]').forEach(r => {
+    r.addEventListener('change', updateSummary);
+  });
+
+  updateSummary();
+
+  function copyDecision() {
+    const code = document.getElementById('decisionCode').textContent;
+    navigator.clipboard.writeText(code).then(() => {
+      const btn = document.getElementById('copyBtn');
+      btn.textContent = '✓ 복사됨';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.textContent = '복사';
+        btn.classList.remove('copied');
+      }, 1600);
+    });
+  }
+</script>
+</body>
+</html>

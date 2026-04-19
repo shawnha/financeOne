@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FinanceOne 데이터 구조</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Pretendard', sans-serif; background: #0d1117; color: #e6edf3; padding: 24px; }
+  .container { max-width: 1400px; margin: 0 auto; }
+  h1 { font-size: 24px; margin-bottom: 8px; }
+  .subtitle { color: #8b949e; font-size: 13px; margin-bottom: 24px; }
+
+  /* Filter buttons */
+  .filters { display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
+  .filter-btn { height: 32px; padding: 0 14px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.1); background: transparent; color: #8b949e; font-size: 12px; cursor: pointer; transition: all 0.15s; }
+  .filter-btn:hover { background: rgba(255,255,255,0.05); color: #e6edf3; }
+  .filter-btn.active { background: rgba(88,166,255,0.15); color: #58a6ff; border-color: rgba(88,166,255,0.3); }
+
+  /* Group sections */
+  .group { margin-bottom: 32px; }
+  .group-title { font-size: 11px; font-weight: 700; color: #58a6ff; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 12px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+
+  /* Table cards */
+  .table-card { background: #161b22; border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; overflow: hidden; transition: all 0.2s; }
+  .table-card:hover { border-color: rgba(88,166,255,0.3); transform: translateY(-2px); }
+  .table-card.dimmed { opacity: 0.25; }
+
+  .table-header { padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; justify-content: space-between; cursor: pointer; }
+  .table-name { font-size: 14px; font-weight: 600; }
+  .table-num { font-size: 10px; color: #8b949e; margin-right: 8px; }
+  .table-tag { display: inline-block; font-size: 9px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+  .tag-core { background: rgba(239,68,68,0.15); color: #f87171; }
+  .tag-master { background: rgba(168,85,247,0.15); color: #c084fc; }
+  .tag-mapping { background: rgba(245,158,11,0.15); color: #fbbf24; }
+  .tag-slack { background: rgba(168,85,247,0.15); color: #c084fc; }
+  .tag-journal { background: rgba(63,185,80,0.15); color: #4ade80; }
+  .tag-statement { background: rgba(59,130,246,0.15); color: #60a5fa; }
+  .tag-meta { background: rgba(107,114,128,0.15); color: #9ca3af; }
+
+  .table-body { padding: 12px 16px; max-height: 0; overflow: hidden; transition: max-height 0.3s; }
+  .table-card.expanded .table-body { max-height: 600px; padding: 12px 16px; overflow-y: auto; }
+
+  .field { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 11px; }
+  .field-name { color: #e6edf3; font-family: 'JetBrains Mono', monospace; min-width: 140px; }
+  .field-type { color: #8b949e; font-size: 10px; font-family: 'JetBrains Mono', monospace; }
+  .field-pk { color: #fbbf24; font-weight: 700; font-size: 9px; }
+  .field-fk { color: #58a6ff; font-size: 9px; }
+  .field-required { color: #f87171; font-size: 9px; }
+
+  .description { padding: 8px 16px; font-size: 11px; color: #8b949e; background: rgba(255,255,255,0.02); border-bottom: 1px solid rgba(255,255,255,0.04); }
+
+  .relationships { padding: 8px 16px; border-top: 1px solid rgba(255,255,255,0.04); font-size: 10px; }
+  .rel-label { color: #8b949e; font-weight: 600; margin-bottom: 4px; }
+  .rel-list { display: flex; flex-wrap: wrap; gap: 4px; }
+  .rel-pill { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border-radius: 999px; background: rgba(88,166,255,0.1); color: #58a6ff; font-size: 9px; cursor: pointer; transition: all 0.15s; }
+  .rel-pill:hover { background: rgba(88,166,255,0.2); }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .stat { background: #161b22; border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 16px; text-align: center; }
+  .stat-num { font-size: 28px; font-weight: 700; color: #58a6ff; }
+  .stat-label { font-size: 11px; color: #8b949e; margin-top: 4px; }
+
+  .legend { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; font-size: 10px; }
+  .legend-item { display: flex; align-items: center; gap: 4px; color: #8b949e; }
+
+  .icon { width: 12px; height: 12px; display: inline-block; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>FinanceOne — 데이터 구조</h1>
+  <div class="subtitle">21개 테이블 · PostgreSQL (financeone schema) · Supabase</div>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat"><div class="stat-num">21</div><div class="stat-label">테이블</div></div>
+    <div class="stat"><div class="stat-num">3</div><div class="stat-label">법인 (HOI / 한아원코리아 / 한아원리테일)</div></div>
+    <div class="stat"><div class="stat-num">7</div><div class="stat-label">테이블 그룹</div></div>
+    <div class="stat"><div class="stat-num">~30</div><div class="stat-label">FK 관계</div></div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filters">
+    <button class="filter-btn active" onclick="filterTables('all')">전체</button>
+    <button class="filter-btn" onclick="filterTables('core')">핵심 (거래)</button>
+    <button class="filter-btn" onclick="filterTables('master')">마스터 (법인/계정)</button>
+    <button class="filter-btn" onclick="filterTables('mapping')">매핑/AI 학습</button>
+    <button class="filter-btn" onclick="filterTables('slack')">Slack</button>
+    <button class="filter-btn" onclick="filterTables('journal')">분개/회계</button>
+    <button class="filter-btn" onclick="filterTables('statement')">재무제표</button>
+    <button class="filter-btn" onclick="filterTables('meta')">메타/설정</button>
+  </div>
+
+  <!-- ============ 그룹 1: 마스터 ============ -->
+  <div class="group">
+    <div class="group-title">📌 마스터 데이터</div>
+    <div class="grid">
+      <div class="table-card" data-group="master">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">1</span><span class="table-name">entities</span></div>
+          <span class="table-tag tag-master">마스터</span>
+        </div>
+        <div class="description">법인 정보 (HOI / 한아원코리아 / 한아원리테일)</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-name">code</span><span class="field-type">TEXT UNIQUE</span></div>
+          <div class="field"><span class="field-name">name</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">type</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">currency</span><span class="field-type">TEXT (USD/KRW)</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">parent_id</span><span class="field-type">→ entities</span></div>
+        </div>
+      </div>
+
+      <div class="table-card" data-group="master">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">2</span><span class="table-name">members</span></div>
+          <span class="table-tag tag-master">마스터</span>
+        </div>
+        <div class="description">팀 멤버 + Slack 연동 + 카드번호</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">entity_id</span><span class="field-type">→ entities</span></div>
+          <div class="field"><span class="field-name">name</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">role</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">card_numbers</span><span class="field-type">TEXT[]</span></div>
+          <div class="field"><span class="field-name">slack_user_id</span><span class="field-type">TEXT</span></div>
+        </div>
+      </div>
+
+      <div class="table-card" data-group="master">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">3</span><span class="table-name">standard_accounts</span></div>
+          <span class="table-tag tag-master">마스터</span>
+        </div>
+        <div class="description">K-GAAP 표준 계정과목 (자산/부채/자본/수익/비용)</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-name">code</span><span class="field-type">TEXT UNIQUE</span></div>
+          <div class="field"><span class="field-name">name</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">category</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">normal_side</span><span class="field-type">TEXT (debit/credit)</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">parent_code</span><span class="field-type">→ standard_accounts</span></div>
+        </div>
+      </div>
+
+      <div class="table-card" data-group="master">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">4</span><span class="table-name">internal_accounts</span></div>
+          <span class="table-tag tag-master">마스터</span>
+        </div>
+        <div class="description">법인별 내부 계정과목 (트리 구조, 표준계정 매핑)</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">entity_id</span><span class="field-type">→ entities</span></div>
+          <div class="field"><span class="field-name">code</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">name</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">standard_account_id</span><span class="field-type">→ standard_accounts</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">parent_id</span><span class="field-type">→ internal_accounts</span></div>
+          <div class="field"><span class="field-name">is_recurring</span><span class="field-type">BOOLEAN</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 그룹 2: 핵심 거래 ============ -->
+  <div class="group">
+    <div class="group-title">💰 핵심 — 거래 + 잔고</div>
+    <div class="grid">
+      <div class="table-card expanded" data-group="core">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">6</span><span class="table-name">transactions</span></div>
+          <span class="table-tag tag-core">핵심</span>
+        </div>
+        <div class="description">⭐ 모든 거래내역의 중심. 카드/은행 명세서가 여기로 들어옴</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">entity_id</span><span class="field-type">→ entities</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">file_id</span><span class="field-type">→ uploaded_files</span></div>
+          <div class="field"><span class="field-name">date</span><span class="field-type">DATE</span></div>
+          <div class="field"><span class="field-name">amount</span><span class="field-type">NUMERIC</span></div>
+          <div class="field"><span class="field-name">type</span><span class="field-type">in/out</span></div>
+          <div class="field"><span class="field-name">description</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">counterparty</span><span class="field-type">TEXT (거래처)</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">member_id</span><span class="field-type">→ members</span></div>
+          <div class="field"><span class="field-name">source_type</span><span class="field-type">TEXT (lotte_card/...)</span></div>
+          <div class="field"><span class="field-name">card_number</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">internal_account_id</span><span class="field-type">→ internal_accounts</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">standard_account_id</span><span class="field-type">→ standard_accounts</span></div>
+          <div class="field"><span class="field-name">mapping_source</span><span class="field-type">manual/ai/...</span></div>
+          <div class="field"><span class="field-name">mapping_confidence</span><span class="field-type">NUMERIC</span></div>
+          <div class="field"><span class="field-name">is_confirmed</span><span class="field-type">BOOLEAN</span></div>
+          <div class="field"><span class="field-name">is_cancel</span><span class="field-type">BOOLEAN</span></div>
+          <div class="field"><span class="field-name">is_duplicate</span><span class="field-type">BOOLEAN</span></div>
+          <div class="field"><span class="field-name">is_intercompany</span><span class="field-type">BOOLEAN</span></div>
+        </div>
+        <div class="relationships">
+          <div class="rel-label">관계:</div>
+          <div class="rel-list">
+            <span class="rel-pill">→ entities</span>
+            <span class="rel-pill">→ members</span>
+            <span class="rel-pill">→ internal_accounts</span>
+            <span class="rel-pill">→ standard_accounts</span>
+            <span class="rel-pill">→ uploaded_files</span>
+            <span class="rel-pill">← journal_entries</span>
+            <span class="rel-pill">← transaction_slack_match</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="table-card" data-group="core">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">5</span><span class="table-name">uploaded_files</span></div>
+          <span class="table-tag tag-core">핵심</span>
+        </div>
+        <div class="description">업로드된 파일 추적 (재업로드 감지용)</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">entity_id</span><span class="field-type">→ entities</span></div>
+          <div class="field"><span class="field-name">filename</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">source_type</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">row_count</span><span class="field-type">INT</span></div>
+          <div class="field"><span class="field-name">status</span><span class="field-type">TEXT</span></div>
+        </div>
+      </div>
+
+      <div class="table-card" data-group="core">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">7</span><span class="table-name">balance_snapshots</span></div>
+          <span class="table-tag tag-core">핵심</span>
+        </div>
+        <div class="description">잔고 스냅샷 (월말/기초 잔고)</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">entity_id</span><span class="field-type">→ entities</span></div>
+          <div class="field"><span class="field-name">date</span><span class="field-type">DATE</span></div>
+          <div class="field"><span class="field-name">account_name</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">balance</span><span class="field-type">NUMERIC</span></div>
+        </div>
+      </div>
+
+      <div class="table-card" data-group="core">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">8</span><span class="table-name">forecasts</span></div>
+          <span class="table-tag tag-core">핵심</span>
+        </div>
+        <div class="description">예상 수입/지출 (예상 현금흐름표)</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">entity_id</span><span class="field-type">→ entities</span></div>
+          <div class="field"><span class="field-name">year/month</span><span class="field-type">INT</span></div>
+          <div class="field"><span class="field-name">type</span><span class="field-type">in/out</span></div>
+          <div class="field"><span class="field-name">forecast_amount</span><span class="field-type">NUMERIC</span></div>
+          <div class="field"><span class="field-name">actual_amount</span><span class="field-type">NUMERIC</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">internal_account_id</span><span class="field-type">→ internal_accounts</span></div>
+          <div class="field"><span class="field-name">expected_day</span><span class="field-type">INT</span></div>
+          <div class="field"><span class="field-name">payment_method</span><span class="field-type">bank/card</span></div>
+          <div class="field"><span class="field-name">is_recurring</span><span class="field-type">BOOLEAN</span></div>
+        </div>
+      </div>
+
+      <div class="table-card" data-group="core">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">9</span><span class="table-name">exchange_rates</span></div>
+          <span class="table-tag tag-core">핵심</span>
+        </div>
+        <div class="description">환율 (USD↔KRW 일별)</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-name">date</span><span class="field-type">DATE</span></div>
+          <div class="field"><span class="field-name">from_currency</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">to_currency</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">rate</span><span class="field-type">NUMERIC</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 그룹 3: 매핑/AI 학습 ============ -->
+  <div class="group">
+    <div class="group-title">🧠 매핑 / AI 학습</div>
+    <div class="grid">
+      <div class="table-card" data-group="mapping">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">13</span><span class="table-name">mapping_rules</span></div>
+          <span class="table-tag tag-mapping">매핑</span>
+        </div>
+        <div class="description">⭐ 거래처 → 내부계정 학습 (Slack 컨텍스트 포함)</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">entity_id</span><span class="field-type">→ entities</span></div>
+          <div class="field"><span class="field-name">counterparty_pattern</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">internal_account_id</span><span class="field-type">→ internal_accounts</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">standard_account_id</span><span class="field-type">→ standard_accounts</span></div>
+          <div class="field"><span class="field-name">confidence</span><span class="field-type">NUMERIC</span></div>
+          <div class="field"><span class="field-name">hit_count</span><span class="field-type">INT</span></div>
+          <div class="field"><span class="field-name">description_pattern</span><span class="field-type">TEXT 🆕</span></div>
+          <div class="field"><span class="field-name">vendor</span><span class="field-type">TEXT 🆕</span></div>
+          <div class="field"><span class="field-name">category</span><span class="field-type">TEXT 🆕</span></div>
+        </div>
+      </div>
+
+      <div class="table-card" data-group="mapping">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">13b</span><span class="table-name">keyword_mapping_rules</span></div>
+          <span class="table-tag tag-mapping">매핑</span>
+        </div>
+        <div class="description">키워드 기반 매핑 (description ILIKE)</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">entity_id</span><span class="field-type">→ entities</span></div>
+          <div class="field"><span class="field-name">keyword</span><span class="field-type">VARCHAR(100)</span></div>
+          <div class="field"><span class="field-name">match_field</span><span class="field-type">description/...</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">internal_account_id</span><span class="field-type">→ internal_accounts</span></div>
+        </div>
+      </div>
+
+      <div class="table-card" data-group="mapping">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">13c</span><span class="table-name">standard_account_keywords</span></div>
+          <span class="table-tag tag-mapping">매핑</span>
+        </div>
+        <div class="description">일상어 → 표준계정 사전</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-name">keyword</span><span class="field-type">VARCHAR(100) UNIQUE</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">standard_account_id</span><span class="field-type">→ standard_accounts</span></div>
+        </div>
+      </div>
+
+      <div class="table-card" data-group="mapping">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">14</span><span class="table-name">gaap_mapping</span></div>
+          <span class="table-tag tag-mapping">매핑</span>
+        </div>
+        <div class="description">US GAAP ↔ K-GAAP 변환</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-name">us_gaap_code</span><span class="field-type">TEXT UNIQUE</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">standard_account_id</span><span class="field-type">→ standard_accounts</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 그룹 4: Slack ============ -->
+  <div class="group">
+    <div class="group-title">💬 Slack 매칭</div>
+    <div class="grid">
+      <div class="table-card" data-group="slack">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">15</span><span class="table-name">slack_messages</span></div>
+          <span class="table-tag tag-slack">Slack</span>
+        </div>
+        <div class="description">⭐ #99-expenses 채널 메시지 + Claude 구조화 파싱 결과</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">entity_id</span><span class="field-type">→ entities</span></div>
+          <div class="field"><span class="field-name">ts</span><span class="field-type">TEXT UNIQUE</span></div>
+          <div class="field"><span class="field-name">channel</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">text</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">parsed_amount</span><span class="field-type">NUMERIC</span></div>
+          <div class="field"><span class="field-name">currency</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">message_type</span><span class="field-type">card_payment/...</span></div>
+          <div class="field"><span class="field-name">parsed_structured</span><span class="field-type">JSONB ⭐</span></div>
+          <div class="field"><span class="field-name">sub_amounts</span><span class="field-type">JSONB</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">member_id</span><span class="field-type">→ members</span></div>
+          <div class="field"><span class="field-name">slack_status</span><span class="field-type">pending/done/...</span></div>
+          <div class="field"><span class="field-name">is_completed</span><span class="field-type">BOOLEAN</span></div>
+          <div class="field"><span class="field-name">is_cancelled</span><span class="field-type">BOOLEAN</span></div>
+          <div class="field"><span class="field-name">reply_count</span><span class="field-type">INT</span></div>
+          <div class="field"><span class="field-name">thread_replies_json</span><span class="field-type">TEXT</span></div>
+        </div>
+      </div>
+
+      <div class="table-card" data-group="slack">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">16</span><span class="table-name">transaction_slack_match</span></div>
+          <span class="table-tag tag-slack">Slack</span>
+        </div>
+        <div class="description">⭐ 거래 ↔ Slack 메시지 양방향 매칭 브릿지</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">transaction_id</span><span class="field-type">→ transactions</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">slack_message_id</span><span class="field-type">→ slack_messages</span></div>
+          <div class="field"><span class="field-name">match_confidence</span><span class="field-type">NUMERIC</span></div>
+          <div class="field"><span class="field-name">is_manual</span><span class="field-type">BOOLEAN</span></div>
+          <div class="field"><span class="field-name">is_confirmed</span><span class="field-type">BOOLEAN</span></div>
+          <div class="field"><span class="field-name">ai_reasoning</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">item_index</span><span class="field-type">INT (개별 매칭)</span></div>
+          <div class="field"><span class="field-name">item_description</span><span class="field-type">TEXT</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 그룹 5: 분개/회계 ============ -->
+  <div class="group">
+    <div class="group-title">📒 분개 / 회계</div>
+    <div class="grid">
+      <div class="table-card" data-group="journal">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">17</span><span class="table-name">journal_entries</span></div>
+          <span class="table-tag tag-journal">분개</span>
+        </div>
+        <div class="description">분개 헤더 (거래 → 복식부기 변환)</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">entity_id</span><span class="field-type">→ entities</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">transaction_id</span><span class="field-type">→ transactions</span></div>
+          <div class="field"><span class="field-name">entry_date</span><span class="field-type">DATE</span></div>
+          <div class="field"><span class="field-name">is_adjusting</span><span class="field-type">BOOLEAN</span></div>
+          <div class="field"><span class="field-name">is_closing</span><span class="field-type">BOOLEAN</span></div>
+        </div>
+      </div>
+
+      <div class="table-card" data-group="journal">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">18</span><span class="table-name">journal_entry_lines</span></div>
+          <span class="table-tag tag-journal">분개</span>
+        </div>
+        <div class="description">분개 라인 (차변/대변, debit==credit 검증)</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">journal_entry_id</span><span class="field-type">→ journal_entries</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">standard_account_id</span><span class="field-type">→ standard_accounts</span></div>
+          <div class="field"><span class="field-name">debit_amount</span><span class="field-type">NUMERIC</span></div>
+          <div class="field"><span class="field-name">credit_amount</span><span class="field-type">NUMERIC</span></div>
+        </div>
+      </div>
+
+      <div class="table-card" data-group="journal">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">19</span><span class="table-name">intercompany_pairs</span></div>
+          <span class="table-tag tag-journal">법인간</span>
+        </div>
+        <div class="description">법인 간 거래 매칭 (연결재무제표용)</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">entity_a_id</span><span class="field-type">→ entities</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">entity_b_id</span><span class="field-type">→ entities</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">transaction_a_id</span><span class="field-type">→ transactions</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">transaction_b_id</span><span class="field-type">→ transactions</span></div>
+          <div class="field"><span class="field-name">amount</span><span class="field-type">NUMERIC</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 그룹 6: 재무제표 ============ -->
+  <div class="group">
+    <div class="group-title">📊 재무제표</div>
+    <div class="grid">
+      <div class="table-card" data-group="statement">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">10</span><span class="table-name">financial_statements</span></div>
+          <span class="table-tag tag-statement">재무제표</span>
+        </div>
+        <div class="description">재무제표 헤더 (회계연도, 회사정보)</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">entity_id</span><span class="field-type">→ entities</span></div>
+          <div class="field"><span class="field-name">fiscal_year</span><span class="field-type">INT</span></div>
+          <div class="field"><span class="field-name">is_consolidated</span><span class="field-type">BOOLEAN</span></div>
+          <div class="field"><span class="field-name">company_name</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">base_currency</span><span class="field-type">TEXT</span></div>
+        </div>
+      </div>
+
+      <div class="table-card" data-group="statement">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">11</span><span class="table-name">financial_statement_line_items</span></div>
+          <span class="table-tag tag-statement">재무제표</span>
+        </div>
+        <div class="description">재무제표 항목 (auto + manual amount)</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">statement_id</span><span class="field-type">→ financial_statements</span></div>
+          <div class="field"><span class="field-name">statement_type</span><span class="field-type">BS/IS/CF/...</span></div>
+          <div class="field"><span class="field-name">line_key</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">label</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">auto_amount</span><span class="field-type">NUMERIC</span></div>
+          <div class="field"><span class="field-name">manual_amount</span><span class="field-type">NUMERIC</span></div>
+        </div>
+      </div>
+
+      <div class="table-card" data-group="statement">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">20</span><span class="table-name">consolidation_adjustments</span></div>
+          <span class="table-tag tag-statement">재무제표</span>
+        </div>
+        <div class="description">연결조정 감사 추적</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">statement_id</span><span class="field-type">→ financial_statements</span></div>
+          <div class="field"><span class="field-name">adjustment_type</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">original_amount</span><span class="field-type">NUMERIC</span></div>
+          <div class="field"><span class="field-name">adjusted_amount</span><span class="field-type">NUMERIC</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 그룹 7: 메타 ============ -->
+  <div class="group">
+    <div class="group-title">⚙️ 메타 / 설정</div>
+    <div class="grid">
+      <div class="table-card" data-group="meta">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">12</span><span class="table-name">settings</span></div>
+          <span class="table-tag tag-meta">메타</span>
+        </div>
+        <div class="description">앱 설정 (key-value, 전역/법인별)</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-name">key</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">value</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">entity_id</span><span class="field-type">→ entities (NULL = 전역)</span></div>
+        </div>
+      </div>
+
+      <div class="table-card" data-group="meta">
+        <div class="table-header" onclick="toggleCard(this)">
+          <div><span class="table-num">21</span><span class="table-name">card_settings</span></div>
+          <span class="table-tag tag-meta">메타</span>
+        </div>
+        <div class="description">카드 설정 (결제일, billing cycle)</div>
+        <div class="table-body">
+          <div class="field"><span class="field-pk">PK</span><span class="field-name">id</span><span class="field-type">SERIAL</span></div>
+          <div class="field"><span class="field-fk">FK</span><span class="field-name">entity_id</span><span class="field-type">→ entities</span></div>
+          <div class="field"><span class="field-name">card_name</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">source_type</span><span class="field-type">TEXT</span></div>
+          <div class="field"><span class="field-name">payment_day</span><span class="field-type">INT</span></div>
+          <div class="field"><span class="field-name">statement_day</span><span class="field-type">INT</span></div>
+          <div class="field"><span class="field-name">billing_start_day</span><span class="field-type">INT</span></div>
+          <div class="field"><span class="field-name">card_number</span><span class="field-type">TEXT</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function toggleCard(header) {
+  header.parentElement.classList.toggle('expanded');
+}
+
+function filterTables(group) {
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+
+  document.querySelectorAll('.table-card').forEach(card => {
+    if (group === 'all' || card.dataset.group === group) {
+      card.classList.remove('dimmed');
+    } else {
+      card.classList.add('dimmed');
+    }
+  });
+}
+</script>
+</body>
+</html>

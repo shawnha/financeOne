@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Eng Review: 수정 사항 설명</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 24px; max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 22px; margin-bottom: 24px; }
+  .issue { background: #161b22; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); padding: 24px; margin-bottom: 24px; }
+  .issue h2 { font-size: 16px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .issue .tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+  .tag.p2 { background: rgba(245,158,11,0.15); color: #F59E0B; }
+  .tag.p3 { background: rgba(96,165,250,0.15); color: #60A5FA; }
+  .tag.fixed { background: rgba(34,197,94,0.15); color: #22C55E; }
+  .desc { font-size: 13px; color: #94a3b8; line-height: 1.7; margin-bottom: 16px; }
+  .code-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .code-box { background: #0d1117; border-radius: 8px; padding: 16px; font-family: 'Geist Mono', monospace; font-size: 12px; line-height: 1.8; overflow-x: auto; }
+  .code-box h3 { font-size: 11px; color: #64748b; margin-bottom: 8px; font-family: -apple-system, sans-serif; }
+  .code-box .bad { color: #EF4444; text-decoration: line-through; opacity: 0.6; }
+  .code-box .good { color: #22C55E; }
+  .code-box .neutral { color: #94a3b8; }
+  .code-box .highlight { background: rgba(245,158,11,0.1); padding: 2px 4px; border-radius: 3px; }
+  .diagram { background: #0d1117; border-radius: 8px; padding: 20px; font-family: 'Geist Mono', monospace; font-size: 12px; line-height: 1.6; color: #94a3b8; margin: 16px 0; white-space: pre; overflow-x: auto; }
+  .diagram .label { color: #F59E0B; }
+  .diagram .green { color: #22C55E; }
+  .diagram .red { color: #EF4444; }
+  .summary { background: rgba(34,197,94,0.06); border: 1px solid rgba(34,197,94,0.15); border-radius: 12px; padding: 20px; margin-top: 24px; }
+  .summary h2 { font-size: 16px; color: #22C55E; margin-bottom: 12px; }
+  .summary ul { font-size: 13px; line-height: 2; padding-left: 20px; }
+</style>
+</head>
+<body>
+
+<h1>Eng Review 수정 사항 설명</h1>
+
+<!-- Issue 1 -->
+<div class="issue">
+  <h2>
+    <span class="tag p2">P2</span>
+    <span class="tag fixed">FIXED</span>
+    .find() 선형 탐색 → Map 기반 접근
+  </h2>
+
+  <div class="desc">
+    <strong>문제:</strong> 마지막 실제일의 예상 잔고를 찾을 때 <code>.find()</code>로 배열을 처음부터 순회합니다.
+    31일이라 느리진 않지만, 만약 배열에 해당 day가 없으면 <code>null</code>이 되어
+    <strong>조정 예상 전체가 원래 예상으로 fallback</strong>됩니다. 즉, 조정 기능이 조용히 꺼집니다.
+  </div>
+
+  <div class="code-compare">
+    <div class="code-box">
+      <h3>BEFORE (위험)</h3>
+      <span class="bad">// 배열 순회 — day가 없으면 null</span><br>
+      <span class="bad">const lastForecastAtActualDay =</span><br>
+      <span class="bad">&nbsp; schedule.points.find(</span><br>
+      <span class="bad">&nbsp;&nbsp;&nbsp; p => p.day === lastActualDay</span><br>
+      <span class="bad">&nbsp; )?.balance ?? null</span><br>
+      <br>
+      <span class="neutral">// worst-case도 같은 문제</span><br>
+      <span class="bad">worstCasePoints.find(...)</span>
+    </div>
+    <div class="code-box">
+      <h3>AFTER (안전)</h3>
+      <span class="good">// Map으로 O(1) 접근 + 명시적</span><br>
+      <span class="good">const forecastBalanceByDay = new Map(</span><br>
+      <span class="good">&nbsp; schedule.points.map(p =></span><br>
+      <span class="good">&nbsp;&nbsp;&nbsp; [p.day, p.balance])</span><br>
+      <span class="good">)</span><br>
+      <br>
+      <span class="good">forecastBalanceByDay.get(lastActualDay)</span><br>
+      <span class="neutral">// worst-case도 동일하게 Map</span>
+    </div>
+  </div>
+
+  <div class="diagram">
+<span class="label">데이터 접근 비교:</span>
+
+.find() 방식:  [day0, day1, day2, ... , <span class="red">day14?</span>, ... day31]
+                 →   →   →   →   →   <span class="red">순회 14번</span>   (없으면 null → 조정 꺼짐!)
+
+Map 방식:      { 0: 161M, 1: 160M, ..., <span class="green">14: 130M</span>, ..., 31: 107M }
+                                         <span class="green">O(1) 직접 접근</span>  (없으면 null → 명시적 fallback)
+  </div>
+</div>
+
+<!-- Issue 2 -->
+<div class="issue">
+  <h2>
+    <span class="tag p3">P3</span>
+    <span class="tag fixed">FIXED</span>
+    IIFE 패턴 → Map 기반 접근으로 통일
+  </h2>
+
+  <div class="desc">
+    <strong>문제:</strong> worst-case 계산이 <code>(() => { ... })()</code> (즉시 실행 함수)로 되어 있고,
+    조정 예상은 <code>let</code> 변수로 되어 있어 <strong>같은 로직인데 코드 스타일이 다릅니다</strong>.
+    또한 IIFE 안에서 <code>worstCasePoints[i]</code>로 인덱스 접근하는데,
+    day 0이 추가된 후 schedule.points와 worst_case_points의 인덱스가 어긋날 수 있습니다.
+    Map으로 바꾸면 day 기준으로 정확하게 매핑됩니다.
+  </div>
+
+  <div class="code-compare">
+    <div class="code-box">
+      <h3>BEFORE</h3>
+      <span class="bad">// 인덱스 기반 — day0 추가 시 어긋남 위험</span><br>
+      <span class="bad">const wc = worstCasePoints[i]</span><br>
+      <span class="neutral">// i=0 → day0, i=1 → day1 ... 인가?</span><br>
+      <span class="neutral">// worst_case에 day0이 없으면?</span><br>
+      <span class="red">// → 인덱스 밀림!</span>
+    </div>
+    <div class="code-box">
+      <h3>AFTER</h3>
+      <span class="good">// day 기준 Map — 인덱스 무관</span><br>
+      <span class="good">const wcBalance =</span><br>
+      <span class="good">&nbsp; worstBalanceByDay.get(p.day)</span><br>
+      <span class="neutral">// day 기준이라 day0 유무와 무관</span><br>
+      <span class="green">// → 항상 정확</span>
+    </div>
+  </div>
+
+  <div class="diagram">
+<span class="label">인덱스 vs Day 기반 접근:</span>
+
+schedule.points:     [<span class="green">day0</span>, day1, day2, ..., day31]  ← day0 포함 (32개)
+worst_case_points:   [<span class="green">day0</span>, day1, day2, ..., day31]  ← day0 포함 (32개)
+
+인덱스 기반: points[5] = day5 ✓ (지금은 맞음)
+            만약 worst_case에 day0이 빠지면?
+            worst[5] = <span class="red">day6</span> ← 밀림!
+
+Map 기반:   forecastByDay.get(5) = <span class="green">항상 day5</span>
+            worstByDay.get(5) = <span class="green">항상 day5</span>
+  </div>
+</div>
+
+<!-- Summary -->
+<div class="summary">
+  <h2>수정 요약</h2>
+  <ul>
+    <li><strong>.find() → Map</strong>: 선형 탐색을 O(1) 접근으로. sparse data에서 조정 기능이 조용히 꺼지는 위험 제거.</li>
+    <li><strong>인덱스[i] → Map.get(day)</strong>: day 0 추가/제거 시 인덱스 어긋남 방지. day 기준으로 항상 정확.</li>
+    <li><strong>코드 일관성</strong>: 조정 예상과 worst-case가 동일한 Map 패턴 사용.</li>
+  </ul>
+</div>
+
+</body>
+</html>

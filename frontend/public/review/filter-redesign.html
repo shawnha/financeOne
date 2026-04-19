@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>거래내역 필터 바 리디자인 비교</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Pretendard', sans-serif; background: #0d1117; color: #e6edf3; }
+
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 20px; margin-bottom: 24px; text-align: center; color: #8b949e; }
+  h2 { font-size: 14px; margin-bottom: 12px; color: #58a6ff; letter-spacing: 0.05em; text-transform: uppercase; }
+  .section { margin-bottom: 40px; border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 20px; background: #161b22; }
+  .label { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 4px; margin-bottom: 12px; }
+  .label-before { background: #da3633; color: white; }
+  .label-after { background: #238636; color: white; }
+
+  /* Shared filter styles */
+  .filter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .btn { height: 34px; padding: 0 14px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.1); background: transparent; color: #e6edf3; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; transition: all 0.15s; }
+  .btn:hover { background: rgba(255,255,255,0.05); }
+  .btn-active { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); }
+  .btn-green { color: #3fb950; border-color: rgba(63,185,80,0.3); }
+  .btn-green:hover { background: rgba(63,185,80,0.1); }
+  .btn-green.active { background: rgba(63,185,80,0.15); }
+
+  .search-input { height: 34px; padding: 0 12px 0 32px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); color: #e6edf3; font-size: 12px; width: 220px; position: relative; }
+  .search-wrap { position: relative; }
+  .search-wrap svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #8b949e; }
+
+  .select { height: 34px; padding: 0 28px 0 12px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); color: #8b949e; font-size: 12px; appearance: none; cursor: pointer; min-width: 100px; }
+
+  .month-picker { height: 34px; padding: 0 14px; border-radius: 999px; background: #238636; color: white; font-size: 12px; font-weight: 600; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+
+  .tab-group { display: inline-flex; border-radius: 999px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); }
+  .tab { height: 32px; padding: 0 12px; font-size: 11px; border: none; background: transparent; color: #8b949e; cursor: pointer; transition: all 0.15s; }
+  .tab:first-child { border-radius: 999px 0 0 999px; }
+  .tab:last-child { border-radius: 0 999px 999px 0; }
+  .tab.active { background: rgba(255,255,255,0.08); color: #e6edf3; }
+
+  .toggle { height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.08); background: transparent; color: #8b949e; font-size: 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: all 0.15s; }
+  .toggle:hover { background: rgba(255,255,255,0.04); }
+  .toggle.active-amber { background: rgba(245,158,11,0.12); color: #f59e0b; border-color: rgba(245,158,11,0.3); }
+  .toggle.active-blue { background: rgba(59,130,246,0.12); color: #3b82f6; border-color: rgba(59,130,246,0.3); }
+  .toggle.active-purple { background: rgba(168,85,247,0.12); color: #a855f7; border-color: rgba(168,85,247,0.3); }
+  .toggle.active-emerald { background: rgba(16,185,129,0.12); color: #10b981; border-color: rgba(16,185,129,0.3); }
+
+  .checkbox-label { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; color: #8b949e; }
+  .checkbox { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.3); }
+
+  .legend { display: flex; align-items: center; gap: 12px; font-size: 11px; color: #8b949e; padding: 8px 0; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+
+  /* Tier 2 panel */
+  .tier2 { display: none; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 10px; margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); }
+  .tier2.open { display: flex; }
+
+  .filter-badge { display: inline-flex; align-items: center; justify-content: center; background: #58a6ff; color: #0d1117; font-size: 9px; font-weight: 700; width: 16px; height: 16px; border-radius: 50%; margin-left: 4px; }
+
+  .dropdown-wrap { position: relative; }
+  .dropdown-menu { position: absolute; top: 40px; right: 0; background: #1c2128; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 6px; min-width: 180px; z-index: 100; display: none; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+  .dropdown-menu.open { display: block; }
+  .dropdown-item { display: flex; align-items: center; gap: 8px; padding: 8px 14px; font-size: 12px; color: #e6edf3; border-radius: 10px; cursor: pointer; border: none; background: none; width: 100%; text-align: left; }
+  .dropdown-item:hover { background: rgba(255,255,255,0.06); }
+  .dropdown-item svg { color: #8b949e; }
+
+  .ml-auto { margin-left: auto; }
+  .gap-4 { gap: 16px; }
+  .text-muted { color: #8b949e; }
+  .text-xs { font-size: 11px; }
+
+  /* Comparison layout */
+  .compare { display: grid; grid-template-columns: 1fr; gap: 32px; }
+
+  /* Arrow between sections */
+  .arrow-divider { text-align: center; padding: 8px 0; color: #8b949e; font-size: 24px; }
+
+  /* Interactive hint */
+  .hint { font-size: 11px; color: #8b949e; margin-top: 8px; font-style: italic; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>거래내역 필터 바 — Before vs After</h1>
+
+  <!-- BEFORE -->
+  <div class="section">
+    <span class="label label-before">BEFORE — 현재</span>
+    <h2>헤더 + 필터 3줄</h2>
+
+    <!-- Header row -->
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:18px;font-weight:600;">거래내역</span>
+        <span class="text-muted text-xs">842건</span>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 1v6M4 4l3 3 3-3"/></svg> 자동 매핑</button>
+        <button class="btn btn-green">이 달 일괄 확정</button>
+        <button class="btn"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v4h8V7M7 1v7M4 4l3-3 3 3"/></svg> CSV 다운로드</button>
+      </div>
+    </div>
+
+    <!-- Filter row 1 -->
+    <div class="filter-bar" style="margin-bottom:8px;">
+      <div class="search-wrap">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="5"/><path d="M10 10l3 3"/></svg>
+        <input class="search-input" placeholder="내역, 거래처, 내부계정..." />
+      </div>
+      <div style="display:flex;align-items:center;gap:4px;">
+        <button class="btn" style="padding:0 8px;">‹</button>
+        <button class="month-picker">JAN 2026</button>
+        <button class="btn" style="padding:0 8px;">›</button>
+      </div>
+      <select class="select"><option>회원</option></select>
+      <select class="select"><option>내부계정</option></select>
+      <select class="select"><option>표준 계정</option></select>
+      <select class="select"><option>출처</option></select>
+      <div class="tab-group">
+        <button class="tab active">전체</button>
+        <button class="tab">수입</button>
+        <button class="tab">지출</button>
+      </div>
+      <span style="color:#f59e0b;font-size:12px;font-weight:600;">자동 매핑</span>
+    </div>
+
+    <!-- Filter row 2 -->
+    <div class="filter-bar" style="margin-bottom:8px;">
+      <label class="checkbox-label"><span class="checkbox"></span> □ 슬랙</label>
+      <label class="checkbox-label"><span class="checkbox"></span> 미분류</label>
+      <label class="checkbox-label"><span class="checkbox"></span> 미확정</label>
+      <button class="btn" style="height:28px;font-size:11px;color:#8b949e;">✕ 초기화</button>
+    </div>
+
+    <!-- Legend row -->
+    <div class="legend">
+      <span>내부계정 구분:</span>
+      <span><span class="legend-dot" style="background:#ef4444;"></span>ODD</span>
+      <span><span class="legend-dot" style="background:#f97316;"></span>한아원리테일</span>
+      <span><span class="legend-dot" style="background:#22c55e;"></span>마트약국</span>
+      <span><span class="legend-dot" style="background:#a855f7;"></span>YUNE</span>
+      <span><span class="legend-dot" style="background:#3b82f6;"></span>3PL</span>
+    </div>
+
+    <p class="hint">⚠ 3줄 + 헤더 = 데이터 영역 시작까지 ~160px 소비</p>
+  </div>
+
+  <div class="arrow-divider">↓</div>
+
+  <!-- AFTER -->
+  <div class="section">
+    <span class="label label-after">AFTER — 리디자인</span>
+    <h2>헤더 + 1차 필터 (+ 접기/펼치기 2차)</h2>
+
+    <!-- Header row (simplified) -->
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:18px;font-weight:600;">거래내역</span>
+        <span class="text-muted text-xs">842건</span>
+      </div>
+    </div>
+
+    <!-- Tier 1: Primary filters -->
+    <div class="filter-bar" id="tier1">
+      <div style="display:flex;align-items:center;gap:4px;">
+        <button class="btn" style="padding:0 8px;">‹</button>
+        <button class="month-picker">JAN 2026</button>
+        <button class="btn" style="padding:0 8px;">›</button>
+      </div>
+      <div class="search-wrap">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="5"/><path d="M10 10l3 3"/></svg>
+        <input class="search-input" placeholder="내역, 거래처, 내부계정..." style="width:200px;" />
+      </div>
+      <div class="tab-group">
+        <button class="tab active">전체</button>
+        <button class="tab">수입</button>
+        <button class="tab">지출</button>
+      </div>
+      <button class="toggle active-amber" onclick="this.classList.toggle('active-amber')">미분류</button>
+      <button class="toggle active-blue" onclick="this.classList.toggle('active-blue')">미확정</button>
+
+      <!-- Filter expand button -->
+      <button class="btn" id="filterToggle" onclick="toggleTier2()" style="gap:4px;">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 5h8M3 8h5M3 11h3"/></svg>
+        필터
+        <span class="filter-badge" id="filterBadge" style="display:none;">0</span>
+      </button>
+
+      <!-- Actions dropdown (replaces 3 buttons) -->
+      <div class="dropdown-wrap ml-auto">
+        <button class="btn" onclick="toggleDropdown()" id="actionsBtn">
+          작업 ▾
+        </button>
+        <div class="dropdown-menu" id="actionsMenu">
+          <button class="dropdown-item" onclick="toggleDropdown()">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 1l2 4-2 2-2-2z M3 9l4 4 4-4"/></svg>
+            자동 매핑
+          </button>
+          <button class="dropdown-item" onclick="toggleDropdown()">
+            <svg width="14" height="14" fill="none" stroke="#3fb950" stroke-width="2"><path d="M2 7l4 4 6-8"/></svg>
+            <span style="color:#3fb950;">이 달 일괄 확정</span>
+          </button>
+          <button class="dropdown-item" onclick="toggleDropdown()">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v4h8V7M7 1v7M4 4l3-3 3 3"/></svg>
+            CSV 다운로드
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tier 2: Secondary filters (collapsible) -->
+    <div class="tier2" id="tier2">
+      <select class="select" style="min-width:140px;"><option>내부계정</option></select>
+      <select class="select"><option>표준 계정</option></select>
+      <select class="select"><option>회원</option></select>
+      <select class="select"><option>출처</option></select>
+      <button class="toggle" onclick="this.classList.toggle('active-purple')">
+        <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="10" height="8" rx="1"/><path d="M3 1v2M7 1v2M11 1v2"/></svg>
+        슬랙
+      </button>
+      <button class="toggle" onclick="this.classList.toggle('active-emerald')">자동 매핑</button>
+      <button class="btn" style="height:28px;font-size:11px;color:#8b949e;">✕ 초기화</button>
+    </div>
+
+    <!-- Legend (compact, below filters) -->
+    <div class="legend" style="margin-top:8px;">
+      <span style="font-size:10px;">내부계정:</span>
+      <span><span class="legend-dot" style="background:#ef4444;"></span>ODD</span>
+      <span><span class="legend-dot" style="background:#f97316;"></span>한아원리테일</span>
+      <span><span class="legend-dot" style="background:#22c55e;"></span>마트약국</span>
+      <span><span class="legend-dot" style="background:#a855f7;"></span>YUNE</span>
+      <span><span class="legend-dot" style="background:#3b82f6;"></span>3PL</span>
+    </div>
+
+    <p class="hint">✅ 기본 ~100px만 사용. "필터" 버튼 클릭 시 2차 필터 펼침. "작업" 드롭다운으로 3버튼 → 1버튼.</p>
+  </div>
+
+  <!-- Side by side comparison stats -->
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:24px;">
+    <div class="section" style="text-align:center;">
+      <span class="label label-before">BEFORE</span>
+      <div style="margin-top:12px;">
+        <div style="font-size:32px;font-weight:700;color:#da3633;">13</div>
+        <div class="text-muted text-xs" style="margin-top:4px;">1차에 보이는 컨트롤 수</div>
+      </div>
+      <div style="margin-top:16px;">
+        <div style="font-size:32px;font-weight:700;color:#da3633;">~160px</div>
+        <div class="text-muted text-xs" style="margin-top:4px;">테이블 위 공간</div>
+      </div>
+    </div>
+    <div class="section" style="text-align:center;">
+      <span class="label label-after">AFTER</span>
+      <div style="margin-top:12px;">
+        <div style="font-size:32px;font-weight:700;color:#238636;">7</div>
+        <div class="text-muted text-xs" style="margin-top:4px;">1차에 보이는 컨트롤 수</div>
+      </div>
+      <div style="margin-top:16px;">
+        <div style="font-size:32px;font-weight:700;color:#238636;">~100px</div>
+        <div class="text-muted text-xs" style="margin-top:4px;">테이블 위 공간</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function toggleTier2() {
+  const tier2 = document.getElementById('tier2');
+  const badge = document.getElementById('filterBadge');
+  tier2.classList.toggle('open');
+  if (tier2.classList.contains('open')) {
+    document.getElementById('filterToggle').classList.add('btn-active');
+  } else {
+    document.getElementById('filterToggle').classList.remove('btn-active');
+  }
+}
+
+function toggleDropdown() {
+  document.getElementById('actionsMenu').classList.toggle('open');
+}
+
+// Close dropdown on outside click
+document.addEventListener('click', (e) => {
+  const wrap = document.querySelector('.dropdown-wrap');
+  if (wrap && !wrap.contains(e.target)) {
+    document.getElementById('actionsMenu').classList.remove('open');
+  }
+});
+</script>
+</body>
+</html>

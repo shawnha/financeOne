@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>조정 예상 + Worst-Case 로직 리뷰</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 24px; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  h2 { font-size: 14px; color: #94a3b8; margin-bottom: 16px; }
+  .controls { display: flex; gap: 16px; align-items: center; margin-bottom: 16px; padding: 14px; background: #161b22; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); flex-wrap: wrap; }
+  .controls label { font-size: 13px; color: #94a3b8; }
+  .controls input[type=range] { width: 280px; accent-color: #22C55E; }
+  .controls .day-display { font-size: 28px; font-weight: 700; color: #22C55E; min-width: 70px; }
+  .toggle-group { display: flex; gap: 4px; padding: 3px; background: #0d1117; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08); }
+  .toggle-btn { padding: 6px 14px; font-size: 12px; font-weight: 600; border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; background: transparent; color: #64748b; }
+  .toggle-btn.active { background: #1e293b; color: #e2e8f0; }
+  .toggle-btn:hover:not(.active) { color: #94a3b8; }
+  .chart-wrap { background: #161b22; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); padding: 20px; margin-bottom: 16px; }
+  canvas { max-height: 380px; }
+  .legend { display: flex; gap: 20px; margin-top: 10px; font-size: 11px; flex-wrap: wrap; }
+  .legend span { display: flex; align-items: center; gap: 5px; }
+  .legend .dot { width: 12px; height: 3px; border-radius: 2px; }
+  .info-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+  .info-card { background: #161b22; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); padding: 14px; }
+  .info-card .label { font-size: 10px; color: #64748b; margin-bottom: 3px; }
+  .info-card .value { font-size: 16px; font-weight: 700; font-family: monospace; }
+  .info-card .sub { font-size: 10px; color: #64748b; margin-top: 3px; }
+  .green { color: #22C55E; }
+  .amber { color: #F59E0B; }
+  .gray { color: #71717a; }
+  .red { color: #EF4444; }
+  .compare-box { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .compare-card { background: #161b22; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); padding: 16px; }
+  .compare-card h3 { font-size: 13px; margin-bottom: 8px; }
+  .compare-card .desc { font-size: 12px; color: #94a3b8; line-height: 1.6; }
+  .compare-card.current { border-color: rgba(113,113,122,0.3); }
+  .compare-card.proposed { border-color: rgba(239,68,68,0.3); }
+  .alert-box { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2); border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; font-size: 12px; color: #fca5a5; display: none; }
+</style>
+</head>
+<body>
+
+<h1>Worst-Case Shift 비교 리뷰</h1>
+<h2>슬라이더로 실제 데이터 범위를 조절하고, 현재(static) vs 제안(shifted) worst-case를 비교하세요</h2>
+
+<div class="controls">
+  <label>실제 데이터:</label>
+  <input type="range" id="daySlider" min="0" max="31" value="14">
+  <div class="day-display" id="dayDisplay">14일</div>
+
+  <div class="toggle-group" style="margin-left: auto;">
+    <button class="toggle-btn active" data-mode="compare">비교</button>
+    <button class="toggle-btn" data-mode="current">현재 (static)</button>
+    <button class="toggle-btn" data-mode="proposed">제안 (shifted)</button>
+  </div>
+</div>
+
+<div id="alertBox" class="alert-box"></div>
+
+<div class="info-cards">
+  <div class="info-card">
+    <div class="label">원래 예상 기말</div>
+    <div class="value gray" id="kpiOriginal">-</div>
+  </div>
+  <div class="info-card">
+    <div class="label">조정 예상 기말</div>
+    <div class="value amber" id="kpiAdjusted">-</div>
+    <div class="sub" id="kpiVariance"></div>
+  </div>
+  <div class="info-card">
+    <div class="label">현재 worst-case 기말 (static)</div>
+    <div class="value gray" id="kpiWorstCurrent">-</div>
+  </div>
+  <div class="info-card">
+    <div class="label">제안 worst-case 기말 (shifted)</div>
+    <div class="value red" id="kpiWorstProposed">-</div>
+  </div>
+</div>
+
+<div class="chart-wrap">
+  <canvas id="chart" height="380"></canvas>
+  <div class="legend">
+    <span><span class="dot" style="background:#22C55E"></span> 실제 잔고</span>
+    <span><span class="dot" style="background:#F59E0B"></span> 조정 예상</span>
+    <span><span class="dot" style="background:#71717a"></span> 원래 예상</span>
+    <span><span class="dot" style="background:rgba(239,68,68,0.4)"></span> worst-case (현재/static)</span>
+    <span><span class="dot" style="background:#EF4444"></span> worst-case (제안/shifted)</span>
+  </div>
+</div>
+
+<div class="compare-box">
+  <div class="compare-card current">
+    <h3 class="gray">현재: Static Worst-Case</h3>
+    <div class="desc">
+      forecast 항목만으로 계산. 실제 데이터가 들어와도 <strong>변하지 않음</strong>.<br><br>
+      <strong>장점:</strong> "원래 계획 기준 최악"을 보여줌<br>
+      <strong>단점:</strong> 실제가 worst-case보다 나빠지면 <span class="red">거짓 안심</span>을 줌
+    </div>
+  </div>
+  <div class="compare-card proposed">
+    <h3 class="red">제안: Shifted Worst-Case</h3>
+    <div class="desc">
+      실제 구간은 실제 잔고, 미래 구간은 <strong>마지막 실제 잔고 + 남은 worst-case 변동분</strong>.<br><br>
+      <strong>장점:</strong> "지금 시점에서 앞으로 최악은?" — CFO가 필요한 정보<br>
+      <strong>단점:</strong> 원래 worst-case 계획과 비교 불가
+    </div>
+  </div>
+</div>
+
+<script>
+let rawData = null;
+let chart = null;
+let viewMode = "compare"; // compare | current | proposed
+
+function buildActualByDay(actualPoints, opening) {
+  const map = new Map();
+  map.set(0, opening);
+  let lastBal = opening;
+  for (const pt of actualPoints) {
+    lastBal = pt.balance;
+    map.set(pt.day, lastBal);
+  }
+  let prev = opening;
+  for (let d = 1; d <= 31; d++) {
+    if (map.has(d)) prev = map.get(d);
+    else map.set(d, prev);
+  }
+  return map;
+}
+
+function compute(simulatedLastDay) {
+  const points = rawData.schedule_points;
+  const worstCase = rawData.worst_case || [];
+  const opening = rawData.opening;
+  const actualByDay = buildActualByDay(rawData.actual_daily_points, opening);
+  const realLastDay = rawData.last_actual_day;
+  const lastDay = Math.min(simulatedLastDay, realLastDay);
+
+  const lastActualBalance = lastDay > 0 ? (actualByDay.get(lastDay) ?? null) : null;
+  const lastForecastPt = points.find(p => p.day === lastDay);
+  const lastForecastAtActualDay = lastForecastPt ? lastForecastPt.balance : null;
+
+  // Worst-case: find balance at lastDay
+  const lastWorstPt = worstCase.find(p => p.day === lastDay);
+  const lastWorstAtActualDay = lastWorstPt ? lastWorstPt.balance : null;
+
+  const labels = [], originalData = [], adjustedData = [], actualData = [];
+  const worstCurrentData = [], worstShiftedData = [];
+
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    const day = p.day;
+    const wc = worstCase[i];
+    labels.push(day === 0 ? '시작' : `1/${day}`);
+    originalData.push(p.balance);
+
+    // Actual
+    if (day === 0) actualData.push(opening);
+    else if (day <= lastDay) actualData.push(actualByDay.get(day) ?? null);
+    else actualData.push(null);
+
+    // Adjusted (current logic - correct)
+    let est;
+    if (day === 0) est = p.balance;
+    else if (day <= lastDay && actualByDay.has(day)) est = actualByDay.get(day);
+    else if (lastActualBalance != null && lastForecastAtActualDay != null) est = lastActualBalance + (p.balance - lastForecastAtActualDay);
+    else est = p.balance;
+    adjustedData.push(est);
+
+    // Worst-case CURRENT (static - never changes)
+    worstCurrentData.push(wc ? wc.balance : null);
+
+    // Worst-case PROPOSED (shifted - same pattern as adjusted)
+    let wcShifted;
+    if (!wc) { wcShifted = null; }
+    else if (day === 0) { wcShifted = wc.balance; }
+    else if (day <= lastDay && actualByDay.has(day)) { wcShifted = actualByDay.get(day); }
+    else if (lastActualBalance != null && lastWorstAtActualDay != null) {
+      wcShifted = lastActualBalance + (wc.balance - lastWorstAtActualDay);
+    } else { wcShifted = wc.balance; }
+    worstShiftedData.push(wcShifted);
+  }
+
+  return { labels, originalData, adjustedData, actualData, worstCurrentData, worstShiftedData, lastDay, lastActualBalance, lastForecastAtActualDay };
+}
+
+function fmt(v) {
+  if (v == null) return '-';
+  return '₩' + Math.round(v).toLocaleString('ko-KR');
+}
+
+function updateChart(simulatedLastDay) {
+  const r = compute(simulatedLastDay);
+
+  document.getElementById('dayDisplay').textContent = simulatedLastDay === 0 ? '없음' : `${simulatedLastDay}일`;
+  document.getElementById('kpiOriginal').textContent = fmt(r.originalData[r.originalData.length - 1]);
+  document.getElementById('kpiAdjusted').textContent = fmt(r.adjustedData[r.adjustedData.length - 1]);
+  document.getElementById('kpiWorstCurrent').textContent = fmt(r.worstCurrentData[r.worstCurrentData.length - 1]);
+  document.getElementById('kpiWorstProposed').textContent = fmt(r.worstShiftedData[r.worstShiftedData.length - 1]);
+
+  const variance = r.lastActualBalance != null && r.lastForecastAtActualDay != null
+    ? r.lastActualBalance - r.lastForecastAtActualDay : 0;
+  document.getElementById('kpiVariance').textContent = variance !== 0
+    ? `차이: ${variance > 0 ? '+' : ''}${fmt(variance)}` : '';
+  document.getElementById('kpiVariance').style.color = variance > 0 ? '#22C55E' : variance < 0 ? '#EF4444' : '#64748b';
+
+  // Alert: if shifted worst-case goes below 0
+  const alertBox = document.getElementById('alertBox');
+  const minShifted = Math.min(...r.worstShiftedData.filter(v => v != null));
+  const minShiftedDay = r.worstShiftedData.findIndex(v => v === minShifted);
+  if (minShifted < 0 && simulatedLastDay > 0) {
+    alertBox.style.display = 'block';
+    alertBox.textContent = `⚠ Shifted worst-case에서 ${minShiftedDay}일에 잔고가 ${fmt(minShifted)}로 마이너스 진입! 유동성 부족 위험.`;
+  } else {
+    alertBox.style.display = 'none';
+  }
+
+  // Show/hide datasets based on mode
+  const showCurrent = viewMode === 'compare' || viewMode === 'current';
+  const showProposed = viewMode === 'compare' || viewMode === 'proposed';
+
+  if (chart) {
+    chart.data.labels = r.labels;
+    chart.data.datasets[0].data = r.actualData;
+    chart.data.datasets[1].data = r.adjustedData;
+    chart.data.datasets[2].data = r.originalData;
+    chart.data.datasets[3].data = showCurrent ? r.worstCurrentData : r.worstCurrentData.map(() => null);
+    chart.data.datasets[4].data = showProposed ? r.worstShiftedData : r.worstShiftedData.map(() => null);
+    chart.data.datasets[3].hidden = !showCurrent;
+    chart.data.datasets[4].hidden = !showProposed;
+    chart.update('none');
+    return;
+  }
+
+  const ctx = document.getElementById('chart').getContext('2d');
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: r.labels,
+      datasets: [
+        { label: '실제 잔고', data: r.actualData, borderColor: '#22C55E', borderWidth: 2.5, pointRadius: 0, spanGaps: false, order: 1 },
+        { label: '조정 예상', data: r.adjustedData, borderColor: '#F59E0B', borderWidth: 2, borderDash: [6, 4], pointRadius: 0, backgroundColor: 'rgba(245,158,11,0.06)', fill: true, order: 2 },
+        { label: '원래 예상', data: r.originalData, borderColor: '#71717a', borderWidth: 1.5, borderDash: [8, 4], pointRadius: 0, order: 3 },
+        { label: 'worst-case (현재/static)', data: r.worstCurrentData, borderColor: 'rgba(239,68,68,0.35)', borderWidth: 1.2, borderDash: [4, 4], pointRadius: 0, order: 4, hidden: !showCurrent },
+        { label: 'worst-case (제안/shifted)', data: r.worstShiftedData, borderColor: '#EF4444', borderWidth: 2, borderDash: [6, 3], pointRadius: 0, order: 4, hidden: !showProposed },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#161b22', borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1,
+          titleColor: '#94a3b8', bodyColor: '#e2e8f0',
+          callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmt(ctx.parsed.y)}` },
+        },
+      },
+      scales: {
+        x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b', font: { size: 10 } } },
+        y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b', font: { size: 10 }, callback: (v) => v >= 1e6 ? `₩${(v/1e6).toFixed(0)}M` : `₩${v.toLocaleString()}` } },
+      },
+    },
+  });
+}
+
+// Toggle buttons
+document.querySelectorAll('.toggle-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    viewMode = btn.dataset.mode;
+    updateChart(parseInt(document.getElementById('daySlider').value));
+  });
+});
+
+(async () => {
+  const resp = await fetch('http://localhost:8000/api/cashflow/daily-schedule?entity_id=2&year=2026&month=1');
+  const schedule = await resp.json();
+  const resp2 = await fetch('http://localhost:8000/api/cashflow/forecast?entity_id=2&year=2026&month=1');
+  const forecast = await resp2.json();
+
+  rawData = {
+    schedule_points: schedule.points,
+    worst_case: schedule.worst_case_points || [],
+    opening: forecast.opening_balance,
+    actual_daily_points: forecast.actual_daily_points,
+    last_actual_day: forecast.last_actual_day,
+  };
+
+  const slider = document.getElementById('daySlider');
+  slider.max = rawData.last_actual_day;
+  slider.value = 14;
+  updateChart(14);
+
+  slider.addEventListener('input', () => updateChart(parseInt(slider.value)));
+})();
+</script>
+</body>
+</html>
