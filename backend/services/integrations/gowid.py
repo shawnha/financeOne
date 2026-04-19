@@ -26,7 +26,10 @@ from psycopg2.extensions import connection as PgConnection
 logger = logging.getLogger(__name__)
 
 GOWID_BASE_URL = "https://openapi.gowid.com"
-SOURCE_TYPE = "gowid_card"
+SETTINGS_KEY_PREFIX = "gowid_api_key"
+
+# Gowid 출처 fallback (카드사 식별 안 될 때만 사용)
+DEFAULT_SOURCE_TYPE = "gowid_card"
 
 # shortCardNumber 형식 "롯데 0742" → 카드사 추출
 _CARD_ISSUER_PATTERN = re.compile(r"^(\S+)\s+(\d{4})$")
@@ -47,6 +50,49 @@ GOWID_ISSUER_TO_ORG = {
 
 class GowidError(Exception):
     pass
+
+
+def get_api_key(conn: PgConnection, entity_id: int) -> Optional[str]:
+    """entity_id에 등록된 Gowid API key 조회.
+    settings(key='gowid_api_key', entity_id=N).value 에 저장."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT value FROM settings WHERE key = %s AND entity_id = %s",
+            [SETTINGS_KEY_PREFIX, entity_id],
+        )
+        row = cur.fetchone()
+        return row[0] if row and row[0] else None
+    finally:
+        cur.close()
+
+
+def set_api_key(conn: PgConnection, entity_id: int, api_key: str) -> None:
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            INSERT INTO settings (key, value, entity_id, updated_at)
+            VALUES (%s, %s, %s, NOW())
+            ON CONFLICT (key, entity_id) DO UPDATE
+                SET value = EXCLUDED.value, updated_at = NOW()
+            """,
+            [SETTINGS_KEY_PREFIX, api_key, entity_id],
+        )
+    finally:
+        cur.close()
+
+
+def delete_api_key(conn: PgConnection, entity_id: int) -> bool:
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "DELETE FROM settings WHERE key = %s AND entity_id = %s",
+            [SETTINGS_KEY_PREFIX, entity_id],
+        )
+        return cur.rowcount > 0
+    finally:
+        cur.close()
 
 
 class GowidClient:
@@ -151,19 +197,40 @@ class GowidClient:
 
             gowid_id = item.get("expenseId")
             id_marker = f"gowid_id:{gowid_id}"
+            # 출처 = 카드사별 (Excel 업로드와 같은 source_type) — fallback gowid_card
+            source_type = tx.get("issuer_org") or DEFAULT_SOURCE_TYPE
 
-            # 중복 감지 — note에 'gowid_id:<int>' marker 저장하고 prefix matching
+            # 중복 감지 — gowid_id marker로 모든 source_type 가로질러 검색
             cur.execute(
                 """
                 SELECT id FROM transactions
-                WHERE entity_id = %s AND source_type = %s AND note LIKE %s
+                WHERE entity_id = %s AND note LIKE %s
                 LIMIT 1
                 """,
-                [entity_id, SOURCE_TYPE, f"{id_marker}%"],
+                [entity_id, f"{id_marker}%"],
             )
             if cur.fetchone():
                 duplicates += 1
                 continue
+
+            # member_id 자동 매칭: 카드번호 → 이름 fallback (Codef와 동일 패턴)
+            member_id = None
+            if tx.get("card_number"):
+                cur.execute(
+                    "SELECT id FROM members WHERE entity_id = %s AND %s = ANY(card_numbers) AND is_active = true LIMIT 1",
+                    [entity_id, tx["card_number"]],
+                )
+                row = cur.fetchone()
+                if row:
+                    member_id = row[0]
+            if member_id is None and tx.get("card_alias"):
+                cur.execute(
+                    "SELECT id FROM members WHERE entity_id = %s AND name = %s AND is_active = true LIMIT 1",
+                    [entity_id, tx["card_alias"]],
+                )
+                row = cur.fetchone()
+                if row:
+                    member_id = row[0]
 
             mapping = auto_map_transaction(
                 cur, entity_id=entity_id,
@@ -171,7 +238,7 @@ class GowidClient:
                 description=tx["description"],
             )
 
-            note_with_id = id_marker
+            note_with_id = f"{id_marker} | gowid"
             if tx.get("note"):
                 note_with_id += f" | {tx['note']}"
 
@@ -180,19 +247,19 @@ class GowidClient:
                 INSERT INTO transactions
                     (entity_id, date, amount, currency, type, description,
                      counterparty, source_type, is_confirmed, is_cancel,
-                     card_number, parsed_member_name,
+                     card_number, parsed_member_name, member_id,
                      internal_account_id, standard_account_id,
                      mapping_confidence, mapping_source,
                      note, created_at, updated_at)
                 VALUES (%s, %s, %s, 'KRW', 'out', %s, %s, %s, FALSE, FALSE,
-                        %s, %s,
+                        %s, %s, %s,
                         %s, %s, %s, %s,
                         %s, NOW(), NOW())
                 """,
                 [
                     entity_id, tx["date"], float(tx["amount"]),
-                    tx["description"], tx["counterparty"], SOURCE_TYPE,
-                    tx["card_number"], tx["card_alias"],
+                    tx["description"], tx["counterparty"], source_type,
+                    tx["card_number"], tx["card_alias"], member_id,
                     mapping["internal_account_id"] if mapping else None,
                     mapping.get("standard_account_id") if mapping else None,
                     mapping.get("confidence") if mapping else None,

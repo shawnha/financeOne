@@ -726,12 +726,32 @@ class GowidSyncRequest(BaseModel):
         return v
 
 
-def _get_gowid_client():
-    from backend.services.integrations.gowid import GowidClient
-    key = os.environ.get("GOWID_API_KEY", "").strip()
+def _get_gowid_client_for_entity(conn: PgConnection, entity_id: int):
+    """entity별 API key로 Gowid 클라이언트 생성. 없으면 env GOWID_API_KEY로 fallback."""
+    from backend.services.integrations.gowid import GowidClient, get_api_key
+    key = get_api_key(conn, entity_id)
     if not key:
-        raise HTTPException(400, "GOWID_API_KEY not configured")
+        # 하위 호환: 첫 등록 전엔 env var 사용 (entity 2 마이그레이션용)
+        key = os.environ.get("GOWID_API_KEY", "").strip()
+    if not key:
+        raise HTTPException(
+            400,
+            f"Gowid API key가 entity_id={entity_id}에 등록되지 않음 — 설정에서 추가 필요",
+        )
     return GowidClient(key)
+
+
+class GowidApiKeyRequest(BaseModel):
+    entity_id: int
+    api_key: str
+
+    @field_validator("api_key")
+    @classmethod
+    def validate_key(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 10:
+            raise ValueError("api_key가 너무 짧습니다")
+        return v
 
 
 @router.get("/gowid/status")
@@ -739,13 +759,15 @@ def gowid_status(
     entity_id: int = 2,
     conn: PgConnection = Depends(get_db),
 ):
-    """Gowid 연결 상태 + 마지막 sync 시각."""
-    configured = bool(os.environ.get("GOWID_API_KEY"))
+    """Gowid 연결 상태 + 마지막 sync 시각 (entity별)."""
+    from backend.services.integrations.gowid import get_api_key
+    key = get_api_key(conn, entity_id) or os.environ.get("GOWID_API_KEY", "").strip()
+    configured = bool(key)
 
     if not configured:
         return {
             "configured": False, "connected": False,
-            "last_sync": None, "synced_count": 0,
+            "last_sync": None, "synced_count": 0, "key_source": None,
         }
 
     cur = conn.cursor()
@@ -761,7 +783,7 @@ def gowid_status(
     cur.close()
 
     try:
-        client = _get_gowid_client()
+        client = _get_gowid_client_for_entity(conn, entity_id)
         connected = client.health()
         client.close()
     except Exception:
@@ -772,7 +794,38 @@ def gowid_status(
         "connected": connected,
         "synced_count": row[0] if row else 0,
         "last_sync": row[1].isoformat() if row and row[1] else None,
+        "key_source": "settings" if get_api_key(conn, entity_id) else "env",
     }
+
+
+@router.post("/gowid/api-key")
+def gowid_set_api_key(
+    body: GowidApiKeyRequest,
+    conn: PgConnection = Depends(get_db),
+):
+    """법인별 Gowid API key 저장."""
+    from backend.services.integrations.gowid import set_api_key, GowidClient
+    # 키 검증 — 실 API 호출
+    test_client = GowidClient(body.api_key)
+    try:
+        if not test_client.health():
+            raise HTTPException(400, "API key 검증 실패: Gowid에서 거절")
+    finally:
+        test_client.close()
+    set_api_key(conn, body.entity_id, body.api_key)
+    conn.commit()
+    return {"ok": True, "entity_id": body.entity_id}
+
+
+@router.delete("/gowid/api-key")
+def gowid_delete_api_key(
+    entity_id: int,
+    conn: PgConnection = Depends(get_db),
+):
+    from backend.services.integrations.gowid import delete_api_key
+    deleted = delete_api_key(conn, entity_id)
+    conn.commit()
+    return {"deleted": deleted, "entity_id": entity_id}
 
 
 @router.post("/gowid/sync")
@@ -780,9 +833,9 @@ def gowid_sync(
     body: GowidSyncRequest,
     conn: PgConnection = Depends(get_db),
 ):
-    """Gowid 거래 동기화."""
+    """Gowid 거래 동기화 (entity별)."""
     from backend.services.integrations.gowid import GowidError
-    client = _get_gowid_client()
+    client = _get_gowid_client_for_entity(conn, body.entity_id)
     try:
         result = client.sync_expenses(
             conn, body.entity_id, body.start_date, body.end_date,
