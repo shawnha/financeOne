@@ -2308,7 +2308,15 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
             onClick={() => setCardTimingOpen((v) => !v)}
             className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-secondary/70 transition-colors"
           >
-            <span className="text-xs font-semibold text-purple-400 flex-1">카드 시차</span>
+            <span className="text-xs font-semibold text-purple-400">카드 시차</span>
+            <span className="flex-1" />
+            <span className="text-xs text-muted-foreground">시차 보정</span>
+            <span className={cn(
+              "text-sm font-mono tabular-nums font-semibold",
+              data.card_timing.adjustment >= 0 ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]",
+            )}>
+              {data.card_timing.adjustment >= 0 ? "+" : ""}{formatByEntity(data.card_timing.adjustment, entityId)}
+            </span>
             {cardTimingOpen ? <ChevronDown className="h-4 w-4 text-purple-400/60" /> : <ChevronRight className="h-4 w-4 text-purple-400/60" />}
           </button>
           {cardTimingOpen && (
@@ -2342,7 +2350,17 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
             onClick={() => setVsActualOpen((v) => !v)}
             className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-secondary/70 transition-colors"
           >
-            <span className="text-xs font-semibold text-[hsl(var(--warning))] flex-1">예상 vs 실제</span>
+            <span className="text-xs font-semibold text-[hsl(var(--warning))]">예상 vs 실제</span>
+            <span className="flex-1" />
+            <span className="text-xs text-muted-foreground">차이</span>
+            <span className={cn("text-sm font-mono tabular-nums font-semibold", diffColor)}>
+              {data.diff >= 0 ? "+" : ""}{formatByEntity(data.diff, entityId)}
+            </span>
+            {data.adjusted_forecast_closing !== 0 && (
+              <span className={cn("text-[11px] font-mono tabular-nums", diffColor)}>
+                ({(100 - Math.abs(diffPct)).toFixed(1)}%)
+              </span>
+            )}
             {vsActualOpen ? <ChevronDown className="h-4 w-4 text-[hsl(var(--warning))]/60" /> : <ChevronRight className="h-4 w-4 text-[hsl(var(--warning))]/60" />}
           </button>
           {vsActualOpen && (
