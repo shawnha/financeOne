@@ -244,7 +244,7 @@ function KPICard({
     <Card className="bg-secondary rounded-xl p-4">
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
       <p className={cn("text-lg md:text-xl lg:text-[28px] font-bold font-mono tabular-nums mt-1 truncate", colorClass)}>{displayValue}</p>
-      {subtext && <p className={cn("text-[11px] mt-0.5", subtextColor || "text-muted-foreground")}>{subtext}</p>}
+      {subtext && <p className={cn("text-[11px] mt-1 font-medium", subtextColor || "text-foreground/75")}>{subtext}</p>}
     </Card>
   )
 }
@@ -1633,6 +1633,12 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
             if (Math.abs(diff) < 1000) return undefined
             return `${diff >= 0 ? "+" : ""}${formatByEntity(diff, entityId)} vs 원래`
           })()}
+          subtextColor={(() => {
+            if (!closingBalances) return undefined
+            const diff = closingBalances.adjusted - closingBalances.original
+            if (Math.abs(diff) < 1000) return undefined
+            return diff >= 0 ? "text-emerald-300" : "text-rose-300"
+          })()}
         />
         <KPICard
           label="실제 진행 기말"
@@ -1640,6 +1646,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
           rawAmount={data.actual_closing}
           entityId={entityId}
           subtext={`차이: ${data.diff >= 0 ? "+" : ""}${formatByEntity(data.diff, entityId)}`}
+          subtextColor={data.diff >= 0 ? "text-emerald-300" : "text-rose-300"}
           colorClass="text-[hsl(var(--profit))]"
         />
         <KPICard
@@ -1648,6 +1655,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
           rawAmount={data.card_timing.curr_month_card_actual}
           entityId={entityId}
           subtext={`예상 ${formatByEntity(data.forecast_card_usage, entityId)} 중`}
+          subtextColor="text-violet-300"
           colorClass="text-[#8B5CF6]"
         />
       </div>
