@@ -1229,7 +1229,7 @@ function ForecastModal({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-muted-foreground">예상 결제일</label>
+              <label className="text-xs text-muted-foreground">{type === "in" ? "예상 입금일" : "예상 결제일"}</label>
               <select
                 value={expectedDay}
                 onChange={(e) => setExpectedDay(e.target.value)}
