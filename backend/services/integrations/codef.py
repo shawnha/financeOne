@@ -13,11 +13,13 @@ env vars:
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Optional
+from urllib.parse import unquote
 
 import httpx
 from psycopg2.extensions import connection as PgConnection
@@ -181,7 +183,7 @@ class CodefClient:
             )
 
         resp.raise_for_status()
-        data = resp.json()
+        data = _parse_codef_response(resp.text)
 
         result_code = data.get("result", {}).get("code", "")
         if result_code != "CF-00000":
@@ -385,6 +387,33 @@ class CodefClient:
             "total_fetched": len(raw_list),
             "environment": self.environment,
         }
+
+
+# ── Codef 응답 파싱 ─────────────────────────────────────
+
+
+def _parse_codef_response(raw: str) -> dict:
+    """Codef API 응답 파싱 — URL-encoded JSON 특이사항 대응.
+
+    Codef는 응답 body를 URL-encoded JSON 문자열로 반환 (예: '%7B%22result%22...').
+    일반 JSON도 지원하기 위해 먼저 URL decode 시도.
+    """
+    if not raw:
+        raise CodefError("Empty response from Codef")
+    # URL-encoded 응답 판별: '%'로 시작하거나 percent-encoded 문자 다수 포함
+    text = raw
+    if text.lstrip().startswith("%"):
+        text = unquote(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # 첫 시도 실패 → unquote 후 재시도 (Codef가 부분 인코딩 할 때 대비)
+        try:
+            return json.loads(unquote(raw))
+        except json.JSONDecodeError as e:
+            snippet = raw[:200]
+            logger.error("Codef response not parseable: %s", snippet)
+            raise CodefError(f"Codef 응답 파싱 실패: {snippet[:100]}") from e
 
 
 # ── 정규화 헬퍼 ───────────────────────────────────────────

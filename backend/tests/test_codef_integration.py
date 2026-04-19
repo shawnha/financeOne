@@ -1,5 +1,6 @@
 """Codef 연동 테스트 — 정규화, env toggle, 중복감지, connected_id 저장."""
 
+import json
 import os
 import pytest
 from decimal import Decimal
@@ -18,6 +19,7 @@ from backend.services.integrations.codef import (
     _normalize_bank_row,
     _normalize_card_row,
     _is_duplicate,
+    _parse_codef_response,
     resolve_base_url,
     is_production,
 )
@@ -429,6 +431,44 @@ def test_create_connected_id_missing_in_response():
         with pytest.raises(CodefError, match="No connectedId"):
             client.create_connected_id([{"organization": "0020"}])
     client.close()
+
+
+# ── Codef 응답 파싱 (URL-encoded JSON) ───────────────
+
+
+def test_parse_codef_response_plain_json():
+    raw = '{"result":{"code":"CF-00000","message":"success"},"data":{"connectedId":"abc"}}'
+    parsed = _parse_codef_response(raw)
+    assert parsed["result"]["code"] == "CF-00000"
+    assert parsed["data"]["connectedId"] == "abc"
+
+
+def test_parse_codef_response_url_encoded():
+    import urllib.parse
+    original = {"result": {"code": "CF-00000"}, "data": {"connectedId": "xyz"}}
+    encoded = urllib.parse.quote(json.dumps(original))
+    parsed = _parse_codef_response(encoded)
+    assert parsed["result"]["code"] == "CF-00000"
+    assert parsed["data"]["connectedId"] == "xyz"
+
+
+def test_parse_codef_response_empty():
+    with pytest.raises(CodefError, match="Empty response"):
+        _parse_codef_response("")
+
+
+def test_parse_codef_response_garbage():
+    with pytest.raises(CodefError, match="응답 파싱 실패"):
+        _parse_codef_response("not json and not url-encoded either")
+
+
+def test_parse_codef_response_korean_url_encoded():
+    """한글 메시지 포함 — 한글이 UTF-8 URL-encoded."""
+    import urllib.parse
+    original = {"result": {"code": "CF-12345", "message": "로그인 정보 불일치"}}
+    encoded = urllib.parse.quote(json.dumps(original, ensure_ascii=False))
+    parsed = _parse_codef_response(encoded)
+    assert parsed["result"]["message"] == "로그인 정보 불일치"
 
 
 # ── RSA 비밀번호 암호화 ─────────────────────────────
