@@ -77,7 +77,7 @@ def fetch_approved(conn: PgConnection, since_date: Optional[str] = None) -> list
                 e.merchant_name, e.transaction_date, e.card_last_four,
                 e.bank_name, e.account_holder,
                 e.is_urgent, e.is_pre_paid, e.pre_paid_percentage,
-                e.approved_at, e.created_at,
+                e.approved_at, e.created_at, e.company_id,
                 u.name AS submitter_name, u.email AS submitter_email
             FROM expenseone.expenses e
             LEFT JOIN expenseone.users u ON e.submitted_by_id = u.id
@@ -116,16 +116,21 @@ def sync_to_financeone(
     entity_id: int,
     expenses: list[dict],
 ) -> dict:
-    """승인 경비 → transactions에 직접 INSERT 안 하고 카드/은행 거래에 매칭만.
+    """승인 경비 → 카드/은행 거래에 매칭만 (transactions INSERT 안 함).
+
+    expense.company_id → entity_id 자동 라우팅 (한아원코리아=2, 한아원리테일=3, HOI=1).
+    entity_id 인자는 무시 (기존 호환용 — 모든 회사 자동 처리).
 
     매칭 성공: transaction_expenseone_match에 link
-    매칭 실패: unmatched로 남김 (별도 매칭 메뉴에서 수동 매칭 가능)
+    매칭 실패: unmatched (별도 매칭 메뉴에서 수동 처리)
+    entity 미매핑: skip + 에러 로그
 
     Returns:
-        {total_fetched, matched_card, matched_deposit, unmatched, already_linked, errors}
+        {total_fetched, matched_card, matched_deposit, unmatched, already_linked,
+         no_entity_mapping, errors, by_entity}
     """
     from backend.services.expenseone_matcher import (
-        find_card_match, find_deposit_match, insert_match,
+        find_card_match, find_deposit_match, insert_match, get_entity_for_company,
     )
 
     cur = conn.cursor()
@@ -133,7 +138,12 @@ def sync_to_financeone(
     matched_deposit = 0
     unmatched = 0
     already_linked = 0
+    no_entity_mapping = 0
+    by_entity: dict[int, int] = {}
     errors: list[dict] = []
+
+    # company_id → entity_id 캐시
+    entity_cache: dict[str, Optional[int]] = {}
 
     for exp in expenses:
         expense_id = str(exp.get("id"))
@@ -147,6 +157,14 @@ def sync_to_financeone(
                 already_linked += 1
                 continue
 
+            company_id = str(exp.get("company_id") or "")
+            if company_id and company_id not in entity_cache:
+                entity_cache[company_id] = get_entity_for_company(cur, company_id)
+            target_entity = entity_cache.get(company_id)
+            if not target_entity:
+                no_entity_mapping += 1
+                continue
+
             exp_type = exp.get("type") or ""
             amount = exp.get("amount") or 0
             txn_date_raw = exp.get("transaction_date") or exp.get("approved_at") or ""
@@ -157,7 +175,7 @@ def sync_to_financeone(
             match = None
             if exp_type == "CORPORATE_CARD":
                 match = find_card_match(
-                    cur, entity_id,
+                    cur, target_entity,
                     expense_date=txn_date, amount=amount,
                     card_last4=exp.get("card_last_four"),
                     merchant=exp.get("merchant_name") or exp.get("title"),
@@ -167,7 +185,7 @@ def sync_to_financeone(
             elif exp_type == "DEPOSIT_REQUEST":
                 approved_date = _parse_date(exp.get("approved_at")) or txn_date
                 match = find_deposit_match(
-                    cur, entity_id,
+                    cur, target_entity,
                     approved_date=approved_date, amount=amount,
                     account_holder=exp.get("account_holder"),
                 )
@@ -182,8 +200,9 @@ def sync_to_financeone(
                     expense_type=exp_type,
                     confidence=match["confidence"],
                     method=match["method"],
-                    reasoning=match["reasoning"],
+                    reasoning=f"entity={target_entity} | {match['reasoning']}",
                 )
+                by_entity[target_entity] = by_entity.get(target_entity, 0) + 1
             else:
                 unmatched += 1
         except Exception as e:
@@ -197,6 +216,8 @@ def sync_to_financeone(
         "matched_deposit": matched_deposit,
         "unmatched": unmatched,
         "already_linked": already_linked,
+        "no_entity_mapping": no_entity_mapping,
+        "by_entity": by_entity,
         "errors": errors,
     }
     logger.info("ExpenseOne match: %s", summary)

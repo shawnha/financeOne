@@ -30,7 +30,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
 import {
-  Search, Download, ChevronLeft, ChevronRight, X, AlertTriangle, AlertCircle, Upload, RotateCw, RefreshCw, Wand2, MessageSquare, SlidersHorizontal, ChevronDown, CheckCircle2,
+  Search, Download, ChevronLeft, ChevronRight, X, AlertTriangle, AlertCircle, Upload, RotateCw, RefreshCw, Wand2, MessageSquare, SlidersHorizontal, ChevronDown, CheckCircle2, Receipt,
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -113,6 +113,28 @@ interface SlackMatchInfo {
   match_confidence: number | null
   ai_reasoning: string | null
   note: string | null
+}
+
+interface ExpenseOneMatchInfo {
+  match_id: number
+  expense_id: string
+  expense_type: string
+  confidence: number | null
+  method: string | null
+  is_manual: boolean
+  is_confirmed: boolean
+  reasoning: string | null
+  expense: {
+    title: string | null
+    description: string | null
+    merchant_name: string | null
+    amount: number | null
+    category: string | null
+    account_holder: string | null
+    transaction_date: string | null
+    approved_at: string | null
+    submitter_name: string | null
+  }
 }
 
 interface Filters {
@@ -306,6 +328,8 @@ export default function TransactionsPage() {
   const [bulkMapAccountId, setBulkMapAccountId] = useState("")
   const [slackMatch, setSlackMatch] = useState<SlackMatchInfo | null>(null)
   const [slackMatchLoading, setSlackMatchLoading] = useState(false)
+  const [eoMatch, setEoMatch] = useState<ExpenseOneMatchInfo | null>(null)
+  const [eoMatchLoading, setEoMatchLoading] = useState(false)
   const [tier2Open, setTier2Open] = useState(false)
 
   // URL query에서 month 왔으면 globalMonth 동기화
@@ -750,6 +774,13 @@ export default function TransactionsPage() {
       .then(data => setSlackMatch(data))
       .catch(() => setSlackMatch(null))
       .finally(() => setSlackMatchLoading(false))
+    // Fetch ExpenseOne match info
+    setEoMatch(null)
+    setEoMatchLoading(true)
+    fetchAPI<ExpenseOneMatchInfo | null>(`/transactions/${tx.id}/expenseone-match`)
+      .then(data => setEoMatch(data))
+      .catch(() => setEoMatch(null))
+      .finally(() => setEoMatchLoading(false))
   }, [])
 
   const saveDetail = useCallback(async () => {
@@ -1576,6 +1607,74 @@ export default function TransactionsPage() {
                       <span className="ml-auto font-mono">{Math.round(slackMatch.match_confidence * 100)}%</span>
                     )}
                   </div>
+                </div>
+              )}
+
+              {/* ExpenseOne match info */}
+              {!eoMatchLoading && eoMatch && (
+                <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Receipt className="h-3.5 w-3.5 text-amber-400" />
+                    <span className="text-xs font-medium text-amber-400">ExpenseOne 매칭</span>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/15 text-amber-400 border-amber-500/30">
+                      {eoMatch.expense_type === "CORPORATE_CARD" ? "법카" : "입금요청"}
+                    </Badge>
+                    <Badge variant="outline" className={cn(
+                      "text-[10px] px-1.5 py-0 ml-auto",
+                      eoMatch.is_manual
+                        ? "bg-orange-500/15 text-orange-400 border-orange-500/30"
+                        : "bg-green-500/15 text-green-400 border-green-500/30"
+                    )}>
+                      {eoMatch.is_manual ? "수동" : "자동"}
+                    </Badge>
+                  </div>
+                  {eoMatch.expense.title && (
+                    <p className="text-sm text-foreground">
+                      {eoMatch.expense.title}
+                    </p>
+                  )}
+                  {eoMatch.expense.description && eoMatch.expense.description !== eoMatch.expense.title && (
+                    <p className="text-xs text-muted-foreground line-clamp-2">
+                      {eoMatch.expense.description}
+                    </p>
+                  )}
+                  <div className="grid grid-cols-2 gap-2 text-[11px] text-muted-foreground">
+                    {eoMatch.expense.submitter_name && (
+                      <div>
+                        <span className="text-muted-foreground/70">제출자</span>
+                        <p className="text-foreground">{eoMatch.expense.submitter_name}</p>
+                      </div>
+                    )}
+                    {eoMatch.expense.category && (
+                      <div>
+                        <span className="text-muted-foreground/70">카테고리</span>
+                        <p className="text-foreground">{eoMatch.expense.category}</p>
+                      </div>
+                    )}
+                    {eoMatch.expense.merchant_name && (
+                      <div>
+                        <span className="text-muted-foreground/70">가맹점</span>
+                        <p className="text-foreground">{eoMatch.expense.merchant_name}</p>
+                      </div>
+                    )}
+                    {eoMatch.expense.account_holder && (
+                      <div>
+                        <span className="text-muted-foreground/70">예금주</span>
+                        <p className="text-foreground">{eoMatch.expense.account_holder}</p>
+                      </div>
+                    )}
+                  </div>
+                  {eoMatch.confidence != null && (
+                    <div className="flex items-center justify-between text-[10px] text-muted-foreground/70 pt-1 border-t border-amber-500/10">
+                      <span className="font-mono">{eoMatch.method}</span>
+                      <span className="font-mono">신뢰도 {Math.round(eoMatch.confidence * 100)}%</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              {!eoMatchLoading && !eoMatch && detailTx.source_type && (detailTx.source_type.includes("card") || detailTx.source_type.includes("bank")) && (
+                <div className="rounded-lg border border-border bg-secondary/20 p-3 text-xs text-muted-foreground">
+                  매칭된 ExpenseOne 항목 없음. 매칭 메뉴에서 수동 연결 가능 (예정).
                 </div>
               )}
 

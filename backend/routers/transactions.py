@@ -619,6 +619,16 @@ def get_slack_match(
     }
 
 
+@router.get("/{tx_id}/expenseone-match")
+def get_expenseone_match(
+    tx_id: int,
+    conn: PgConnection = Depends(get_db),
+):
+    """거래에 연결된 ExpenseOne 매칭 정보 조회."""
+    from backend.services.expenseone_matcher import get_match_by_transaction
+    return get_match_by_transaction(conn.cursor(), tx_id)
+
+
 @router.post("/remap")
 def remap_batch(
     entity_id: int = Query(...),

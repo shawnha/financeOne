@@ -23,6 +23,31 @@ from psycopg2.extensions import connection as PgConnection
 logger = logging.getLogger(__name__)
 
 
+# ── ExpenseOne company_id ↔ FinanceOne entity_id ─────────
+# 회사명 기반 자동 매핑 (companies 테이블 + entities 테이블 join)
+def get_entity_for_company(cur, company_id: str) -> Optional[int]:
+    """ExpenseOne company_id → FinanceOne entity_id 매핑.
+
+    매칭 규칙: companies.name이 entities.name에 포함되거나 반대로 포함되면 같은 회사.
+    예: '한아원코리아' ↔ '주식회사 한아원코리아', 'HOI' ↔ 'HOI Inc.'
+    """
+    if not company_id:
+        return None
+    cur.execute(
+        """
+        SELECT ent.id
+        FROM expenseone.companies c
+        JOIN financeone.entities ent
+          ON ent.name LIKE '%%' || c.name || '%%' OR c.name LIKE '%%' || ent.name || '%%'
+        WHERE c.id = %s AND ent.is_active = TRUE
+        LIMIT 1
+        """,
+        [company_id],
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
 # ── 카드 매칭 ──────────────────────────────────────
 
 
