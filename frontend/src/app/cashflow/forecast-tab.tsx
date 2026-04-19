@@ -1021,11 +1021,13 @@ function ForecastModal({
     setSaving(true)
     try {
       if (isEdit && editItem) {
+        const acc = internalAccounts.find((a) => String(a.id) === selectedAccountId)
         await fetchAPI(`/forecasts/${editItem.id}`, {
           method: "PUT",
           body: JSON.stringify({
             type,
-            category: category.trim() || editItem.category,
+            category: acc ? acc.name : (category.trim() || editItem.category),
+            internal_account_id: acc ? acc.id : null,
             forecast_amount: Number(amount.replace(/,/g, "")),
             is_recurring: recurring,
             expected_day: expectedDay ? Number(expectedDay) : null,
@@ -1103,18 +1105,20 @@ function ForecastModal({
           </div>
           {isEdit && (
             <div>
-              <label className="text-xs text-muted-foreground">항목 이름</label>
-              <Input
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                placeholder="항목 이름"
-                className="mt-1"
-              />
-              {editItem?.internal_account_name && editItem.internal_account_name !== category && (
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  연결 내부계정: <span className="text-foreground">{editItem.internal_account_name}</span>
-                </p>
-              )}
+              <label className="text-xs text-muted-foreground">항목 (내부계정)</label>
+              <div className="mt-1">
+                <AccountCombobox
+                  options={internalAccounts}
+                  value={selectedAccountId}
+                  onChange={(v) => {
+                    setSelectedAccountId(v)
+                    const acc = internalAccounts.find((a) => String(a.id) === v)
+                    if (acc) setCategory(acc.name)
+                  }}
+                  placeholder="내부계정 선택"
+                  showCode
+                />
+              </div>
             </div>
           )}
           <div>

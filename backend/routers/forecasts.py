@@ -33,6 +33,7 @@ class ForecastUpdate(BaseModel):
     type: Optional[str] = Field(None, pattern="^(in|out)$")
     category: Optional[str] = None
     subcategory: Optional[str] = None
+    internal_account_id: Optional[int] = None
     forecast_amount: Optional[float] = None
     actual_amount: Optional[float] = None
     is_recurring: Optional[bool] = None
@@ -148,6 +149,9 @@ def update_forecast(
     if body.subcategory is not None:
         updates.append("subcategory = %s")
         params.append(body.subcategory.strip() or None)
+    if body.internal_account_id is not None:
+        updates.append("internal_account_id = %s")
+        params.append(body.internal_account_id)
     if body.forecast_amount is not None:
         updates.append("forecast_amount = %s")
         params.append(body.forecast_amount)
