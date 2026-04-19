@@ -14,6 +14,18 @@ from psycopg2.extensions import connection as PgConnection
 from backend.utils.db import build_date_range, fetch_all
 
 
+# ── source_type 분류 ─────────────────────────────────
+# Excel 업로드 + Codef API pull + 외부 연동 모두 포함
+BANK_SOURCES = (
+    "woori_bank", "codef_woori_bank", "codef_ibk_bank",
+    "mercury_api", "manual",
+)
+CARD_SOURCES = (
+    "lotte_card", "woori_card", "shinhan_card",
+    "codef_lotte_card", "codef_woori_card", "codef_shinhan_card",
+)
+
+
 # ── Pure computation functions (no DB) ───────────────────────────────────────
 
 
@@ -249,7 +261,7 @@ def get_bank_transactions(conn: PgConnection, entity_id: int, year: int, month: 
         LEFT JOIN internal_accounts ia ON t.internal_account_id = ia.id
         LEFT JOIN internal_accounts pia ON ia.parent_id = pia.id
         WHERE t.entity_id = %s
-          AND t.source_type IN ('woori_bank', 'mercury_api', 'manual')
+          AND t.source_type IN ('woori_bank', 'codef_woori_bank', 'codef_ibk_bank', 'mercury_api', 'manual')
           AND t.date >= %s AND t.date < %s
           AND t.is_duplicate = false
           AND (t.is_cancel IS NOT TRUE)
@@ -275,7 +287,7 @@ def get_card_transactions(conn: PgConnection, entity_id: int, year: int, month: 
         LEFT JOIN members m ON t.member_id = m.id
         LEFT JOIN standard_accounts sa ON t.standard_account_id = sa.id
         WHERE t.entity_id = %s
-          AND t.source_type IN ('lotte_card', 'woori_card')
+          AND t.source_type IN ('lotte_card', 'woori_card', 'shinhan_card', 'codef_lotte_card', 'codef_woori_card', 'codef_shinhan_card')
           AND t.date >= %s AND t.date < %s
           AND t.is_duplicate = false
           AND (t.is_cancel IS NOT TRUE)
@@ -305,7 +317,7 @@ def get_monthly_summary_data(
         SELECT DISTINCT to_char(date_trunc('month', date), 'YYYY-MM') AS month
         FROM transactions
         WHERE entity_id = %s
-          AND source_type IN ('woori_bank', 'mercury_api', 'manual')
+          AND source_type IN ('woori_bank', 'codef_woori_bank', 'codef_ibk_bank', 'mercury_api', 'manual')
           AND is_duplicate = false
           AND (is_cancel IS NOT TRUE)
         ORDER BY month
@@ -335,7 +347,7 @@ def get_monthly_summary_data(
             COALESCE(SUM(CASE WHEN type = 'out' THEN amount ELSE 0 END), 0) AS expense
         FROM transactions
         WHERE entity_id = %s
-          AND source_type IN ('woori_bank', 'mercury_api', 'manual')
+          AND source_type IN ('woori_bank', 'codef_woori_bank', 'codef_ibk_bank', 'mercury_api', 'manual')
           AND is_duplicate = false
           AND (is_cancel IS NOT TRUE)
           AND to_char(date_trunc('month', date), 'YYYY-MM') >= %s
@@ -422,7 +434,7 @@ def get_card_total_net(
                 COALESCE(SUM(CASE WHEN type = 'in' THEN amount ELSE 0 END), 0)
             FROM transactions
             WHERE entity_id = %s
-              AND source_type IN ('lotte_card', 'woori_card')
+              AND source_type IN ('lotte_card', 'woori_card', 'shinhan_card', 'codef_lotte_card', 'codef_woori_card', 'codef_shinhan_card')
               AND date >= %s AND date < %s
               AND is_duplicate = false
               AND (is_cancel IS NOT TRUE)
@@ -514,7 +526,7 @@ def get_forecast_cashflow(
           AND is_duplicate = false
           AND (is_cancel IS NOT TRUE)
           AND internal_account_id IS NULL
-          AND source_type IN ('woori_bank', 'mercury_api', 'manual')
+          AND source_type IN ('woori_bank', 'codef_woori_bank', 'codef_ibk_bank', 'mercury_api', 'manual')
         """,
         [entity_id, year, month, year, month],
     )
@@ -590,7 +602,7 @@ def get_forecast_cashflow(
             COALESCE(SUM(CASE WHEN type = 'out' THEN amount ELSE 0 END), 0) AS expense
         FROM transactions
         WHERE entity_id = %s
-          AND source_type IN ('woori_bank', 'mercury_api', 'manual')
+          AND source_type IN ('woori_bank', 'codef_woori_bank', 'codef_ibk_bank', 'mercury_api', 'manual')
           AND date >= %s AND date < %s
           AND is_duplicate = false
           AND (is_cancel IS NOT TRUE)
@@ -791,7 +803,7 @@ def get_variance_bridge(
             COUNT(*)
         FROM transactions
         WHERE entity_id = %s
-          AND source_type IN ('woori_bank', 'mercury_api', 'manual')
+          AND source_type IN ('woori_bank', 'codef_woori_bank', 'codef_ibk_bank', 'mercury_api', 'manual')
           AND date >= %s AND date < %s
           AND is_duplicate = false
           AND (is_cancel IS NOT TRUE)
@@ -806,7 +818,7 @@ def get_variance_bridge(
         SELECT COALESCE(SUM(amount), 0), COUNT(*)
         FROM transactions
         WHERE entity_id = %s
-          AND source_type IN ('woori_bank', 'mercury_api', 'manual')
+          AND source_type IN ('woori_bank', 'codef_woori_bank', 'codef_ibk_bank', 'mercury_api', 'manual')
           AND date >= %s AND date < %s
           AND is_duplicate = false
           AND (is_cancel IS NOT TRUE)
@@ -842,7 +854,7 @@ def get_variance_bridge(
           AND is_duplicate = false
           AND (is_cancel IS NOT TRUE)
           AND internal_account_id IS NULL
-          AND source_type IN ('woori_bank', 'mercury_api', 'manual')
+          AND source_type IN ('woori_bank', 'codef_woori_bank', 'codef_ibk_bank', 'mercury_api', 'manual')
         """,
         [entity_id, *build_date_range(year, month)],
     )
@@ -869,7 +881,7 @@ def get_variance_bridge(
     # Data quality checks
     cur.execute(
         "SELECT COUNT(DISTINCT source_type) FROM transactions "
-        "WHERE entity_id = %s AND source_type IN ('lotte_card', 'woori_card') "
+        "WHERE entity_id = %s AND source_type IN ('lotte_card', 'woori_card', 'shinhan_card', 'codef_lotte_card', 'codef_woori_card', 'codef_shinhan_card') "
         "AND date >= %s AND date < %s AND is_duplicate = false "
         "AND (is_cancel IS NOT TRUE)",
         [entity_id, *build_date_range(year, month)],
@@ -928,7 +940,7 @@ def get_variance_bridge(
         FROM transactions t
         LEFT JOIN internal_accounts ia ON t.internal_account_id = ia.id
         WHERE t.entity_id = %s
-          AND t.source_type IN ('woori_bank', 'mercury_api', 'manual')
+          AND t.source_type IN ('woori_bank', 'codef_woori_bank', 'codef_ibk_bank', 'mercury_api', 'manual')
           AND t.date >= %s AND t.date < %s
           AND t.is_duplicate = false
           AND (t.is_cancel IS NOT TRUE)

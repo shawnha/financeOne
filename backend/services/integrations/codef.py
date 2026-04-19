@@ -349,6 +349,10 @@ class CodefClient:
         duplicates = 0
         auto_mapped = 0
 
+        # 잔고 추적 (Excel 파서와 동일 — balance_snapshots 자동 갱신)
+        latest_balance = None
+        latest_balance_date = None
+
         # 자동 매핑 (lazy import — 순환 회피)
         from backend.services.mapping_service import auto_map_transaction
 
@@ -357,11 +361,33 @@ class CodefClient:
             if not tx:
                 continue
 
+            # 잔고 — orderBy="0"(오래된순)이라 마지막 row가 가장 최신
+            if tx.get("balance_after") is not None:
+                latest_balance = tx["balance_after"]
+                latest_balance_date = tx["date"]
+
             if _is_duplicate(cur, entity_id, tx, "codef_woori_bank"):
                 duplicates += 1
                 continue
 
             is_check_card_memo = tx.get("memo") == "체크우리"
+
+            # 체크카드 cross-dedup: 우리은행 '체크우리' 항목은 우리카드 거래와
+            # 매핑되므로 같은 (date, amount)의 우리카드(코덱 또는 Excel) 거래가
+            # 있으면 은행쪽은 INSERT 스킵 (Excel 업로더와 동일 정책).
+            if is_check_card_memo:
+                cur.execute(
+                    """
+                    SELECT id FROM transactions
+                    WHERE entity_id = %s AND date = %s AND amount = %s
+                      AND source_type IN ('woori_card', 'codef_woori_card')
+                    LIMIT 1
+                    """,
+                    [entity_id, tx["date"], float(tx["amount"])],
+                )
+                if cur.fetchone():
+                    duplicates += 1
+                    continue
 
             # mapping_rules cascade 시도
             mapping = auto_map_transaction(
@@ -407,10 +433,25 @@ class CodefClient:
                 )
             synced += 1
 
+        # balance_snapshots 자동 저장 (Excel 업로드와 동일한 후속 작업)
+        balance_saved = False
+        if latest_balance is not None and latest_balance_date is not None:
+            cur.execute(
+                """
+                INSERT INTO balance_snapshots
+                    (entity_id, date, account_name, account_type, balance, currency, source)
+                VALUES (%s, %s, %s, 'bank', %s, 'KRW', 'codef_api')
+                ON CONFLICT (entity_id, date, account_name)
+                DO UPDATE SET balance = EXCLUDED.balance, source = 'codef_api'
+                """,
+                [entity_id, latest_balance_date, "우리은행 법인통장", latest_balance],
+            )
+            balance_saved = True
+
         cur.close()
         logger.info(
-            "Codef bank sync: entity=%d, fetched=%d, synced=%d, dup=%d, auto_mapped=%d",
-            entity_id, len(raw_list), synced, duplicates, auto_mapped,
+            "Codef bank sync: entity=%d, fetched=%d, synced=%d, dup=%d, auto_mapped=%d, bal=%s",
+            entity_id, len(raw_list), synced, duplicates, auto_mapped, balance_saved,
         )
         return {
             "synced": synced,
@@ -420,6 +461,11 @@ class CodefClient:
             "total_fetched": len(raw_list),
             "environment": self.environment,
             "account": account,
+            "balance_snapshot": {
+                "saved": balance_saved,
+                "balance": float(latest_balance) if latest_balance else None,
+                "date": str(latest_balance_date) if latest_balance_date else None,
+            },
         }
 
     # ── 카드 ────────────────────────────────────────────────
@@ -472,6 +518,11 @@ class CodefClient:
         synced = 0
         duplicates = 0
         cancels = 0
+        auto_mapped = 0
+        check_card_cancelled = 0
+
+        # 자동 매핑 (Excel 업로드와 동일한 후속 작업)
+        from backend.services.mapping_service import auto_map_transaction
 
         for item in raw_list:
             tx = _normalize_card_row(item)
@@ -482,36 +533,107 @@ class CodefClient:
                 duplicates += 1
                 continue
 
-            cur.execute(
-                """
-                INSERT INTO transactions
-                    (entity_id, date, amount, currency, type, description,
-                     counterparty, source_type, is_confirmed,
-                     card_number, parsed_member_name, is_cancel)
-                VALUES (%s, %s, %s, 'KRW', %s, %s, %s, %s, FALSE,
-                        %s, %s, %s)
-                """,
-                [
-                    entity_id, tx["date"], float(tx["amount"]),
-                    tx["type"], tx["description"], tx["counterparty"],
-                    source_type,
-                    tx["card_number"], tx["member_name"], tx["is_cancel"],
-                ],
+            # member_id 매칭 (이름 → 카드번호 fallback)
+            member_id = None
+            if tx.get("member_name"):
+                cur.execute(
+                    "SELECT id FROM members WHERE entity_id = %s AND name = %s LIMIT 1",
+                    [entity_id, tx["member_name"]],
+                )
+                row = cur.fetchone()
+                if row:
+                    member_id = row[0]
+            if member_id is None and tx.get("card_number"):
+                cur.execute(
+                    "SELECT id FROM members WHERE entity_id = %s AND %s = ANY(card_numbers) AND is_active = true LIMIT 1",
+                    [entity_id, tx["card_number"]],
+                )
+                row = cur.fetchone()
+                if row:
+                    member_id = row[0]
+
+            # 자동 매핑
+            mapping = auto_map_transaction(
+                cur,
+                entity_id=entity_id,
+                counterparty=tx["counterparty"],
+                description=tx["description"],
             )
+
+            if mapping:
+                auto_mapped += 1
+                cur.execute(
+                    """
+                    INSERT INTO transactions
+                        (entity_id, date, amount, currency, type, description,
+                         counterparty, source_type, is_confirmed,
+                         card_number, parsed_member_name, is_cancel,
+                         member_id, internal_account_id, standard_account_id,
+                         mapping_confidence, mapping_source)
+                    VALUES (%s, %s, %s, 'KRW', %s, %s, %s, %s, FALSE,
+                            %s, %s, %s,
+                            %s, %s, %s, %s, %s)
+                    """,
+                    [
+                        entity_id, tx["date"], float(tx["amount"]),
+                        tx["type"], tx["description"], tx["counterparty"],
+                        source_type,
+                        tx["card_number"], tx["member_name"], tx["is_cancel"],
+                        member_id,
+                        mapping["internal_account_id"], mapping.get("standard_account_id"),
+                        mapping.get("confidence"), mapping.get("match_type"),
+                    ],
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO transactions
+                        (entity_id, date, amount, currency, type, description,
+                         counterparty, source_type, is_confirmed,
+                         card_number, parsed_member_name, is_cancel, member_id)
+                    VALUES (%s, %s, %s, 'KRW', %s, %s, %s, %s, FALSE,
+                            %s, %s, %s, %s)
+                    """,
+                    [
+                        entity_id, tx["date"], float(tx["amount"]),
+                        tx["type"], tx["description"], tx["counterparty"],
+                        source_type,
+                        tx["card_number"], tx["member_name"], tx["is_cancel"],
+                        member_id,
+                    ],
+                )
             synced += 1
             if tx["is_cancel"]:
                 cancels += 1
 
+            # 우리카드면 같은 (date, amount)의 우리은행 '체크우리' 행 자동 취소
+            # (Excel 업로더와 동일 정책)
+            if card_type == "woori_card":
+                cur.execute(
+                    """
+                    UPDATE transactions SET is_cancel = true, updated_at = NOW()
+                    WHERE entity_id = %s AND date = %s AND amount = %s
+                      AND source_type IN ('woori_bank', 'codef_woori_bank')
+                      AND description LIKE '체크우리%%'
+                      AND is_cancel IS NOT TRUE
+                    """,
+                    [entity_id, tx["date"], float(tx["amount"])],
+                )
+                check_card_cancelled += cur.rowcount
+
         cur.close()
         logger.info(
-            "Codef card sync: entity=%d, card=%s, fetched=%d, synced=%d, dup=%d, cancels=%d",
-            entity_id, card_type, len(raw_list), synced, duplicates, cancels,
+            "Codef card sync: entity=%d, card=%s, fetched=%d, synced=%d, dup=%d, cancel=%d, auto_mapped=%d, check_cancelled=%d",
+            entity_id, card_type, len(raw_list), synced, duplicates, cancels, auto_mapped, check_card_cancelled,
         )
         return {
             "card_type": card_type,
             "synced": synced,
             "duplicates": duplicates,
             "cancels": cancels,
+            "auto_mapped": auto_mapped,
+            "unmapped": synced - auto_mapped,
+            "check_card_cancelled": check_card_cancelled,
             "total_fetched": len(raw_list),
             "environment": self.environment,
         }

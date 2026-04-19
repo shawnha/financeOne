@@ -342,15 +342,25 @@ def test_sync_card_approvals_inserts_and_dedups():
         },
     ]
 
-    with patch.object(client, "get_card_approvals", return_value=approvals):
+    with patch.object(client, "get_card_approvals", return_value=approvals), \
+         patch("backend.services.mapping_service.auto_map_transaction", return_value=None):
         conn = MagicMock()
         cur = MagicMock()
         conn.cursor.return_value = cur
 
-        # 첫 세 건은 중복 아님(fetchone None), 네 번째도 취소라 별개
-        # 단 세 번째(중복)만 True
-        # dedup query는 INSERT 전에 호출됨 — 총 4건 중 중복 1건
-        fetchone_results = [None, None, (999,), None]  # 3번째가 중복
+        # sync_card_approvals 동작 (각 row별):
+        #   1) _is_duplicate (fetchone) — None=신규, 값=중복
+        #   2) member 매칭 (parsed_member_name 없음 → 카드번호로 매칭, fetchone)
+        #   3) carry-on UPDATE (lotte_card는 체크우리 cancel 안 함, woori_card만)
+        # row마다 fetchone 호출 횟수: dedup(1) + member_card_lookup(1) = 2
+        # 중복 row는 dedup True에서 멈춤 → fetchone 1회만
+        # 4 rows: row1(신규)=2, row2(신규)=2, row3(중복)=1, row4(신규)=2 → 7
+        fetchone_results = [
+            None, None,  # row 1: dedup None, member None
+            None, None,  # row 2: dedup None, member None
+            (999,),      # row 3: dedup True → 즉시 continue
+            None, None,  # row 4: dedup None, member None
+        ]
         cur.fetchone.side_effect = fetchone_results
 
         result = client.sync_card_approvals(
@@ -362,6 +372,7 @@ def test_sync_card_approvals_inserts_and_dedups():
         assert result["duplicates"] == 1
         assert result["cancels"] == 1
         assert result["card_type"] == "lotte_card"
+        assert result["auto_mapped"] == 0  # 매핑 mock None
 
     client.close()
 
