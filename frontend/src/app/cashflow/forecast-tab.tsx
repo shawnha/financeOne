@@ -1611,34 +1611,29 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
       {/* Forecast vs Actual balance chart (daily-schedule API) */}
       <ForecastBalanceChart schedule={schedule} forecastData={data} entityId={entityId} month={m} onClosingBalances={setClosingBalances} />
 
-      {/* KPI */}
-      <div className="grid grid-cols-4 gap-3 max-md:grid-cols-2">
+      {/* KPI — 5개 동등 column으로 분리 (폭 부족으로 숫자 truncate 방지) */}
+      <div className="grid grid-cols-5 gap-3 max-xl:grid-cols-3 max-md:grid-cols-2">
         <KPICard label={`기초 (${m - 1 || 12}월 확정)`} value={formatByEntity(data.opening_balance, entityId)} rawAmount={data.opening_balance} entityId={entityId} />
-        <Card className="bg-secondary rounded-xl p-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">원래 예상 기말</p>
-              <p className="text-lg md:text-xl font-bold font-mono tabular-nums mt-1 truncate text-[#71717a]">
-                {formatByEntity(closingBalances?.original ?? data.forecast_closing, entityId)}
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">조정 예상 기말</p>
-              <p className="text-lg md:text-xl font-bold font-mono tabular-nums mt-1 truncate text-[hsl(var(--warning))]">
-                {formatByEntity(closingBalances?.adjusted ?? data.adjusted_forecast_closing, entityId)}
-              </p>
-              {closingBalances && (() => {
-                const diff = closingBalances.adjusted - closingBalances.original
-                if (Math.abs(diff) < 1000) return null
-                return (
-                  <p className={cn("text-[10px] font-mono mt-0.5", diff >= 0 ? "text-green-400" : "text-red-400")}>
-                    {diff >= 0 ? "+" : ""}{formatByEntity(diff, entityId)}
-                  </p>
-                )
-              })()}
-            </div>
-          </div>
-        </Card>
+        <KPICard
+          label="원래 예상 기말"
+          value={formatByEntity(closingBalances?.original ?? data.forecast_closing, entityId)}
+          rawAmount={closingBalances?.original ?? data.forecast_closing}
+          entityId={entityId}
+          colorClass="text-[#71717a]"
+        />
+        <KPICard
+          label="조정 예상 기말"
+          value={formatByEntity(closingBalances?.adjusted ?? data.adjusted_forecast_closing, entityId)}
+          rawAmount={closingBalances?.adjusted ?? data.adjusted_forecast_closing}
+          entityId={entityId}
+          colorClass="text-[hsl(var(--warning))]"
+          subtext={(() => {
+            if (!closingBalances) return undefined
+            const diff = closingBalances.adjusted - closingBalances.original
+            if (Math.abs(diff) < 1000) return undefined
+            return `${diff >= 0 ? "+" : ""}${formatByEntity(diff, entityId)} vs 원래`
+          })()}
+        />
         <KPICard
           label="실제 진행 기말"
           value={formatByEntity(data.actual_closing, entityId)}
