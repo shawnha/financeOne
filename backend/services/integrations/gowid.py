@@ -155,14 +155,35 @@ class GowidClient:
         )
 
     def iter_expenses(self, start_date: str, end_date: str, page_size: int = 100):
-        """페이징 자동 처리 — 모든 expenses iterator."""
+        """페이징 자동 처리 + client-side date filter.
+
+        Gowid v1 API는 startDate/endDate 파라미터를 무시하고 전체 데이터를 반환.
+        클라이언트에서 expenseDate(YYYYMMDD)가 범위 내인지 직접 필터링.
+        """
+        # ISO YYYY-MM-DD → YYYYMMDD (8자리)
+        start_compact = start_date.replace("-", "")
+        end_compact = end_date.replace("-", "")
+
         page = 0
         while True:
             data = self.get_expenses(start_date, end_date, page=page, size=page_size)
             content = data.get("content", []) if isinstance(data, dict) else []
             for item in content:
+                exp_date = str(item.get("expenseDate") or "").strip()
+                if not exp_date or len(exp_date) != 8:
+                    continue
+                if exp_date < start_compact or exp_date > end_compact:
+                    continue
                 yield item
+            # Gowid는 최신순 정렬 — 마지막 page 도달 시 종료
             if not content or data.get("last", True):
+                return
+            # 페이지의 가장 오래된 row가 start_compact보다 이전이면 더 가져올 필요 없음
+            oldest_in_page = min(
+                (str(c.get("expenseDate", "")) for c in content if c.get("expenseDate")),
+                default=None,
+            )
+            if oldest_in_page and oldest_in_page < start_compact:
                 return
             page += 1
 
