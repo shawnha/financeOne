@@ -185,11 +185,21 @@ class CodefClient:
         resp.raise_for_status()
         data = _parse_codef_response(resp.text)
 
-        result_code = data.get("result", {}).get("code", "")
+        result = data.get("result", {})
+        result_code = result.get("code", "")
         if result_code != "CF-00000":
-            raise CodefError(
-                f"Codef error: {result_code} - {data.get('result', {}).get('message', '')}"
+            msg = result.get("message", "")
+            extra = result.get("extraMessage", "") or result.get("extraInfo", "")
+            # 진단 로그 — payload는 비밀번호 마스킹 후
+            masked_params = _mask_sensitive(params)
+            logger.warning(
+                "Codef non-OK response: code=%s msg=%s extra=%s endpoint=%s payload=%s data=%s",
+                result_code, msg, extra, endpoint, masked_params, data.get("data"),
             )
+            full_msg = f"{result_code} - {msg}"
+            if extra:
+                full_msg += f" | {extra}"
+            raise CodefError(f"Codef error: {full_msg}")
         return data.get("data", {})
 
     # ── connected_id 관리 ───────────────────────────────────
@@ -390,6 +400,23 @@ class CodefClient:
 
 
 # ── Codef 응답 파싱 ─────────────────────────────────────
+
+
+_SENSITIVE_KEYS = {"password", "certPassword", "accountPassword", "id"}
+
+
+def _mask_sensitive(payload: dict) -> dict:
+    """password·id 등 민감 필드 로그용 마스킹."""
+    def mask(obj):
+        if isinstance(obj, dict):
+            return {k: ("***" if k in _SENSITIVE_KEYS and v else mask(v)) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [mask(x) for x in obj]
+        return obj
+    try:
+        return mask(payload)
+    except Exception:
+        return {"_masked": True}
 
 
 def _parse_codef_response(raw: str) -> dict:
