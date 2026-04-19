@@ -1271,6 +1271,12 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
   useEffect(() => { setSelectedMonthLocal(globalMonth) }, [globalMonth])
 
   const [showComparison, setShowComparison] = useState(false)
+  const [missingRecurring, setMissingRecurring] = useState<Array<{
+    internal_account_id: number; name: string; code: string
+    inferred_type: string; suggested_amount: number; txn_count: number; payment_method: string
+  }>>([])
+  const [missingDismissed, setMissingDismissed] = useState(false)
+  const [missingLoading, setMissingLoading] = useState(false)
   const [editingItemId, setEditingItemId] = useState<number | null>(null)
   const [editingAmount, setEditingAmount] = useState("")
   const [editModalItem, setEditModalItem] = useState<ForecastItem | null>(null)
@@ -1471,6 +1477,18 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
   useEffect(() => { fetchSummary() }, [fetchSummary])
   useEffect(() => { fetchForecast() }, [fetchForecast])
 
+  // missing-recurring 감지 (Decision 1A/2A/3A/5B)
+  useEffect(() => {
+    if (!entityId || !selectedMonth || !monthReady || state !== "success") return
+    const [y, m] = selectedMonth.split("-").map(Number)
+    const dismissKey = `dismissed-missing-recurring-${entityId}-${y}-${m}`
+    if (localStorage.getItem(dismissKey)) { setMissingDismissed(true); return }
+    setMissingDismissed(false)
+    fetchAPI<{ items: typeof missingRecurring }>(`/forecasts/missing-recurring?entity_id=${entityId}&year=${y}&month=${m}`)
+      .then(res => setMissingRecurring(res.items ?? []))
+      .catch(() => setMissingRecurring([]))
+  }, [entityId, selectedMonth, monthReady, state])
+
   const handleExportCSV = useCallback(() => {
     if (!data) return
     const [yy, mm] = selectedMonth.split("-").map(Number)
@@ -1638,6 +1656,82 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
           colorClass="text-[#8B5CF6]"
         />
       </div>
+
+      {/* Missing recurring banner (Decision 1A/2A/3A/4A/5B/6A) */}
+      {!missingDismissed && missingRecurring.length > 0 && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3 min-w-0">
+              <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-amber-200">
+                  반복 항목 {missingRecurring.length}개가 이번 달 예상에 빠져있습니다
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {missingRecurring.slice(0, 8).map(item => (
+                    <span key={item.internal_account_id} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                      {item.name}
+                      {item.txn_count === 0 && <span className="text-[10px] text-amber-500">(거래없음)</span>}
+                      {item.txn_count > 0 && <span className="text-[10px] text-muted-foreground">{formatByEntity(item.suggested_amount, entityId)}</span>}
+                    </span>
+                  ))}
+                  {missingRecurring.length > 8 && (
+                    <span className="text-xs text-amber-500">+{missingRecurring.length - 8}개</span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs border-amber-500/30 text-amber-300 hover:bg-amber-500/10"
+                disabled={missingLoading}
+                onClick={async () => {
+                  setMissingLoading(true)
+                  try {
+                    const res = await fetchAPI<{ added: number }>(`/forecasts/add-missing-recurring`, {
+                      method: "POST",
+                      body: JSON.stringify({
+                        entity_id: Number(entityId),
+                        year: Number(selectedMonth.split("-")[0]),
+                        month: Number(selectedMonth.split("-")[1]),
+                        items: missingRecurring.map(i => ({
+                          internal_account_id: i.internal_account_id,
+                          type: i.inferred_type,
+                          amount: i.suggested_amount,
+                          name: i.name,
+                          payment_method: i.payment_method,
+                        })),
+                      }),
+                    })
+                    toast.success(`반복 항목 ${res.added}건 추가 완료`)
+                    setMissingRecurring([])
+                    fetchForecast(true)
+                  } catch {
+                    toast.error("반복 항목 추가 실패")
+                  } finally {
+                    setMissingLoading(false)
+                  }
+                }}
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                전부 추가
+              </Button>
+              <button
+                onClick={() => {
+                  const [y, m] = selectedMonth.split("-").map(Number)
+                  localStorage.setItem(`dismissed-missing-recurring-${entityId}-${y}-${m}`, "1")
+                  setMissingDismissed(true)
+                }}
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                무시
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Forecast items list (no chart -- table only per mockup) */}
       <Card className="overflow-hidden rounded-2xl">

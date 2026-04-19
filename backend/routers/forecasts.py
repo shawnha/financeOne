@@ -467,3 +467,135 @@ def suggest_forecasts_from_actuals(
         "source_month": prev_month,
         "suggestions": rows,
     }
+
+
+class AddMissingRecurringRequest(BaseModel):
+    entity_id: int
+    year: int
+    month: int
+    items: list[dict]  # [{internal_account_id, type, amount}]
+
+
+@router.get("/missing-recurring")
+def missing_recurring(
+    entity_id: int = Query(...),
+    year: int = Query(...),
+    month: int = Query(...),
+    conn: PgConnection = Depends(get_db),
+):
+    """is_recurring=TRUE인데 해당 월 forecast에 없는 내부계정 감지.
+
+    Decision 1A: type은 최근 3개월 transactions majority vote.
+    Decision 5B: suggested_amount는 majority type의 absolute amount 평균.
+    """
+    cur = conn.cursor()
+    cur.execute(
+        """
+        WITH recurring_accounts AS (
+            SELECT ia.id, ia.name, ia.code
+            FROM internal_accounts ia
+            WHERE ia.entity_id = %(eid)s
+              AND ia.is_recurring = true
+              AND ia.is_active = true
+              AND ia.id NOT IN (
+                  SELECT f.internal_account_id FROM forecasts f
+                  WHERE f.entity_id = %(eid)s AND f.year = %(y)s AND f.month = %(m)s
+                    AND f.internal_account_id IS NOT NULL
+              )
+        ),
+        txn_agg AS (
+            SELECT t.internal_account_id, t.type,
+                   COUNT(*) AS cnt,
+                   SUM(t.amount) AS total
+            FROM transactions t
+            WHERE t.entity_id = %(eid)s
+              AND t.date >= make_date(%(y)s, %(m)s, 1) - INTERVAL '3 months'
+              AND t.date < make_date(%(y)s, %(m)s, 1)
+              AND t.is_duplicate = false
+              AND t.internal_account_id IN (SELECT id FROM recurring_accounts)
+            GROUP BY t.internal_account_id, t.type
+        ),
+        majority AS (
+            SELECT internal_account_id, type AS majority_type, total, cnt,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY internal_account_id ORDER BY cnt DESC, total DESC
+                   ) AS rn
+            FROM txn_agg
+        ),
+        prev_pm AS (
+            SELECT DISTINCT ON (internal_account_id)
+                   internal_account_id, payment_method
+            FROM forecasts
+            WHERE entity_id = %(eid)s AND internal_account_id IS NOT NULL
+            ORDER BY internal_account_id, year DESC, month DESC
+        )
+        SELECT ra.id AS internal_account_id, ra.name, ra.code,
+               COALESCE(m.majority_type, 'out') AS inferred_type,
+               COALESCE(ROUND(m.total / 3.0, 0), 0) AS suggested_amount,
+               COALESCE(m.cnt, 0) AS txn_count,
+               COALESCE(pm.payment_method, 'bank') AS payment_method
+        FROM recurring_accounts ra
+        LEFT JOIN majority m ON ra.id = m.internal_account_id AND m.rn = 1
+        LEFT JOIN prev_pm pm ON ra.id = pm.internal_account_id
+        ORDER BY ra.name
+        """,
+        {"eid": entity_id, "y": year, "m": month},
+    )
+    rows = fetch_all(cur)
+    cur.close()
+    return {"items": rows, "count": len(rows), "year": year, "month": month}
+
+
+@router.post("/add-missing-recurring", status_code=201)
+def add_missing_recurring(
+    body: AddMissingRecurringRequest,
+    conn: PgConnection = Depends(get_db),
+):
+    """누락된 반복 항목을 일괄 forecast에 추가. UPSERT로 중복 안전."""
+    if not body.items:
+        return {"added": 0}
+
+    cur = conn.cursor()
+    added = 0
+    try:
+        for item in body.items:
+            ia_id = item.get("internal_account_id")
+            inferred_type = item.get("type", "out")
+            amount = item.get("amount", 0)
+            payment_method = item.get("payment_method", "bank")
+            name = item.get("name", "")
+
+            if not ia_id:
+                continue
+            if inferred_type not in ("in", "out"):
+                inferred_type = "out"
+            if payment_method not in ("bank", "card"):
+                payment_method = "bank"
+
+            cur.execute(
+                """
+                INSERT INTO forecasts
+                    (entity_id, year, month, category, subcategory, type,
+                     forecast_amount, is_recurring, internal_account_id, note,
+                     expected_day, payment_method)
+                VALUES (%s, %s, %s, %s, NULL, %s, %s, true, %s, NULL, NULL, %s)
+                ON CONFLICT (entity_id, year, month, internal_account_id, type)
+                  WHERE internal_account_id IS NOT NULL
+                DO NOTHING
+                RETURNING id
+                """,
+                [body.entity_id, body.year, body.month, name, inferred_type,
+                 amount, ia_id, payment_method],
+            )
+            row = cur.fetchone()
+            if row:
+                added += 1
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        cur.close()
+
+    return {"added": added, "target": f"{body.year}-{body.month:02d}"}
