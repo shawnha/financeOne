@@ -1,10 +1,10 @@
 """Codef.io API 연동 — 한국 법인 은행/카드 자동 pull
 
-샌드박스(development.codef.io) ↔ 프로덕션(api.codef.io) 환경 토글 지원.
+데모(development.codef.io) ↔ 프로덕션(api.codef.io) 환경 토글 지원.
 프로덕션 사용 시 공동인증서 + 연계 계정 등록 필요.
 
 env vars:
-    CODEF_ENV              : "sandbox" (default) | "production"
+    CODEF_ENV              : "demo" (default, alias: "sandbox") | "production"
     CODEF_CLIENT_ID        : OAuth client id
     CODEF_CLIENT_SECRET    : OAuth client secret
     CODEF_BASE_URL         : override 자동 URL 선택
@@ -24,9 +24,11 @@ from psycopg2.extensions import connection as PgConnection
 
 logger = logging.getLogger(__name__)
 
-# 환경별 base URL
-CODEF_SANDBOX_URL = "https://development.codef.io"
+# 환경별 base URL — Codef 공식 용어: 데모 / 정식(프로덕션)
+CODEF_DEMO_URL = "https://development.codef.io"
 CODEF_PRODUCTION_URL = "https://api.codef.io"
+# 하위 호환: 이전에 SANDBOX로 부르던 이름
+CODEF_SANDBOX_URL = CODEF_DEMO_URL
 CODEF_TOKEN_URL = "https://oauth.codef.io/oauth/token"
 
 # Codef 기관 코드
@@ -48,12 +50,17 @@ def resolve_base_url() -> str:
     override = os.environ.get("CODEF_BASE_URL", "").strip()
     if override:
         return override
-    env = os.environ.get("CODEF_ENV", "sandbox").strip().lower()
-    return CODEF_PRODUCTION_URL if env == "production" else CODEF_SANDBOX_URL
+    env = os.environ.get("CODEF_ENV", "demo").strip().lower()
+    return CODEF_PRODUCTION_URL if env == "production" else CODEF_DEMO_URL
 
 
 def is_production() -> bool:
-    return os.environ.get("CODEF_ENV", "sandbox").strip().lower() == "production"
+    return os.environ.get("CODEF_ENV", "demo").strip().lower() == "production"
+
+
+def env_label() -> str:
+    """UI 표시용 라벨 — demo | production."""
+    return "production" if is_production() else "demo"
 
 
 class CodefError(Exception):
@@ -75,7 +82,7 @@ class CodefClient:
 
     @property
     def environment(self) -> str:
-        return "production" if self.base_url == CODEF_PRODUCTION_URL else "sandbox"
+        return "production" if self.base_url == CODEF_PRODUCTION_URL else "demo"
 
     # ── 인증 ────────────────────────────────────────────────
     def _get_token(self) -> str:

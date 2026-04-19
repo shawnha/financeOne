@@ -179,8 +179,17 @@ def test_normalize_card_row_fallback_total_amount():
 # ── 환경 토글 ───────────────────────────────────────
 
 
-def test_resolve_base_url_default_sandbox(monkeypatch):
+def test_resolve_base_url_default_demo(monkeypatch):
     monkeypatch.delenv("CODEF_ENV", raising=False)
+    monkeypatch.delenv("CODEF_BASE_URL", raising=False)
+    assert resolve_base_url() == CODEF_SANDBOX_URL
+    assert is_production() is False
+
+
+def test_resolve_base_url_sandbox_alias(monkeypatch):
+    # "sandbox" 구 이름도 demo로 인식해야 하지만, 현재는 production만 별도.
+    # "sandbox" 는 non-production → demo로 fallback.
+    monkeypatch.setenv("CODEF_ENV", "sandbox")
     monkeypatch.delenv("CODEF_BASE_URL", raising=False)
     assert resolve_base_url() == CODEF_SANDBOX_URL
     assert is_production() is False
@@ -201,9 +210,9 @@ def test_resolve_base_url_override(monkeypatch):
 
 def test_client_environment_property(monkeypatch):
     monkeypatch.delenv("CODEF_BASE_URL", raising=False)
-    monkeypatch.setenv("CODEF_ENV", "sandbox")
+    monkeypatch.setenv("CODEF_ENV", "demo")
     c = CodefClient("id", "sec")
-    assert c.environment == "sandbox"
+    assert c.environment == "demo"
     c.close()
 
     monkeypatch.setenv("CODEF_ENV", "production")
