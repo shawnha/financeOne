@@ -263,7 +263,7 @@ def codef_status(
     configured = bool(
         os.environ.get("CODEF_CLIENT_ID") and os.environ.get("CODEF_CLIENT_SECRET")
     )
-    env = "production" if is_production() else "sandbox"
+    env = "production" if is_production() else "demo"
     connections = list_connected_ids(conn, entity_id) if configured else {}
 
     if not configured:
