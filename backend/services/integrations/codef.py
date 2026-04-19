@@ -43,14 +43,41 @@ CODEF_TOKEN_URL = "https://oauth.codef.io/oauth/token"
 # Codef 기관 코드
 ORG_CODES = {
     "woori_bank": "0020",
+    "ibk_bank": "0003",
     "lotte_card": "0301",
     "woori_card": "0315",
     "shinhan_card": "0309",
 }
 
+# UI 표시명
+ORG_LABELS = {
+    "woori_bank": "우리은행",
+    "ibk_bank": "IBK기업은행",
+    "lotte_card": "롯데카드",
+    "woori_card": "우리카드",
+    "shinhan_card": "신한카드",
+}
+
 # 은행/카드 타입 → source_type (mapping rules와 일관성 유지)
-BANK_ORGS = {"woori_bank"}
+BANK_ORGS = {"woori_bank", "ibk_bank"}
 CARD_ORGS = {"lotte_card", "woori_card", "shinhan_card"}
+
+# NPKI cert OU 키워드 → 한글 은행/기관명
+_BANK_OU_KEYWORDS = {
+    "WOORI": "우리은행",
+    "우리은행": "우리은행",
+    "IBK": "IBK기업은행",
+    "기업은행": "IBK기업은행",
+    "KB": "KB국민은행",
+    "국민은행": "KB국민은행",
+    "SHB": "신한은행",
+    "신한은행": "신한은행",
+    "HANA": "하나은행",
+    "하나은행": "하나은행",
+    "NH": "NH농협",
+    "농협": "NH농협",
+    "BizBank": "신한은행",  # SignKorea + BizBank 조합 = 신한 BizBank
+}
 
 SETTINGS_PREFIX = "codef_connected_id_"  # e.g., codef_connected_id_woori_bank
 
@@ -689,11 +716,24 @@ _NPKI_ROOTS = [
 ]
 
 
+def _detect_bank_from_dn(dn: str) -> Optional[str]:
+    """cert 폴더명(=DN 일부)에서 ou 키워드로 은행/기관명 추출.
+
+    Mac APFS는 한글을 NFD로 저장 — NFC 정규화 후 매칭.
+    """
+    import unicodedata
+    nfc = unicodedata.normalize("NFC", dn)
+    for kw, label in _BANK_OU_KEYWORDS.items():
+        if kw in nfc:
+            return label
+    return None
+
+
 def discover_npki_certs() -> list[dict]:
     """Mac/Linux의 NPKI 폴더에서 공동인증서 목록 탐색.
 
     Returns:
-        [{ca, cn, path, label}] — path는 cert 폴더 (signCert.der + signPri.key 포함)
+        [{ca, cn, bank, path, label}] — path는 cert 폴더 (signCert.der + signPri.key 포함)
     """
     import os as _os
     from pathlib import Path
@@ -716,20 +756,29 @@ def discover_npki_certs() -> list[dict]:
                 sign_key = cert_dir / "signPri.key"
                 if not (sign_cert.exists() and sign_key.exists()):
                     continue
-                # cert 폴더명: "cn=..,ou=..,o=..,c=.." → CN 추출
-                dir_name = cert_dir.name
+                import unicodedata
+                # Mac APFS는 NFD 저장 — UI/매칭 일관성 위해 NFC 정규화
+                dir_name = unicodedata.normalize("NFC", cert_dir.name)
                 cn = dir_name
                 if dir_name.startswith("cn="):
                     cn_raw = dir_name.split(",", 1)[0][3:]
                     cn = cn_raw.strip()
+                bank = _detect_bank_from_dn(dir_name)
+                # 라벨: [은행명] CN (CA)
+                label_parts = []
+                if bank:
+                    label_parts.append(f"[{bank}]")
+                label_parts.append(cn)
+                label_parts.append(f"({ca_dir.name})")
                 results.append({
                     "ca": ca_dir.name,
                     "cn": cn,
+                    "bank": bank or "",
                     "path": str(cert_dir),
-                    "label": f"{cn} ({ca_dir.name})",
+                    "label": " ".join(label_parts),
                 })
-    # sort by CA then CN for stable order
-    results.sort(key=lambda x: (x["ca"], x["cn"]))
+    # bank → CN 순서로 정렬 (은행 같은 것끼리 묶이게)
+    results.sort(key=lambda x: (x.get("bank") or "z", x["cn"]))
     return results
 
 

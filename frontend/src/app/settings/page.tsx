@@ -51,6 +51,7 @@ interface CodefStatus {
 interface NpkiCert {
   ca: string
   cn: string
+  bank: string
   path: string
   label: string
 }
@@ -71,7 +72,30 @@ interface CodefBankSyncResult {
   environment?: string
 }
 
-type CodefOrg = "woori_bank" | "lotte_card" | "woori_card" | "shinhan_card"
+type CodefOrg =
+  | "woori_bank"
+  | "ibk_bank"
+  | "lotte_card"
+  | "woori_card"
+  | "shinhan_card"
+
+const CODEF_ORG_LABELS: Record<CodefOrg, string> = {
+  woori_bank: "우리은행",
+  ibk_bank: "IBK기업은행",
+  lotte_card: "롯데카드",
+  woori_card: "우리카드",
+  shinhan_card: "신한카드",
+}
+
+const CODEF_ORG_ORDER: CodefOrg[] = [
+  "woori_bank",
+  "ibk_bank",
+  "lotte_card",
+  "woori_card",
+  "shinhan_card",
+]
+
+const CODEF_BANK_ORGS = new Set<CodefOrg>(["woori_bank", "ibk_bank"])
 
 interface ExpenseOneStatus {
   configured: boolean
@@ -154,28 +178,19 @@ function SettingsContent() {
   // 인증서 모드 진입 시, 법인/기관에 맞는 인증서 자동 선택
   useEffect(() => {
     if (codefAuthMode !== "cert" || !codefConnectOrg || codefNpkiCerts.length === 0) return
-    const entityKeyword =
-      codefEntityId === 2 ? "한아원" : codefEntityId === 3 ? "리테일" : ""
-    const orgKeyword =
-      codefConnectOrg === "woori_bank"
-        ? ["WOORI", "우리"]
-        : codefConnectOrg === "shinhan_card"
-        ? ["SHB", "신한"]
-        : []
+    const wantedBank = CODEF_ORG_LABELS[codefConnectOrg] // 예: "우리은행"
     const match = codefNpkiCerts.find((c) => {
-      const hayLabel = c.label
-      const hayPath = c.path
       const matchesEntity =
-        !entityKeyword ||
-        (codefEntityId === 3
-          ? hayLabel.includes("리테일")
-          : hayLabel.includes("한아원") && !hayLabel.includes("리테일"))
-      const matchesOrg =
-        orgKeyword.length === 0 ||
-        orgKeyword.some((k) => hayLabel.includes(k) || hayPath.includes(k))
-      return matchesEntity && matchesOrg
+        codefEntityId === 3
+          ? c.cn.includes("리테일")
+          : c.cn.includes("한아원") && !c.cn.includes("리테일")
+      const matchesBank =
+        c.bank === wantedBank ||
+        (CODEF_BANK_ORGS.has(codefConnectOrg) ? c.bank === wantedBank : true)
+      return matchesEntity && matchesBank
     })
     if (match) setCodefNpkiCertPath(match.path)
+    else setCodefNpkiCertPath("")
   }, [codefAuthMode, codefConnectOrg, codefEntityId, codefNpkiCerts])
 
   // QBO callback 후 자동 status 체크
@@ -578,8 +593,7 @@ function SettingsContent() {
                   </div>
                 </div>
 
-                {(["woori_bank", "lotte_card", "woori_card", "shinhan_card"] as CodefOrg[]).map(
-                  (org) => {
+                {CODEF_ORG_ORDER.map((org) => {
                     const cid = codefStatus.connections?.[org]
                     const syncKey = `codef-sync-${org}`
                     const disconKey = `codef-disconnect-${org}`
@@ -589,7 +603,12 @@ function SettingsContent() {
                         className="flex items-center justify-between gap-2 py-1 border-t border-border first:border-t-0"
                       >
                         <div className="flex flex-col flex-1">
-                          <span className="text-sm font-medium">{org}</span>
+                          <span className="text-sm font-medium">
+                            {CODEF_ORG_LABELS[org]}
+                            <span className="text-xs text-muted-foreground/70 ml-2 font-mono">
+                              {org}
+                            </span>
+                          </span>
                           <span className="text-xs text-muted-foreground">
                             {cid ? (
                               <span className="text-green-400">
@@ -631,7 +650,7 @@ function SettingsContent() {
                               onClick={() => {
                                 setCodefConnectOrg(org)
                                 // 은행은 공동인증서 필수 → 자동 전환
-                                setCodefAuthMode(org === "woori_bank" ? "cert" : "idpw")
+                                setCodefAuthMode(CODEF_BANK_ORGS.has(org) ? "cert" : "idpw")
                               }}
                             >
                               연결
@@ -668,9 +687,9 @@ function SettingsContent() {
                     </div>
                   </div>
 
-                  {codefConnectOrg === "woori_bank" && codefAuthMode === "idpw" && (
+                  {codefConnectOrg && CODEF_BANK_ORGS.has(codefConnectOrg) && codefAuthMode === "idpw" && (
                     <p className="text-xs text-yellow-500">
-                      ⚠️ 우리은행 기업뱅킹은 Codef에서 공동인증서 필수입니다. ID/PW로는 실패합니다.
+                      ⚠️ {CODEF_ORG_LABELS[codefConnectOrg]} 기업뱅킹은 Codef에서 공동인증서 필수입니다. ID/PW로는 실패합니다.
                     </p>
                   )}
 
