@@ -123,6 +123,9 @@ function SettingsContent() {
   const [codefAuthMode, setCodefAuthMode] = useState<"idpw" | "cert">("idpw")
   const [codefLoginId, setCodefLoginId] = useState("")
   const [codefLoginPw, setCodefLoginPw] = useState("")
+  const [codefCardPw, setCodefCardPw] = useState("")        // 카드 4자리 비번
+  const [codefBusinessNo, setCodefBusinessNo] = useState("")  // 사업자번호
+  const [codefAdvancedOpen, setCodefAdvancedOpen] = useState(false)
   const [codefCertPw, setCodefCertPw] = useState("")
   const [codefDerFileB64, setCodefDerFileB64] = useState("")
   const [codefKeyFileB64, setCodefKeyFileB64] = useState("")
@@ -243,6 +246,9 @@ function SettingsContent() {
   const resetCodefForm = () => {
     setCodefLoginId("")
     setCodefLoginPw("")
+    setCodefCardPw("")
+    setCodefBusinessNo("")
+    setCodefAdvancedOpen(false)
     setCodefCertPw("")
     setCodefDerFileB64("")
     setCodefKeyFileB64("")
@@ -283,6 +289,8 @@ function SettingsContent() {
         account.login_type = "1"
         account.login_id = codefLoginId
         account.login_password = codefLoginPw
+        if (codefCardPw) account.card_password = codefCardPw
+        if (codefBusinessNo) account.business_no = codefBusinessNo
       } else {
         account.login_type = "0"
         account.cert_password = codefCertPw
@@ -708,6 +716,39 @@ function SettingsContent() {
                         onChange={(e) => setCodefLoginPw(e.target.value)}
                         className="h-8 text-sm"
                       />
+                      {/* 카드 등 일부 기관 추가 필드 — 접기/펼치기 */}
+                      {codefConnectOrg && !CODEF_BANK_ORGS.has(codefConnectOrg) && (
+                        <div className="space-y-2">
+                          <button
+                            type="button"
+                            onClick={() => setCodefAdvancedOpen((v) => !v)}
+                            className="text-xs text-muted-foreground hover:text-foreground"
+                          >
+                            {codefAdvancedOpen ? "▼" : "▶"} 추가 정보 (CF-12803·12407 등 에러 시)
+                          </button>
+                          {codefAdvancedOpen && (
+                            <>
+                              <Input
+                                type="password"
+                                placeholder="카드 비밀번호 4자리 (선택)"
+                                value={codefCardPw}
+                                onChange={(e) => setCodefCardPw(e.target.value)}
+                                maxLength={4}
+                                className="h-8 text-sm"
+                              />
+                              <Input
+                                placeholder="사업자번호 10자리 (선택, 하이픈 없이)"
+                                value={codefBusinessNo}
+                                onChange={(e) =>
+                                  setCodefBusinessNo(e.target.value.replace(/[^0-9]/g, ""))
+                                }
+                                maxLength={10}
+                                className="h-8 text-sm"
+                              />
+                            </>
+                          )}
+                        </div>
+                      )}
                     </>
                   ) : (
                     <>

@@ -195,6 +195,10 @@ class CodefAccountSpec(BaseModel):
     cert_password: Optional[str] = None  # plain → 서버에서 RSA+base64
     # NPKI 로컬 경로로 cert 지정 (der/key 자동 로드)
     npki_cert_path: Optional[str] = None
+    # 카드사·일부 은행 추가 필수 필드 (없으면 무시)
+    card_password: Optional[str] = None     # 4자리 카드 비밀번호 → RSA+base64
+    business_no: Optional[str] = None       # 사업자등록번호 (10자리)
+    birth_date: Optional[str] = None        # 대표자 생년월일 (YYMMDD)
 
     @field_validator("organization")
     @classmethod
@@ -399,6 +403,13 @@ def codef_connect(
                     raise HTTPException(400, "login_id + login_password required for id/pw auth")
                 account["id"] = spec.login_id
                 account["password"] = encrypt_password(spec.login_password)
+                # 카드사·일부 은행 추가 필드 (있으면 포함)
+                if spec.card_password:
+                    account["cardPassword"] = encrypt_password(spec.card_password)
+                if spec.business_no:
+                    account["businessNo"] = spec.business_no
+                if spec.birth_date:
+                    account["birthDate"] = spec.birth_date
             else:
                 # 공동인증서 — npki_cert_path 우선, 없으면 업로드된 der/key 사용
                 der_b64 = spec.der_file_b64
