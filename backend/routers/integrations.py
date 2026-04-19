@@ -258,11 +258,12 @@ def codef_status(
     entity_id: int = 2,
     conn: PgConnection = Depends(get_db),
 ):
-    """Codef 연결 상태 + 환경 + 등록된 connected_id 목록."""
+    """Codef 연결 상태 + 환경 + 등록된 connected_id + 마지막 sync 시각."""
     from backend.services.integrations.codef import (
         resolve_base_url,
         is_production,
         list_connected_ids,
+        list_last_syncs,
     )
 
     configured = bool(
@@ -270,6 +271,7 @@ def codef_status(
     )
     env = "production" if is_production() else "demo"
     connections = list_connected_ids(conn, entity_id) if configured else {}
+    last_syncs = list_last_syncs(conn, entity_id) if configured else {}
 
     if not configured:
         return {
@@ -278,6 +280,7 @@ def codef_status(
             "environment": env,
             "base_url": resolve_base_url(),
             "connections": {},
+            "last_syncs": {},
         }
 
     try:
@@ -290,6 +293,7 @@ def codef_status(
             "environment": env,
             "base_url": resolve_base_url(),
             "connections": connections,
+            "last_syncs": last_syncs,
         }
     except Exception:
         logger.exception("Connection check failed")
@@ -299,6 +303,7 @@ def codef_status(
             "environment": env,
             "base_url": resolve_base_url(),
             "connections": connections,
+            "last_syncs": last_syncs,
             "error": "Unable to authenticate",
         }
 
@@ -449,7 +454,7 @@ def codef_sync_bank(
     conn: PgConnection = Depends(get_db),
 ):
     """Codef 우리은행 거래 동기화."""
-    from backend.services.integrations.codef import CodefError
+    from backend.services.integrations.codef import CodefError, set_last_sync
     connected_id = _resolve_connected_id(conn, body.entity_id, "woori_bank", body.connected_id)
     client = _get_codef_client()
     try:
@@ -457,6 +462,7 @@ def codef_sync_bank(
             conn, body.entity_id, connected_id,
             body.start_date, body.end_date,
         )
+        set_last_sync(conn, body.entity_id, "woori_bank")
         conn.commit()
         return result
     except CodefError as e:
@@ -476,7 +482,7 @@ def codef_sync_card(
     conn: PgConnection = Depends(get_db),
 ):
     """Codef 카드 승인내역 동기화."""
-    from backend.services.integrations.codef import CodefError
+    from backend.services.integrations.codef import CodefError, set_last_sync
     connected_id = _resolve_connected_id(conn, body.entity_id, body.card_type, body.connected_id)
     client = _get_codef_client()
     try:
@@ -484,6 +490,7 @@ def codef_sync_card(
             conn, body.entity_id, connected_id,
             body.start_date, body.end_date, body.card_type,
         )
+        set_last_sync(conn, body.entity_id, body.card_type)
         conn.commit()
         return result
     except CodefError as e:

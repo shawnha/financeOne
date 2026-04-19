@@ -80,6 +80,7 @@ _BANK_OU_KEYWORDS = {
 }
 
 SETTINGS_PREFIX = "codef_connected_id_"  # e.g., codef_connected_id_woori_bank
+LAST_SYNC_PREFIX = "codef_last_sync_"    # e.g., codef_last_sync_woori_bank
 
 
 def resolve_base_url() -> str:
@@ -346,6 +347,10 @@ class CodefClient:
         cur = conn.cursor()
         synced = 0
         duplicates = 0
+        auto_mapped = 0
+
+        # 자동 매핑 (lazy import — 순환 회피)
+        from backend.services.mapping_service import auto_map_transaction
 
         for item in raw_list:
             tx = _normalize_bank_row(item)
@@ -356,34 +361,65 @@ class CodefClient:
                 duplicates += 1
                 continue
 
-            # 체크카드 표시 (Excel 파서와 동일 — '체크우리' 적요)
             is_check_card_memo = tx.get("memo") == "체크우리"
 
-            cur.execute(
-                """
-                INSERT INTO transactions
-                    (entity_id, date, amount, currency, type, description,
-                     counterparty, source_type, is_confirmed, is_cancel, note)
-                VALUES (%s, %s, %s, 'KRW', %s, %s, %s, 'codef_woori_bank', FALSE, FALSE, %s)
-                """,
-                [
-                    entity_id, tx["date"], float(tx["amount"]),
-                    tx["type"], tx["description"], tx["counterparty"],
-                    f"체크카드" if is_check_card_memo else None,
-                ],
+            # mapping_rules cascade 시도
+            mapping = auto_map_transaction(
+                cur,
+                entity_id=entity_id,
+                counterparty=tx["counterparty"],
+                description=tx["description"],
             )
+
+            if mapping:
+                auto_mapped += 1
+                cur.execute(
+                    """
+                    INSERT INTO transactions
+                        (entity_id, date, amount, currency, type, description,
+                         counterparty, source_type, is_confirmed, is_cancel, note,
+                         internal_account_id, standard_account_id,
+                         mapping_confidence, mapping_source)
+                    VALUES (%s, %s, %s, 'KRW', %s, %s, %s, 'codef_woori_bank', FALSE, FALSE, %s,
+                            %s, %s, %s, %s)
+                    """,
+                    [
+                        entity_id, tx["date"], float(tx["amount"]),
+                        tx["type"], tx["description"], tx["counterparty"],
+                        "체크카드" if is_check_card_memo else None,
+                        mapping["internal_account_id"], mapping.get("standard_account_id"),
+                        mapping.get("confidence"), mapping.get("match_type"),
+                    ],
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO transactions
+                        (entity_id, date, amount, currency, type, description,
+                         counterparty, source_type, is_confirmed, is_cancel, note)
+                    VALUES (%s, %s, %s, 'KRW', %s, %s, %s, 'codef_woori_bank', FALSE, FALSE, %s)
+                    """,
+                    [
+                        entity_id, tx["date"], float(tx["amount"]),
+                        tx["type"], tx["description"], tx["counterparty"],
+                        "체크카드" if is_check_card_memo else None,
+                    ],
+                )
             synced += 1
 
         cur.close()
         logger.info(
-            "Codef bank sync: entity=%d, fetched=%d, synced=%d, duplicates=%d",
-            entity_id, len(raw_list), synced, duplicates,
+            "Codef bank sync: entity=%d, fetched=%d, synced=%d, dup=%d, auto_mapped=%d",
+            entity_id, len(raw_list), synced, duplicates, auto_mapped,
         )
         return {
             "synced": synced,
             "duplicates": duplicates,
+            "auto_mapped": auto_mapped,
+            "unmapped": synced - auto_mapped,
             "total_fetched": len(raw_list),
             "environment": self.environment,
+            "account": account,
         }
 
     # ── 카드 ────────────────────────────────────────────────
@@ -735,6 +771,40 @@ def list_connected_ids(conn: PgConnection, entity_id: int) -> dict:
         result = {}
         for key, value in cur.fetchall():
             org = key[len(SETTINGS_PREFIX):]
+            result[org] = value
+        return result
+    finally:
+        cur.close()
+
+
+def set_last_sync(conn: PgConnection, entity_id: int, org: str) -> None:
+    """sync 성공 시각을 settings에 저장 (UTC ISO)."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            INSERT INTO settings (key, value, entity_id, updated_at)
+            VALUES (%s, NOW()::text, %s, NOW())
+            ON CONFLICT (key, entity_id) DO UPDATE
+                SET value = EXCLUDED.value, updated_at = NOW()
+            """,
+            [LAST_SYNC_PREFIX + org, entity_id],
+        )
+    finally:
+        cur.close()
+
+
+def list_last_syncs(conn: PgConnection, entity_id: int) -> dict:
+    """entity의 모든 기관 last_sync 시각 조회. {org: ISO timestamp}."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT key, value FROM settings WHERE key LIKE %s AND entity_id = %s",
+            [LAST_SYNC_PREFIX + "%", entity_id],
+        )
+        result = {}
+        for key, value in cur.fetchall():
+            org = key[len(LAST_SYNC_PREFIX):]
             result[org] = value
         return result
     finally:

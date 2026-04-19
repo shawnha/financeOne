@@ -30,7 +30,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
 import {
-  Search, Download, ChevronLeft, ChevronRight, X, AlertTriangle, AlertCircle, Upload, RotateCw, Wand2, MessageSquare, SlidersHorizontal, ChevronDown, CheckCircle2,
+  Search, Download, ChevronLeft, ChevronRight, X, AlertTriangle, AlertCircle, Upload, RotateCw, RefreshCw, Wand2, MessageSquare, SlidersHorizontal, ChevronDown, CheckCircle2,
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -146,6 +146,14 @@ const SOURCE_LABELS: Record<string, string> = {
   lotte_card: "롯데카드",
   woori_card: "우리카드",
   woori_bank: "우리은행",
+  ibk_bank: "IBK기업은행",
+  shinhan_card: "신한카드",
+  // Codef API pull (출처는 같은 기관이므로 동일 라벨)
+  codef_woori_bank: "우리은행",
+  codef_ibk_bank: "IBK기업은행",
+  codef_lotte_card: "롯데카드",
+  codef_woori_card: "우리카드",
+  codef_shinhan_card: "신한카드",
   expenseone_card: "ExpenseOne 법카",
   expenseone_deposit: "ExpenseOne 입금",
   manual: "수동",
@@ -155,6 +163,13 @@ const SOURCE_BADGE_CLASSES: Record<string, string> = {
   lotte_card: "bg-red-500/15 text-red-400 border-red-500/30",
   woori_card: "bg-blue-500/15 text-blue-400 border-blue-500/30",
   woori_bank: "bg-cyan-500/15 text-cyan-400 border-cyan-500/30",
+  ibk_bank: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+  shinhan_card: "bg-violet-500/15 text-violet-400 border-violet-500/30",
+  codef_woori_bank: "bg-cyan-500/15 text-cyan-400 border-cyan-500/30",
+  codef_ibk_bank: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+  codef_lotte_card: "bg-red-500/15 text-red-400 border-red-500/30",
+  codef_woori_card: "bg-blue-500/15 text-blue-400 border-blue-500/30",
+  codef_shinhan_card: "bg-violet-500/15 text-violet-400 border-violet-500/30",
   expenseone_card: "bg-amber-500/15 text-amber-400 border-amber-500/30",
   expenseone_deposit: "bg-amber-500/15 text-amber-400 border-amber-500/30",
   manual: "bg-gray-500/15 text-gray-400 border-gray-500/30",
@@ -248,6 +263,10 @@ export default function TransactionsPage() {
   const [errorMsg, setErrorMsg] = useState("")
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(50)
+  const [codefSyncing, setCodefSyncing] = useState(false)
+  const [codefSyncMsg, setCodefSyncMsg] = useState<string | null>(null)
+  const [codefLastSync, setCodefLastSync] = useState<string | null>(null)
+  const [codefHasConnections, setCodefHasConnections] = useState(false)
   const [globalMonth, setGlobalMonth] = useGlobalMonth() // ready handled via globalMonth sync effect
   const [filters, setFilters] = useState<Filters>(() => {
     // URL query에서 year/month/filter 읽기
@@ -486,6 +505,142 @@ export default function TransactionsPage() {
       setBulkConfirming(false)
     }
   }, [selectedIds, fetchTransactions])
+
+  // Codef 상태 + 마지막 sync 로드 (entity 바뀔 때마다)
+  useEffect(() => {
+    if (!entityId || entityId < 0) {
+      setCodefHasConnections(false)
+      setCodefLastSync(null)
+      return
+    }
+    fetchAPI<{
+      configured: boolean
+      connections?: Record<string, string>
+      last_syncs?: Record<string, string>
+    }>(`/integrations/codef/status?entity_id=${entityId}`)
+      .then((s) => {
+        const conns = Object.keys(s.connections || {})
+        setCodefHasConnections(s.configured && conns.length > 0)
+        const ts = Object.values(s.last_syncs || {})
+        if (ts.length > 0) {
+          const newest = ts.reduce((a, b) => (a > b ? a : b))
+          setCodefLastSync(newest)
+        } else {
+          setCodefLastSync(null)
+        }
+      })
+      .catch(() => {
+        setCodefHasConnections(false)
+        setCodefLastSync(null)
+      })
+  }, [entityId, codefSyncing])
+
+  // 상대시간 포맷 ('5분 전', '1시간 전')
+  const formatRelative = (iso: string | null) => {
+    if (!iso) return null
+    const d = new Date(iso.replace(" ", "T"))
+    if (isNaN(d.getTime())) return null
+    const diffSec = Math.floor((Date.now() - d.getTime()) / 1000)
+    if (diffSec < 60) return "방금 전"
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}분 전`
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}시간 전`
+    return `${Math.floor(diffSec / 86400)}일 전`
+  }
+
+  // Codef 동기화 (현재 entity, 선택 월의 1일 ~ 월말 또는 오늘)
+  const handleCodefSync = useCallback(async () => {
+    if (!entityId || entityId < 0) return
+    setCodefSyncing(true)
+    setCodefSyncMsg(null)
+    try {
+      // 1) connections 조회
+      const status = await fetchAPI<{
+        configured: boolean
+        connections: Record<string, string>
+      }>(`/integrations/codef/status?entity_id=${entityId}`)
+      if (!status.configured) {
+        toast.error("Codef 미설정")
+        return
+      }
+      const orgs = Object.keys(status.connections || {})
+      if (orgs.length === 0) {
+        toast.error("이 법인에 연결된 Codef 계정이 없습니다 (설정 → Codef)")
+        return
+      }
+      // 2) 날짜 범위 결정 — 현재 선택 월
+      const sel =
+        filters.dateFrom && filters.dateFrom.slice(0, 7) === filters.dateTo.slice(0, 7)
+          ? filters.dateFrom.slice(0, 7)
+          : globalMonth
+      const [y, m] = sel.split("-").map(Number)
+      const today = new Date()
+      const isCurrentMonth = today.getFullYear() === y && today.getMonth() + 1 === m
+      const lastDay = isCurrentMonth ? today.getDate() : new Date(y, m, 0).getDate()
+      const startStr = `${y}${String(m).padStart(2, "0")}01`
+      const endStr = `${y}${String(m).padStart(2, "0")}${String(lastDay).padStart(2, "0")}`
+
+      // 3) 기관별 sync 병렬 실행
+      const results = await Promise.all(
+        orgs.map(async (org) => {
+          try {
+            const isBank = org.endsWith("_bank")
+            const path = isBank
+              ? "/integrations/codef/sync-bank"
+              : "/integrations/codef/sync-card"
+            const body: Record<string, unknown> = {
+              entity_id: entityId,
+              start_date: startStr,
+              end_date: endStr,
+            }
+            if (!isBank) body.card_type = org
+            const r = await fetchAPI<{
+              synced: number
+              duplicates: number
+              auto_mapped?: number
+              unmapped?: number
+              total_fetched: number
+            }>(path, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            })
+            return { org, ok: true, ...r }
+          } catch (err) {
+            return {
+              org,
+              ok: false,
+              error: err instanceof Error ? err.message : "실패",
+              synced: 0,
+              total_fetched: 0,
+              duplicates: 0,
+            }
+          }
+        }),
+      )
+
+      // 4) 결과 메시지
+      const totalSynced = results.reduce((s, r) => s + (r.synced || 0), 0)
+      const totalDup = results.reduce((s, r) => s + (r.duplicates || 0), 0)
+      const totalAuto = results.reduce(
+        (s, r) => s + ((r as { auto_mapped?: number }).auto_mapped ?? 0),
+        0,
+      )
+      const errs = results.filter((r) => !r.ok)
+      const summary = `${sel} 동기화: 신규 ${totalSynced}, 자동매핑 ${totalAuto}, 중복 ${totalDup}` +
+        (errs.length > 0 ? ` (실패 ${errs.length})` : "")
+      setCodefSyncMsg(summary)
+      if (errs.length === 0) toast.success(summary)
+      else toast.error(`일부 실패: ${errs.map((e) => `${e.org}=${(e as {error?:string}).error}`).join(", ")}`)
+      // 5) 거래내역 새로고침
+      await fetchTransactions(true)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "동기화 실패"
+      setCodefSyncMsg(msg)
+      toast.error(msg)
+    } finally {
+      setCodefSyncing(false)
+    }
+  }, [entityId, filters.dateFrom, filters.dateTo, globalMonth, fetchTransactions])
 
   // Bulk cancel
   const [bulkCancelling, setBulkCancelling] = useState(false)
@@ -744,6 +899,35 @@ export default function TransactionsPage() {
             }}
             allowFuture
           />
+
+          {/* Codef 동기화 — 현재 entity 연결 기관에 대해 선택월 sync */}
+          {codefHasConnections && (
+            <div className="inline-flex items-center gap-2">
+              <button
+                onClick={handleCodefSync}
+                disabled={codefSyncing}
+                className={cn(
+                  "h-9 px-3 rounded-full border text-xs font-medium transition-colors inline-flex items-center gap-1.5",
+                  codefSyncing
+                    ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-400"
+                    : "border-white/10 text-muted-foreground hover:bg-white/[0.04] hover:text-cyan-400",
+                )}
+                title={codefLastSync ? `마지막: ${new Date(codefLastSync.replace(" ","T")).toLocaleString("ko-KR")}` : "선택한 월의 Codef 거래를 가져옵니다"}
+              >
+                {codefSyncing ? (
+                  <RefreshCw className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Download className="h-3 w-3" />
+                )}
+                Codef 동기화
+              </button>
+              {codefLastSync && !codefSyncing && (
+                <span className="text-[11px] text-muted-foreground/70">
+                  마지막: {formatRelative(codefLastSync)}
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Search */}
           <div className="relative">
