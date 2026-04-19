@@ -40,13 +40,19 @@ CODEF_PRODUCTION_URL = "https://api.codef.io"
 CODEF_SANDBOX_URL = CODEF_DEMO_URL
 CODEF_TOKEN_URL = "https://oauth.codef.io/oauth/token"
 
-# Codef 기관 코드
+# Codef 기관 코드 (live API brute-force로 검증된 값, 2026-04-20)
 ORG_CODES = {
     "woori_bank": "0020",
     "ibk_bank": "0003",
     "lotte_card": "0301",
-    "woori_card": "0315",
-    "shinhan_card": "0309",
+    "bc_card": "0302",
+    "samsung_card": "0303",
+    "shinhan_card": "0304",   # 이전 0309는 우리카드. 0304가 진짜 신한
+    "hyundai_card": "0305",
+    "nh_card": "0306",
+    "woori_card": "0309",     # 이전 0315는 무효. 0309가 진짜 우리카드
+    "kb_card": "0311",
+    "hana_card": "0313",
 }
 
 # UI 표시명
@@ -54,13 +60,22 @@ ORG_LABELS = {
     "woori_bank": "우리은행",
     "ibk_bank": "IBK기업은행",
     "lotte_card": "롯데카드",
-    "woori_card": "우리카드",
+    "bc_card": "BC카드",
+    "samsung_card": "삼성카드",
     "shinhan_card": "신한카드",
+    "hyundai_card": "현대카드",
+    "nh_card": "NH농협카드",
+    "woori_card": "우리카드",
+    "kb_card": "KB국민카드",
+    "hana_card": "하나카드",
 }
 
 # 은행/카드 타입 → source_type (mapping rules와 일관성 유지)
 BANK_ORGS = {"woori_bank", "ibk_bank"}
-CARD_ORGS = {"lotte_card", "woori_card", "shinhan_card"}
+CARD_ORGS = {
+    "lotte_card", "bc_card", "samsung_card", "shinhan_card",
+    "hyundai_card", "nh_card", "woori_card", "kb_card", "hana_card",
+}
 
 # NPKI cert OU 키워드 → 한글 은행/기관명
 _BANK_OU_KEYWORDS = {

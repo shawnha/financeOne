@@ -102,7 +102,11 @@ def mercury_sync(
 
 # --- Codef ---
 
-VALID_CODEF_ORGS = {"woori_bank", "lotte_card", "woori_card", "shinhan_card"}
+VALID_CODEF_ORGS = {
+    "woori_bank", "ibk_bank",
+    "lotte_card", "bc_card", "samsung_card", "shinhan_card",
+    "hyundai_card", "nh_card", "woori_card", "kb_card", "hana_card",
+}
 
 
 class CodefSyncRequest(BaseModel):
@@ -132,13 +136,14 @@ class CodefSyncRequest(BaseModel):
 
 
 class CodefCardSyncRequest(CodefSyncRequest):
-    card_type: str = "lotte_card"  # lotte_card, woori_card, shinhan_card
+    card_type: str = "lotte_card"
 
     @field_validator("card_type")
     @classmethod
     def validate_card_type(cls, v: str) -> str:
-        if v not in ("lotte_card", "woori_card", "shinhan_card"):
-            raise ValueError("card_type must be lotte_card|woori_card|shinhan_card")
+        from backend.services.integrations.codef import CARD_ORGS
+        if v not in CARD_ORGS:
+            raise ValueError(f"card_type must be one of {sorted(CARD_ORGS)}")
         return v
 
 

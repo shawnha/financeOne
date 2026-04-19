@@ -303,7 +303,7 @@ def test_sync_card_approvals_unknown_card_type():
     client = CodefClient("id", "sec")
     conn = MagicMock()
     with pytest.raises(CodefError, match="Unknown card type"):
-        client.sync_card_approvals(conn, 1, "cid", "20260301", "20260331", "hyundai_card")
+        client.sync_card_approvals(conn, 1, "cid", "20260301", "20260331", "fake_xx_card")
     client.close()
 
 
