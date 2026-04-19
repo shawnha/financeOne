@@ -19,7 +19,7 @@ import os
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Optional
-from urllib.parse import unquote_plus
+from urllib.parse import quote, unquote_plus
 
 import httpx
 from psycopg2.extensions import connection as PgConnection
@@ -196,19 +196,19 @@ class CodefClient:
 
     def _request(self, endpoint: str, params: dict) -> dict:
         token = self._get_token()
-        resp = self.client.post(
-            endpoint,
-            json=params,
-            headers={"Authorization": f"Bearer {token}"},
-        )
+        # Codef 공식 SDK 패턴: body 전체를 URL-encoded JSON 문자열로 전송
+        # (Content-Type: application/json 유지, data=quote(json.dumps(body)))
+        body = quote(json.dumps(params, ensure_ascii=False))
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        resp = self.client.post(endpoint, content=body, headers=headers)
         if resp.status_code == 401:
             self._token = None
             token = self._get_token()
-            resp = self.client.post(
-                endpoint,
-                json=params,
-                headers={"Authorization": f"Bearer {token}"},
-            )
+            headers["Authorization"] = f"Bearer {token}"
+            resp = self.client.post(endpoint, content=body, headers=headers)
 
         resp.raise_for_status()
         data = _parse_codef_response(resp.text)
