@@ -2237,7 +2237,9 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                     {data.card_timing.adjustment >= 0 ? "+" : ""}{formatByEntity(data.card_timing.adjustment, entityId)}
                   </td>
                   {showComparison && <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-muted-foreground">--</td>}
-                  <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-[hsl(var(--warning))]">--</td>
+                  <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-[hsl(var(--warning))]">
+                    {formatByEntity(data.adjusted_forecast_closing, entityId)}
+                  </td>
                   {showComparison && <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-muted-foreground">--</td>}
                   <td></td>
                 </tr>
