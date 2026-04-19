@@ -19,7 +19,7 @@ import os
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Optional
-from urllib.parse import unquote
+from urllib.parse import unquote_plus
 
 import httpx
 from psycopg2.extensions import connection as PgConnection
@@ -395,21 +395,19 @@ class CodefClient:
 def _parse_codef_response(raw: str) -> dict:
     """Codef API 응답 파싱 — URL-encoded JSON 특이사항 대응.
 
-    Codef는 응답 body를 URL-encoded JSON 문자열로 반환 (예: '%7B%22result%22...').
-    일반 JSON도 지원하기 위해 먼저 URL decode 시도.
+    Codef는 응답 body를 form-encoded JSON 문자열로 반환 (예: '%7B...', '+'=공백).
+    unquote_plus로 '+' → 공백, '%XX' → 실제 문자 변환 후 json.loads.
     """
     if not raw:
         raise CodefError("Empty response from Codef")
-    # URL-encoded 응답 판별: '%'로 시작하거나 percent-encoded 문자 다수 포함
     text = raw
     if text.lstrip().startswith("%"):
-        text = unquote(text)
+        text = unquote_plus(text)
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        # 첫 시도 실패 → unquote 후 재시도 (Codef가 부분 인코딩 할 때 대비)
         try:
-            return json.loads(unquote(raw))
+            return json.loads(unquote_plus(raw))
         except json.JSONDecodeError as e:
             snippet = raw[:200]
             logger.error("Codef response not parseable: %s", snippet)
