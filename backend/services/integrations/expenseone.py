@@ -116,59 +116,90 @@ def sync_to_financeone(
     entity_id: int,
     expenses: list[dict],
 ) -> dict:
-    """승인 경비를 transactions에 INSERT (중복 SKIP/UPDATE).
+    """승인 경비 → transactions에 직접 INSERT 안 하고 카드/은행 거래에 매칭만.
+
+    매칭 성공: transaction_expenseone_match에 link
+    매칭 실패: unmatched로 남김 (별도 매칭 메뉴에서 수동 매칭 가능)
 
     Returns:
-        {total_fetched, inserted, enriched, duplicates, unmapped, errors}
+        {total_fetched, matched_card, matched_deposit, unmatched, already_linked, errors}
     """
-    cur = conn.cursor()
+    from backend.services.expenseone_matcher import (
+        find_card_match, find_deposit_match, insert_match,
+    )
 
-    inserted = 0
-    enriched = 0
-    duplicates = 0
-    unmapped = 0
+    cur = conn.cursor()
+    matched_card = 0
+    matched_deposit = 0
+    unmatched = 0
+    already_linked = 0
     errors: list[dict] = []
 
-    # 내부계정 이름 → id 캐시 (category fallback용)
-    cur.execute(
-        """
-        SELECT id, name, standard_account_id
-        FROM internal_accounts
-        WHERE entity_id = %s AND is_active = TRUE
-        """,
-        [entity_id],
-    )
-    name_to_account: dict[str, tuple[int, int | None]] = {}
-    for iid, name, std_id in cur.fetchall():
-        name_to_account[name.lower()] = (iid, std_id)
-
     for exp in expenses:
+        expense_id = str(exp.get("id"))
         try:
-            result = _upsert_expense(cur, entity_id, exp, name_to_account)
-            if result == "inserted":
-                inserted += 1
-            elif result == "enriched":
-                enriched += 1
-            elif result == "duplicate":
-                duplicates += 1
-            elif result == "unmapped":
-                unmapped += 1
-                inserted += 1  # 여전히 insert됨
+            # 이미 매칭 있으면 skip
+            cur.execute(
+                "SELECT 1 FROM transaction_expenseone_match WHERE expense_id = %s LIMIT 1",
+                [expense_id],
+            )
+            if cur.fetchone():
+                already_linked += 1
+                continue
+
+            exp_type = exp.get("type") or ""
+            amount = exp.get("amount") or 0
+            txn_date_raw = exp.get("transaction_date") or exp.get("approved_at") or ""
+            txn_date = _parse_date(txn_date_raw)
+            if not txn_date or amount <= 0:
+                continue
+
+            match = None
+            if exp_type == "CORPORATE_CARD":
+                match = find_card_match(
+                    cur, entity_id,
+                    expense_date=txn_date, amount=amount,
+                    card_last4=exp.get("card_last_four"),
+                    merchant=exp.get("merchant_name") or exp.get("title"),
+                )
+                if match:
+                    matched_card += 1
+            elif exp_type == "DEPOSIT_REQUEST":
+                approved_date = _parse_date(exp.get("approved_at")) or txn_date
+                match = find_deposit_match(
+                    cur, entity_id,
+                    approved_date=approved_date, amount=amount,
+                    account_holder=exp.get("account_holder"),
+                )
+                if match:
+                    matched_deposit += 1
+
+            if match:
+                insert_match(
+                    cur,
+                    transaction_id=match["transaction_id"],
+                    expense_id=expense_id,
+                    expense_type=exp_type,
+                    confidence=match["confidence"],
+                    method=match["method"],
+                    reasoning=match["reasoning"],
+                )
+            else:
+                unmatched += 1
         except Exception as e:
-            logger.exception("expense sync failed: id=%s", exp.get("id"))
-            errors.append({"expense_id": str(exp.get("id", "")), "error": str(e)[:200]})
+            logger.exception("expense match failed: id=%s", expense_id)
+            errors.append({"expense_id": expense_id, "error": str(e)[:200]})
 
     cur.close()
-
     summary = {
         "total_fetched": len(expenses),
-        "inserted": inserted,
-        "enriched": enriched,
-        "duplicates": duplicates,
-        "unmapped": unmapped,
+        "matched_card": matched_card,
+        "matched_deposit": matched_deposit,
+        "unmatched": unmatched,
+        "already_linked": already_linked,
         "errors": errors,
     }
-    logger.info("ExpenseOne sync: %s", summary)
+    logger.info("ExpenseOne match: %s", summary)
     return summary
 
 

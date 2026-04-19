@@ -347,6 +347,26 @@ CREATE TABLE IF NOT EXISTS transaction_slack_match (
 CREATE INDEX IF NOT EXISTS idx_match_tx ON transaction_slack_match(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_match_slack ON transaction_slack_match(slack_message_id);
 
+-- 16b. transaction_expenseone_match — 거래 ↔ ExpenseOne 매칭
+CREATE TABLE IF NOT EXISTS transaction_expenseone_match (
+  id                SERIAL PRIMARY KEY,
+  transaction_id    INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+  expense_id        UUID NOT NULL,
+  expense_type      TEXT NOT NULL,        -- 'CORPORATE_CARD' | 'DEPOSIT_REQUEST'
+  match_confidence  NUMERIC(3,2),
+  match_method      TEXT,
+  is_manual         BOOLEAN NOT NULL DEFAULT FALSE,
+  is_confirmed      BOOLEAN NOT NULL DEFAULT FALSE,
+  ai_reasoning      TEXT,
+  note              TEXT,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_eo_match_tx ON transaction_expenseone_match(transaction_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_eo_match_expense ON transaction_expenseone_match(expense_id);
+CREATE INDEX IF NOT EXISTS idx_eo_match_type_conf ON transaction_expenseone_match(expense_type, is_confirmed);
+
 -- 17. journal_entries — 분개 헤더
 CREATE TABLE IF NOT EXISTS journal_entries (
   id             SERIAL PRIMARY KEY,
