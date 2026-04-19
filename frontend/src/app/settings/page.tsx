@@ -115,6 +115,7 @@ interface GowidStatus {
   connected: boolean
   last_sync?: string | null
   synced_count?: number
+  key_source?: "settings" | "env" | null
 }
 
 interface GowidSyncResult {
@@ -178,6 +179,8 @@ function SettingsContent() {
   const [gowidStatus, setGowidStatus] = useState<GowidStatus | null>(null)
   const [gowidSyncResult, setGowidSyncResult] = useState<GowidSyncResult | null>(null)
   const [gowidError, setGowidError] = useState<string | null>(null)
+  const [gowidEntityId, setGowidEntityId] = useState(2)  // 한아원코리아 default
+  const [gowidApiKeyInput, setGowidApiKeyInput] = useState("")
   const [gowidStart, setGowidStart] = useState(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`
@@ -198,12 +201,59 @@ function SettingsContent() {
       .catch(() => setExpenseoneStatus({ configured: false, connected: false, error: "fetch failed" }))
   }, [])
 
-  // Gowid 초기 status 로드
+  // Gowid 초기 status 로드 — entity 선택 변경 시 재로드
   useEffect(() => {
-    fetchAPI<GowidStatus>("/integrations/gowid/status?entity_id=2")
+    fetchAPI<GowidStatus>(`/integrations/gowid/status?entity_id=${gowidEntityId}`)
       .then(setGowidStatus)
-      .catch(() => setGowidStatus({ configured: false, connected: false }))
-  }, [])
+      .catch(() =>
+        setGowidStatus({ configured: false, connected: false }),
+      )
+    setGowidSyncResult(null)
+    setGowidError(null)
+    setGowidApiKeyInput("")
+  }, [gowidEntityId])
+
+  const reloadGowidStatus = () => {
+    fetchAPI<GowidStatus>(`/integrations/gowid/status?entity_id=${gowidEntityId}`)
+      .then(setGowidStatus).catch(() => {})
+  }
+
+  const saveGowidApiKey = async () => {
+    if (!gowidApiKeyInput.trim()) return
+    setTesting("gowid-key-save")
+    setGowidError(null)
+    try {
+      await fetchAPI("/integrations/gowid/api-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entity_id: gowidEntityId,
+          api_key: gowidApiKeyInput.trim(),
+        }),
+      })
+      setGowidApiKeyInput("")
+      reloadGowidStatus()
+    } catch (err) {
+      setGowidError(err instanceof Error ? err.message : "API key 저장 실패")
+    } finally {
+      setTesting(null)
+    }
+  }
+
+  const deleteGowidApiKey = async () => {
+    if (!confirm(`${gowidEntityId === 2 ? "한아원코리아" : "한아원리테일"} Gowid 연결을 해제할까요?`)) return
+    setTesting("gowid-key-delete")
+    try {
+      await fetchAPI(`/integrations/gowid/api-key?entity_id=${gowidEntityId}`, {
+        method: "DELETE",
+      })
+      reloadGowidStatus()
+    } catch (err) {
+      setGowidError(err instanceof Error ? err.message : "해제 실패")
+    } finally {
+      setTesting(null)
+    }
+  }
 
   const syncGowid = async () => {
     setTesting("gowid-sync")
@@ -214,15 +264,13 @@ function SettingsContent() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          entity_id: 2,
+          entity_id: gowidEntityId,
           start_date: gowidStart,
           end_date: gowidEnd,
         }),
       })
       setGowidSyncResult(r)
-      // status 새로고침
-      fetchAPI<GowidStatus>("/integrations/gowid/status?entity_id=2")
-        .then(setGowidStatus).catch(() => {})
+      reloadGowidStatus()
     } catch (err) {
       setGowidError(err instanceof Error ? err.message : "동기화 실패")
     } finally {
@@ -1089,11 +1137,61 @@ function SettingsContent() {
             Codef 롯데카드 직접 연결이 차단된 동안 우회 경로. 고위드 OpenAPI로 법인카드 거래(롯데/우리/신한 등) 통합 sync.
             Codef 정상화되면 끊을 수 있음.
           </p>
+
+          {/* 법인 선택 */}
+          <div className="flex gap-2 items-center">
+            <label className="text-xs text-muted-foreground">법인</label>
+            <div className="flex rounded-md overflow-hidden border border-border">
+              {[
+                { id: 2, name: "한아원코리아" },
+                { id: 3, name: "한아원리테일" },
+              ].map((e) => (
+                <button
+                  key={e.id}
+                  onClick={() => setGowidEntityId(e.id)}
+                  className={`px-3 py-1 text-xs transition-colors ${
+                    gowidEntityId === e.id
+                      ? "bg-accent/20 text-accent"
+                      : "bg-transparent text-muted-foreground hover:bg-secondary/50"
+                  }`}
+                >
+                  {e.name}
+                </button>
+              ))}
+            </div>
+            {gowidStatus?.key_source && (
+              <span className="text-xs text-muted-foreground/70">
+                key: {gowidStatus.key_source === "settings" ? "법인 등록" : "환경변수 (전역)"}
+              </span>
+            )}
+          </div>
+
           {!gowidStatus?.configured && (
-            <p className="text-xs text-yellow-500">
-              GOWID_API_KEY 환경변수 미설정
-            </p>
+            <div className="space-y-2 rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3">
+              <p className="text-xs text-yellow-500">
+                {gowidEntityId === 2 ? "한아원코리아" : "한아원리테일"} Gowid API key 미등록
+              </p>
+              <Input
+                type="password"
+                placeholder="Gowid API key 입력"
+                value={gowidApiKeyInput}
+                onChange={(e) => setGowidApiKeyInput(e.target.value)}
+                className="h-8 text-sm font-mono"
+              />
+              <Button
+                variant="default"
+                size="sm"
+                onClick={saveGowidApiKey}
+                disabled={testing === "gowid-key-save" || !gowidApiKeyInput.trim()}
+              >
+                {testing === "gowid-key-save" ? (
+                  <RefreshCw className="h-3 w-3 animate-spin mr-1" />
+                ) : null}
+                연결
+              </Button>
+            </div>
           )}
+
           {gowidStatus?.configured && (
             <>
               <div className="grid grid-cols-2 gap-3 text-xs text-muted-foreground">
@@ -1112,7 +1210,7 @@ function SettingsContent() {
                   </p>
                 </div>
               </div>
-              <div className="flex gap-2 items-center">
+              <div className="flex gap-2 items-center flex-wrap">
                 <Input
                   value={gowidStart}
                   onChange={(e) => setGowidStart(e.target.value)}
@@ -1137,6 +1235,16 @@ function SettingsContent() {
                   ) : null}
                   동기화
                 </Button>
+                {gowidStatus.key_source === "settings" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={deleteGowidApiKey}
+                    disabled={testing === "gowid-key-delete"}
+                  >
+                    연결 해제
+                  </Button>
+                )}
               </div>
               {gowidError && (
                 <div className="text-sm text-red-500">
