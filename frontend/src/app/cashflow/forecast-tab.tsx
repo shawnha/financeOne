@@ -1025,6 +1025,7 @@ function ForecastModal({
           method: "PUT",
           body: JSON.stringify({
             type,
+            category: category.trim() || editItem.category,
             forecast_amount: Number(amount.replace(/,/g, "")),
             is_recurring: recurring,
             expected_day: expectedDay ? Number(expectedDay) : null,
@@ -1102,8 +1103,18 @@ function ForecastModal({
           </div>
           {isEdit && (
             <div>
-              <label className="text-xs text-muted-foreground">항목</label>
-              <p className="font-medium mt-1">{editItem?.internal_account_name ?? editItem?.category}</p>
+              <label className="text-xs text-muted-foreground">항목 이름</label>
+              <Input
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                placeholder="항목 이름"
+                className="mt-1"
+              />
+              {editItem?.internal_account_name && editItem.internal_account_name !== category && (
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  연결 내부계정: <span className="text-foreground">{editItem.internal_account_name}</span>
+                </p>
+              )}
             </div>
           )}
           <div>

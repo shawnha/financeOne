@@ -31,6 +31,8 @@ class ForecastCreate(BaseModel):
 
 class ForecastUpdate(BaseModel):
     type: Optional[str] = Field(None, pattern="^(in|out)$")
+    category: Optional[str] = None
+    subcategory: Optional[str] = None
     forecast_amount: Optional[float] = None
     actual_amount: Optional[float] = None
     is_recurring: Optional[bool] = None
@@ -137,6 +139,15 @@ def update_forecast(
     if body.type is not None:
         updates.append("type = %s")
         params.append(body.type)
+    if body.category is not None:
+        cat = body.category.strip()
+        if not cat:
+            raise HTTPException(400, "category cannot be empty")
+        updates.append("category = %s")
+        params.append(cat)
+    if body.subcategory is not None:
+        updates.append("subcategory = %s")
+        params.append(body.subcategory.strip() or None)
     if body.forecast_amount is not None:
         updates.append("forecast_amount = %s")
         params.append(body.forecast_amount)
