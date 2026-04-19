@@ -30,7 +30,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
 import {
-  Search, Download, ChevronLeft, ChevronRight, X, AlertTriangle, Upload, RotateCw, Wand2, MessageSquare, SlidersHorizontal, ChevronDown, CheckCircle2,
+  Search, Download, ChevronLeft, ChevronRight, X, AlertTriangle, AlertCircle, Upload, RotateCw, Wand2, MessageSquare, SlidersHorizontal, ChevronDown, CheckCircle2,
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -64,6 +64,9 @@ interface Transaction {
   standard_account_code: string | null
   standard_account_name: string | null
   has_slack_match: boolean
+  expense_id: string | null
+  expense_submitted_by: string | null
+  expense_title: string | null
 }
 
 interface PaginatedResponse {
@@ -143,6 +146,8 @@ const SOURCE_LABELS: Record<string, string> = {
   lotte_card: "롯데카드",
   woori_card: "우리카드",
   woori_bank: "우리은행",
+  expenseone_card: "ExpenseOne 법카",
+  expenseone_deposit: "ExpenseOne 입금",
   manual: "수동",
 }
 
@@ -150,6 +155,8 @@ const SOURCE_BADGE_CLASSES: Record<string, string> = {
   lotte_card: "bg-red-500/15 text-red-400 border-red-500/30",
   woori_card: "bg-blue-500/15 text-blue-400 border-blue-500/30",
   woori_bank: "bg-cyan-500/15 text-cyan-400 border-cyan-500/30",
+  expenseone_card: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+  expenseone_deposit: "bg-amber-500/15 text-amber-400 border-amber-500/30",
   manual: "bg-gray-500/15 text-gray-400 border-gray-500/30",
 }
 
@@ -247,6 +254,8 @@ export default function TransactionsPage() {
     const urlYear = searchParams.get("year")
     const urlMonth = searchParams.get("month")
     const urlFilter = searchParams.get("filter")
+    const urlSourceType = searchParams.get("source_type")
+    const urlUnconfirmed = searchParams.get("unconfirmed") === "true"
     // localStorage에서 직접 읽기 (globalMonth는 아직 초기화 전일 수 있음)
     const savedMonth = typeof window !== "undefined" ? localStorage.getItem("financeone-selected-month") : null
     const now = new Date()
@@ -258,8 +267,9 @@ export default function TransactionsPage() {
       ...INITIAL_FILTERS,
       dateFrom: `${y}-${String(m).padStart(2, "0")}-01`,
       dateTo: `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
+      sourceType: urlSourceType || "",
       unclassified: urlFilter === "unmapped",
-      unconfirmed: urlFilter === "unconfirmed",
+      unconfirmed: urlUnconfirmed || urlFilter === "unconfirmed",
     }
   })
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
@@ -331,6 +341,26 @@ export default function TransactionsPage() {
         .then(setMembers)
         .catch(() => {})
     }
+  }, [entityId])
+
+  // ExpenseOne summary — entity_id=2에서만, 필터 바에 표시
+  const [expenseoneSummary, setExpenseoneSummary] = useState<{
+    unmapped_count: number
+    by_submitter: { name: string; count: number }[]
+    drift_count: number
+  } | null>(null)
+  useEffect(() => {
+    if (entityId !== 2) {
+      setExpenseoneSummary(null)
+      return
+    }
+    fetchAPI<{
+      unmapped_count: number
+      by_submitter: { name: string; count: number }[]
+      drift_count: number
+    }>(`/dashboard/expenseone-summary?entity_id=2`, { cache: "no-store" })
+      .then(setExpenseoneSummary)
+      .catch(() => setExpenseoneSummary(null))
   }, [entityId])
 
   // Fetch transactions
@@ -879,6 +909,8 @@ export default function TransactionsPage() {
                 { value: "lotte_card", label: "롯데카드" },
                 { value: "woori_card", label: "우리카드" },
                 { value: "woori_bank", label: "우리은행" },
+                { value: "expenseone_card", label: "ExpenseOne 법카" },
+                { value: "expenseone_deposit", label: "ExpenseOne 입금" },
               ]}
               placeholder="출처"
               searchPlaceholder="출처 검색..."
@@ -925,6 +957,36 @@ export default function TransactionsPage() {
           ))}
         </div>
 
+        {/* ExpenseOne 요약 바 — source_type이 expenseone_* 일 때만 */}
+        {expenseoneSummary
+          && filters.sourceType.startsWith("expenseone")
+          && expenseoneSummary.unmapped_count > 0 && (
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 px-3 py-2 rounded-md border border-[hsl(var(--warning))]/30 bg-[hsl(var(--warning))]/5 text-sm">
+            <div className="flex items-center gap-2 text-[hsl(var(--warning))]">
+              <AlertCircle className="h-4 w-4" />
+              <span>미매칭 <span className="font-mono tabular-nums font-semibold">{expenseoneSummary.unmapped_count}</span>건</span>
+            </div>
+            {expenseoneSummary.by_submitter.length > 0 && (
+              <div className="text-muted-foreground text-xs sm:text-sm">
+                <span className="hidden sm:inline">제출자별: </span>
+                <span className="font-mono tabular-nums">
+                  {expenseoneSummary.by_submitter
+                    .map((s) => `${s.name} ${s.count}`)
+                    .join(" · ")}
+                </span>
+              </div>
+            )}
+            {expenseoneSummary.drift_count > 0 && (
+              <Badge
+                variant="outline"
+                className="ml-auto text-xs font-mono bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))] border-[hsl(var(--warning))]/30"
+              >
+                전월 승인 {expenseoneSummary.drift_count}건
+              </Badge>
+            )}
+          </div>
+        )}
+
         {/* Main content area */}
         <div className="flex-1 overflow-y-auto rounded-md border">
           {viewState === "loading" && <TableSkeleton />}
@@ -952,6 +1014,7 @@ export default function TransactionsPage() {
                     <TableHead className="w-[88px]">날짜</TableHead>
                     <TableHead className="w-[64px]">출처</TableHead>
                     <TableHead className="w-[64px]">회원</TableHead>
+                    <TableHead className="w-[72px]">제출자</TableHead>
                     <TableHead className="w-[18%]">내역</TableHead>
                     <TableHead className="w-[14%]">거래처</TableHead>
                     <TableHead className="w-[90px] text-right">수입</TableHead>
@@ -1006,6 +1069,14 @@ export default function TransactionsPage() {
                       {/* Member */}
                       <TableCell className="p-2 text-sm truncate max-w-[80px]">
                         {tx.member_name || (tx.card_number ? tx.card_number.slice(-4) : "\u2014")}
+                      </TableCell>
+
+                      {/* Submitter (ExpenseOne) */}
+                      <TableCell
+                        className="p-2 text-sm overflow-hidden text-muted-foreground"
+                        title={tx.expense_submitted_by || ""}
+                      >
+                        <span className="block truncate">{tx.expense_submitted_by || "\u2014"}</span>
                       </TableCell>
 
                       {/* Description */}

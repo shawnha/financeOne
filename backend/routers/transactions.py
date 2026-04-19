@@ -123,6 +123,7 @@ def list_transactions(
                t.mapping_confidence, t.mapping_source, t.is_confirmed,
                t.is_duplicate, t.note, t.member_id,
                t.internal_account_id, t.standard_account_id, t.is_cancel, t.card_number,
+               t.expense_id, t.expense_submitted_by, t.expense_title,
                m.name AS member_name,
                ia.code AS internal_account_code, ia.name AS internal_account_name,
                pia.name AS internal_account_parent_name,

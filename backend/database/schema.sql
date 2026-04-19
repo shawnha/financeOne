@@ -112,6 +112,11 @@ CREATE TABLE IF NOT EXISTS transactions (
   is_duplicate           BOOLEAN NOT NULL DEFAULT FALSE,
   duplicate_of_id        INTEGER REFERENCES transactions(id),
 
+  -- ExpenseOne 연동 메타데이터 (Phase 2)
+  expense_id             UUID,
+  expense_submitted_by   TEXT,
+  expense_title          TEXT,
+
   note                   TEXT,
   created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -121,6 +126,8 @@ CREATE INDEX IF NOT EXISTS idx_tx_entity_date ON transactions(entity_id, date);
 CREATE INDEX IF NOT EXISTS idx_tx_standard ON transactions(standard_account_id);
 CREATE INDEX IF NOT EXISTS idx_tx_confirmed ON transactions(is_confirmed);
 CREATE INDEX IF NOT EXISTS idx_tx_file_id ON transactions(file_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_transactions_expense_id
+    ON transactions(expense_id) WHERE expense_id IS NOT NULL;
 
 -- 7. balance_snapshots — 잔고 스냅샷
 CREATE TABLE IF NOT EXISTS balance_snapshots (

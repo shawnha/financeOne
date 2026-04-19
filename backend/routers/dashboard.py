@@ -181,3 +181,58 @@ def _get_dashboard_data(conn: PgConnection, entity_id: Optional[int]):
 
 # NOTE: /cashflow, /cashflow/detail 엔드포인트는 /api/cashflow/ 라우터로 이전됨
 # (backend/routers/cashflow.py)
+
+
+@router.get("/expenseone-summary")
+def get_expenseone_summary(
+    entity_id: int = 2,
+    conn: PgConnection = Depends(get_db),
+):
+    """ExpenseOne 미매칭 거래 요약 — 빠른실행 버튼 카운트 + 제출자 breakdown + drift.
+
+    Returns:
+        unmapped_count: 전체 미매칭 수 (대시보드 버튼용)
+        by_submitter: 제출자별 top 10 [{name, count}]
+        drift_count: 전월 거래를 이번달에 승인한 건 (Asia/Seoul)
+    """
+    cur = conn.cursor()
+
+    # unmapped_count + by_submitter
+    cur.execute(
+        """
+        SELECT
+            COALESCE(expense_submitted_by, '(미상)') AS name,
+            COUNT(*) AS cnt
+        FROM transactions
+        WHERE entity_id = %s
+          AND source_type LIKE 'expenseone_%%'
+          AND internal_account_id IS NULL
+        GROUP BY COALESCE(expense_submitted_by, '(미상)')
+        ORDER BY cnt DESC, name ASC
+        LIMIT 10
+        """,
+        [entity_id],
+    )
+    by_submitter = [{"name": name, "count": cnt} for name, cnt in cur.fetchall()]
+    unmapped_count = sum(r["count"] for r in by_submitter)
+
+    # drift: 거래일 월 != 생성일 월 (Asia/Seoul)
+    cur.execute(
+        """
+        SELECT COUNT(*)
+        FROM transactions
+        WHERE entity_id = %s
+          AND source_type LIKE 'expenseone_%%'
+          AND DATE_TRUNC('month', date)
+            != DATE_TRUNC('month', (created_at AT TIME ZONE 'Asia/Seoul')::date)
+        """,
+        [entity_id],
+    )
+    drift_count = cur.fetchone()[0] or 0
+    cur.close()
+
+    return {
+        "unmapped_count": unmapped_count,
+        "by_submitter": by_submitter,
+        "drift_count": drift_count,
+    }

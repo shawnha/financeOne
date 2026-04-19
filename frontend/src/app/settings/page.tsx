@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Wifi,
   Link,
+  Receipt,
 } from "lucide-react"
 
 interface ConnectionStatus {
@@ -38,6 +39,23 @@ interface QBOSeedResult {
   validation: { total: number; matched: number; match_rate: number }
 }
 
+interface ExpenseOneStatus {
+  configured: boolean
+  connected: boolean
+  error?: string | null
+  synced_count?: number
+  last_sync?: string | null
+}
+
+interface ExpenseOneSyncResult {
+  total_fetched: number
+  inserted: number
+  enriched: number
+  duplicates: number
+  unmapped: number
+  errors: { expense_id?: string; error: string }[]
+}
+
 function SettingsContent() {
   const [mercuryToken, setMercuryToken] = useState("")
   const [mercuryStatus, setMercuryStatus] = useState<ConnectionStatus | null>(null)
@@ -45,7 +63,17 @@ function SettingsContent() {
   const [qboStatus, setQboStatus] = useState<ConnectionStatus | null>(null)
   const [qboSyncResult, setQboSyncResult] = useState<QBOSyncResult | null>(null)
   const [qboSeedResult, setQboSeedResult] = useState<QBOSeedResult | null>(null)
+  const [expenseoneStatus, setExpenseoneStatus] = useState<ExpenseOneStatus | null>(null)
+  const [expenseoneSyncResult, setExpenseoneSyncResult] = useState<ExpenseOneSyncResult | null>(null)
+  const [expenseoneError, setExpenseoneError] = useState<string | null>(null)
   const [testing, setTesting] = useState<string | null>(null)
+
+  // ExpenseOne 초기 status 로드
+  useEffect(() => {
+    fetchAPI<ExpenseOneStatus>("/integrations/expenseone/status?entity_id=2")
+      .then(setExpenseoneStatus)
+      .catch(() => setExpenseoneStatus({ configured: false, connected: false, error: "fetch failed" }))
+  }, [])
 
   // QBO callback 후 자동 status 체크
   useEffect(() => {
@@ -134,6 +162,28 @@ function SettingsContent() {
       setQboSeedResult(result)
     } catch (err) {
       setQboStatus({ connected: true, error: err instanceof Error ? err.message : "Seed failed" })
+    } finally {
+      setTesting(null)
+    }
+  }
+
+  const syncExpenseOne = async () => {
+    setTesting("expenseone-sync")
+    setExpenseoneSyncResult(null)
+    setExpenseoneError(null)
+    try {
+      const result = await fetchAPI<ExpenseOneSyncResult>("/integrations/expenseone/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entity_id: 2 }),
+      })
+      setExpenseoneSyncResult(result)
+      // status 재조회
+      fetchAPI<ExpenseOneStatus>("/integrations/expenseone/status?entity_id=2")
+        .then(setExpenseoneStatus)
+        .catch(() => {})
+    } catch (err) {
+      setExpenseoneError(err instanceof Error ? err.message : "동기화 실패")
     } finally {
       setTesting(null)
     }
@@ -306,6 +356,105 @@ function SettingsContent() {
               {qboSeedResult.validation.match_rate < 70 && (
                 <p className="text-yellow-500">
                   gaap_mapping 매칭률 {qboSeedResult.validation.match_rate}% — 추가 매핑 필요
+                </p>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ExpenseOne */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Receipt className="h-5 w-5" />
+            ExpenseOne (한아원코리아)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            ExpenseOne 앱에서 승인된 경비를 FinanceOne 거래내역으로 자동 가져옵니다.
+            제출자·제목·카테고리 컨텍스트가 함께 저장되어 매핑 정확도가 올라갑니다.
+          </p>
+
+          {expenseoneStatus && !expenseoneStatus.configured && (
+            <div className="rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3 text-sm text-yellow-500">
+              <p className="font-medium">환경변수 미설정</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                .env에 다음을 추가 후 backend 재시작:
+              </p>
+              <pre className="mt-2 text-xs font-mono text-yellow-400">
+{`EXPENSEONE_SUPABASE_URL=https://xxx.supabase.co
+EXPENSEONE_SERVICE_ROLE_KEY=eyJ...`}
+              </pre>
+            </div>
+          )}
+
+          {expenseoneStatus && expenseoneStatus.configured && (
+            <div className="space-y-3">
+              <StatusBadge
+                status={{
+                  connected: expenseoneStatus.connected,
+                  error: expenseoneStatus.error ?? undefined,
+                }}
+              />
+
+              <div className="grid grid-cols-2 gap-3 text-xs text-muted-foreground">
+                <div>
+                  <span className="text-muted-foreground/70">동기화된 거래</span>
+                  <p className="font-mono text-sm text-foreground tabular-nums">
+                    {expenseoneStatus.synced_count ?? 0}건
+                  </p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground/70">마지막 동기화</span>
+                  <p className="text-sm text-foreground">
+                    {expenseoneStatus.last_sync
+                      ? new Date(expenseoneStatus.last_sync).toLocaleString("ko-KR")
+                      : "—"}
+                  </p>
+                </div>
+              </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={syncExpenseOne}
+                disabled={testing === "expenseone-sync" || !expenseoneStatus.connected}
+              >
+                {testing === "expenseone-sync" ? (
+                  <RefreshCw className="h-4 w-4 animate-spin mr-1" />
+                ) : null}
+                승인 경비 동기화
+              </Button>
+            </div>
+          )}
+
+          {expenseoneError && (
+            <div className="text-sm text-red-500">
+              <XCircle className="inline h-4 w-4 mr-1" />
+              {expenseoneError}
+            </div>
+          )}
+
+          {expenseoneSyncResult && (
+            <div className="text-sm space-y-1 rounded-md border border-border bg-secondary/30 p-3">
+              <p className="text-foreground">
+                총 {expenseoneSyncResult.total_fetched}건 조회 — 신규{" "}
+                <span className="text-green-500">{expenseoneSyncResult.inserted}</span>건,
+                기존 보강{" "}
+                <span className="text-blue-400">{expenseoneSyncResult.enriched}</span>건,
+                중복{" "}
+                <span className="text-muted-foreground">{expenseoneSyncResult.duplicates}</span>건
+              </p>
+              {expenseoneSyncResult.unmapped > 0 && (
+                <p className="text-yellow-500">
+                  미매핑 {expenseoneSyncResult.unmapped}건 — 거래내역에서 수동 매핑 필요
+                </p>
+              )}
+              {expenseoneSyncResult.errors.length > 0 && (
+                <p className="text-red-500">
+                  에러 {expenseoneSyncResult.errors.length}건 — 로그 확인 필요
                 </p>
               )}
             </div>

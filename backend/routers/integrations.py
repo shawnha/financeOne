@@ -384,3 +384,93 @@ def quickbooks_seed_rules(
         raise
     finally:
         client.close()
+
+
+# --- ExpenseOne ---
+
+class ExpenseOneSyncRequest(BaseModel):
+    entity_id: int = 2  # 한아원코리아
+    since_date: Optional[str] = None  # ISO date (YYYY-MM-DD) or timestamp
+
+    @field_validator("since_date")
+    @classmethod
+    def validate_since_date(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        # YYYY-MM-DD 또는 ISO timestamp 허용
+        if not re.match(r"^\d{4}-\d{2}-\d{2}", v):
+            raise ValueError("since_date must be YYYY-MM-DD (optionally with time suffix)")
+        return v
+
+
+def _get_expenseone_client():
+    from backend.services.integrations.expenseone import (
+        ExpenseOneClient,
+        ExpenseOneError,
+        load_credentials,
+    )
+    try:
+        url, key = load_credentials()
+    except ExpenseOneError as e:
+        raise HTTPException(400, str(e))
+    return ExpenseOneClient(url, key)
+
+
+@router.get("/expenseone/status")
+def expenseone_status(
+    entity_id: int = 2,
+    conn: PgConnection = Depends(get_db),
+):
+    """ExpenseOne 연결 상태 + 마지막 동기화 통계."""
+    try:
+        client = _get_expenseone_client()
+    except HTTPException as e:
+        return {"connected": False, "configured": False, "error": e.detail}
+
+    try:
+        conn_info = client.check_connection()
+    finally:
+        client.close()
+
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT COUNT(*) FILTER (WHERE expense_id IS NOT NULL),
+               MAX(updated_at) FILTER (WHERE expense_id IS NOT NULL)
+        FROM transactions
+        WHERE entity_id = %s
+        """,
+        [entity_id],
+    )
+    row = cur.fetchone()
+    cur.close()
+
+    synced_count = row[0] if row else 0
+    last_sync = row[1].isoformat() if row and row[1] else None
+
+    return {
+        "configured": True,
+        "connected": conn_info.get("connected", False),
+        "error": conn_info.get("error"),
+        "synced_count": synced_count,
+        "last_sync": last_sync,
+    }
+
+
+@router.post("/expenseone/sync")
+def expenseone_sync(
+    body: ExpenseOneSyncRequest,
+    conn: PgConnection = Depends(get_db),
+):
+    """ExpenseOne 승인 경비 → FinanceOne transactions 동기화."""
+    client = _get_expenseone_client()
+    try:
+        expenses = client.fetch_approved(body.since_date)
+        result = client.sync_to_financeone(conn, body.entity_id, expenses)
+        conn.commit()
+        return result
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        client.close()

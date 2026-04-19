@@ -62,6 +62,12 @@ interface DashboardData {
   counts: Counts
 }
 
+interface ExpenseOneSummary {
+  unmapped_count: number
+  by_submitter: { name: string; count: number }[]
+  drift_count: number
+}
+
 type LoadState = "loading" | "empty" | "error" | "success" | "partial"
 
 // ── Helpers ────────────────────────────────────────────
@@ -228,6 +234,7 @@ function DashboardContent() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [state, setState] = useState<LoadState>("loading")
   const [errorMessage, setErrorMessage] = useState("")
+  const [expenseoneSummary, setExpenseoneSummary] = useState<ExpenseOneSummary | null>(null)
 
   const fetchData = useCallback(async () => {
     if (!entityId) return
@@ -255,6 +262,19 @@ function DashboardContent() {
       )
       setState("error")
     }
+  }, [entityId])
+
+  // ExpenseOne 요약 — 한아원코리아(entity_id=2)에서만 fetch, 실패 시 silent
+  useEffect(() => {
+    if (entityId !== "2") {
+      setExpenseoneSummary(null)
+      return
+    }
+    fetchAPI<ExpenseOneSummary>(`/dashboard/expenseone-summary?entity_id=2`, {
+      cache: "no-store",
+    })
+      .then(setExpenseoneSummary)
+      .catch(() => setExpenseoneSummary(null))
   }, [entityId])
 
   useEffect(() => {
@@ -502,6 +522,25 @@ function DashboardContent() {
                 </span>
               </Link>
             </Button>
+
+            {/* ExpenseOne 미매칭 — entity_id=2, N>0일 때만 */}
+            {entityId === "2" && expenseoneSummary && expenseoneSummary.unmapped_count > 0 && (
+              <Button
+                asChild
+                variant="secondary"
+                className="w-full justify-start gap-3 h-auto py-3 border border-[hsl(var(--warning))] text-[hsl(var(--warning))]"
+              >
+                <Link
+                  href={`/transactions?entity=2&source_type=expenseone_card,expenseone_deposit&unconfirmed=true`}
+                  aria-label={`ExpenseOne 미매칭 ${expenseoneSummary.unmapped_count}건 검토`}
+                >
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span className="text-left">
+                    ExpenseOne 미매칭 {expenseoneSummary.unmapped_count}건 검토
+                  </span>
+                </Link>
+              </Button>
+            )}
 
             <Button
               asChild
