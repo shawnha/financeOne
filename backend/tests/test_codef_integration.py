@@ -431,6 +431,69 @@ def test_create_connected_id_missing_in_response():
     client.close()
 
 
+# ── RSA 비밀번호 암호화 ─────────────────────────────
+
+
+def test_encrypt_password_requires_public_key(monkeypatch):
+    from backend.services.integrations.codef import encrypt_password, CodefError
+    monkeypatch.delenv("CODEF_PUBLIC_KEY", raising=False)
+    with pytest.raises(CodefError, match="CODEF_PUBLIC_KEY 미설정"):
+        encrypt_password("secret")
+
+
+def test_encrypt_password_roundtrip(monkeypatch):
+    """생성한 키쌍으로 암호화 → 복호화 해서 원문 복구 검증."""
+    import base64 as _b64
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding as _pad, rsa
+    from backend.services.integrations.codef import encrypt_password
+
+    # 테스트용 RSA 키쌍 생성
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_pem = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode()
+
+    plain = "myS3cretP@ssw0rd!"
+    ciphertext_b64 = encrypt_password(plain, public_key_pem=public_pem)
+
+    # base64 디코드 후 개인키로 복호화
+    ciphertext = _b64.b64decode(ciphertext_b64)
+    recovered = private_key.decrypt(ciphertext, _pad.PKCS1v15()).decode("utf-8")
+    assert recovered == plain
+
+
+def test_encrypt_password_accepts_raw_base64_key(monkeypatch):
+    """Codef 포털에서 헤더 없이 복사된 공개키(raw base64)도 정규화해서 처리."""
+    import base64 as _b64
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import padding as _pad, rsa
+    from backend.services.integrations.codef import encrypt_password
+
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_pem = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode()
+    # PEM 헤더 제거하고 raw base64만 추출
+    raw_b64 = "".join(
+        line for line in public_pem.splitlines() if not line.startswith("-----")
+    )
+
+    plain = "pw123"
+    ciphertext_b64 = encrypt_password(plain, public_key_pem=raw_b64)
+    ciphertext = _b64.b64decode(ciphertext_b64)
+    recovered = private_key.decrypt(ciphertext, _pad.PKCS1v15()).decode("utf-8")
+    assert recovered == plain
+
+
+def test_encrypt_password_invalid_key():
+    from backend.services.integrations.codef import encrypt_password, CodefError
+    with pytest.raises(CodefError, match="공개키 처리 실패"):
+        encrypt_password("secret", public_key_pem="not-a-real-key")
+
+
 # ── ORG_CODES 완전성 ─────────────────────────────────
 
 

@@ -22,6 +22,13 @@ from typing import Any, Optional
 import httpx
 from psycopg2.extensions import connection as PgConnection
 
+try:
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+    _CRYPTO_AVAILABLE = True
+except ImportError:
+    _CRYPTO_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # 환경별 base URL — Codef 공식 용어: 데모 / 정식(프로덕션)
@@ -61,6 +68,61 @@ def is_production() -> bool:
 def env_label() -> str:
     """UI 표시용 라벨 — demo | production."""
     return "production" if is_production() else "demo"
+
+
+def _normalize_public_key_pem(raw: str) -> str:
+    """Codef 포털에서 복사한 공개키를 PEM 포맷으로 정규화.
+
+    Codef는 일반적으로 헤더 없는 base64 문자열(raw) 또는 PEM을 제공.
+    """
+    s = raw.strip()
+    if s.startswith("-----BEGIN"):
+        return s
+    # raw base64 — PEM wrap
+    return (
+        "-----BEGIN PUBLIC KEY-----\n"
+        + "\n".join(s[i:i + 64] for i in range(0, len(s), 64))
+        + "\n-----END PUBLIC KEY-----"
+    )
+
+
+def encrypt_password(plain: str, public_key_pem: Optional[str] = None) -> str:
+    """Codef 규약에 맞게 비밀번호 암호화: RSA(PKCS1v15) → base64.
+
+    Codef 요구사항: 비밀번호·계정번호 등 민감정보는 Codef 공개키로 RSA 암호화 후
+    base64 인코딩. 미암호화 base64만 보내면 Codef가 복호화 실패 → 인증 거절.
+
+    Args:
+        plain: 평문 비밀번호
+        public_key_pem: PEM 형식 공개키. None이면 env CODEF_PUBLIC_KEY 사용.
+
+    Returns:
+        base64-encoded ciphertext string (Codef가 기대하는 포맷).
+
+    Raises:
+        CodefError: 공개키 없음/형식 이상/cryptography 미설치.
+    """
+    if not _CRYPTO_AVAILABLE:
+        raise CodefError(
+            "cryptography 패키지 미설치 — `pip install cryptography` 후 재시작"
+        )
+
+    pem = public_key_pem or os.environ.get("CODEF_PUBLIC_KEY", "").strip()
+    if not pem:
+        raise CodefError(
+            "CODEF_PUBLIC_KEY 미설정 — Codef 포털 → 개발정보 관리 → 공개키 복사 후 .env에 추가"
+        )
+
+    try:
+        normalized = _normalize_public_key_pem(pem)
+        public_key = serialization.load_pem_public_key(normalized.encode("utf-8"))
+        ciphertext = public_key.encrypt(plain.encode("utf-8"), padding.PKCS1v15())
+        return base64.b64encode(ciphertext).decode("ascii")
+    except CodefError:
+        raise
+    except Exception as e:
+        logger.exception("Codef password encryption failed")
+        raise CodefError(f"Codef 공개키 처리 실패: {type(e).__name__}")
 
 
 class CodefError(Exception):

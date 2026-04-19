@@ -350,57 +350,60 @@ def codef_connect(
     샌드박스: Codef 테스트 id/pw로 검증 가능.
     프로덕션: 공동인증서(cert_file_b64 + key_file_b64 + cert_password) 필요.
     """
-    import base64 as _b64
     from backend.services.integrations.codef import (
         ORG_CODES,
         set_connected_id,
         is_production,
+        encrypt_password,
+        CodefError,
     )
 
     if not body.accounts:
         raise HTTPException(400, "accounts list empty")
 
-    # Codef 요청 포맷으로 변환
+    # Codef 요청 포맷으로 변환 — 비밀번호는 RSA(PKCS1v15) + base64
     account_list = []
-    for spec in body.accounts:
-        org_code = ORG_CODES.get(spec.organization)
-        if not org_code:
-            raise HTTPException(400, f"Unknown organization: {spec.organization}")
+    try:
+        for spec in body.accounts:
+            org_code = ORG_CODES.get(spec.organization)
+            if not org_code:
+                raise HTTPException(400, f"Unknown organization: {spec.organization}")
 
-        account = {
-            "countryCode": "KR",
-            "businessType": spec.business_type,
-            "organization": org_code,
-            "clientType": spec.client_type,
-            "loginType": spec.login_type,
-        }
+            account = {
+                "countryCode": "KR",
+                "businessType": spec.business_type,
+                "organization": org_code,
+                "clientType": spec.client_type,
+                "loginType": spec.login_type,
+            }
 
-        if spec.login_type == "1":
-            if not spec.login_id or not spec.login_password:
-                raise HTTPException(400, "login_id + login_password required for id/pw auth")
-            account["id"] = spec.login_id
-            account["password"] = _b64.b64encode(spec.login_password.encode("utf-8")).decode()
-        else:
-            # cert 로그인 (프로덕션)
-            if not is_production():
-                logger.warning("cert auth requested in non-production env")
-            if not (spec.cert_file_b64 and spec.key_file_b64 and spec.cert_password):
-                raise HTTPException(
-                    400,
-                    "cert_file_b64 + key_file_b64 + cert_password required for cert auth",
-                )
-            account["certFile"] = spec.cert_file_b64
-            account["keyFile"] = spec.key_file_b64
-            account["certPassword"] = _b64.b64encode(spec.cert_password.encode("utf-8")).decode()
-            if spec.cert_type:
-                account["certType"] = spec.cert_type
+            if spec.login_type == "1":
+                if not spec.login_id or not spec.login_password:
+                    raise HTTPException(400, "login_id + login_password required for id/pw auth")
+                account["id"] = spec.login_id
+                account["password"] = encrypt_password(spec.login_password)
+            else:
+                if not is_production():
+                    logger.warning("cert auth requested in non-production env")
+                if not (spec.cert_file_b64 and spec.key_file_b64 and spec.cert_password):
+                    raise HTTPException(
+                        400,
+                        "cert_file_b64 + key_file_b64 + cert_password required for cert auth",
+                    )
+                account["certFile"] = spec.cert_file_b64
+                account["keyFile"] = spec.key_file_b64
+                account["certPassword"] = encrypt_password(spec.cert_password)
+                if spec.cert_type:
+                    account["certType"] = spec.cert_type
 
-        account_list.append(account)
+            account_list.append(account)
+    except CodefError as e:
+        # 공개키 미설정 등 설정 문제 — 400으로 사용자에게 명확한 안내
+        raise HTTPException(400, str(e))
 
     client = _get_codef_client()
     try:
         connected_id = client.create_connected_id(account_list)
-        # 저장: 각 org별로 같은 connected_id 저장 (Codef는 하나의 connected_id로 다중 기관 관리)
         saved_orgs = []
         for spec in body.accounts:
             set_connected_id(conn, body.entity_id, spec.organization, connected_id)
@@ -411,9 +414,16 @@ def codef_connect(
             "saved_for": saved_orgs,
             "environment": client.environment,
         }
-    except Exception:
+    except HTTPException:
         conn.rollback()
         raise
+    except CodefError as e:
+        conn.rollback()
+        raise HTTPException(400, f"Codef 연결 실패: {str(e)}")
+    except Exception as e:
+        conn.rollback()
+        logger.exception("Codef connect failed")
+        raise HTTPException(500, f"내부 오류: {type(e).__name__}")
     finally:
         client.close()
 
@@ -424,6 +434,7 @@ def codef_sync_bank(
     conn: PgConnection = Depends(get_db),
 ):
     """Codef 우리은행 거래 동기화."""
+    from backend.services.integrations.codef import CodefError
     connected_id = _resolve_connected_id(conn, body.entity_id, "woori_bank", body.connected_id)
     client = _get_codef_client()
     try:
@@ -433,9 +444,13 @@ def codef_sync_bank(
         )
         conn.commit()
         return result
-    except Exception:
+    except CodefError as e:
         conn.rollback()
-        raise
+        raise HTTPException(400, f"Codef 은행 sync 실패: {str(e)}")
+    except Exception as e:
+        conn.rollback()
+        logger.exception("Codef bank sync failed")
+        raise HTTPException(500, f"내부 오류: {type(e).__name__}")
     finally:
         client.close()
 
@@ -446,6 +461,7 @@ def codef_sync_card(
     conn: PgConnection = Depends(get_db),
 ):
     """Codef 카드 승인내역 동기화."""
+    from backend.services.integrations.codef import CodefError
     connected_id = _resolve_connected_id(conn, body.entity_id, body.card_type, body.connected_id)
     client = _get_codef_client()
     try:
@@ -455,9 +471,13 @@ def codef_sync_card(
         )
         conn.commit()
         return result
-    except Exception:
+    except CodefError as e:
         conn.rollback()
-        raise
+        raise HTTPException(400, f"Codef 카드 sync 실패: {str(e)}")
+    except Exception as e:
+        conn.rollback()
+        logger.exception("Codef card sync failed")
+        raise HTTPException(500, f"내부 오류: {type(e).__name__}")
     finally:
         client.close()
 
