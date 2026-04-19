@@ -39,6 +39,33 @@ interface QBOSeedResult {
   validation: { total: number; matched: number; match_rate: number }
 }
 
+interface CodefStatus {
+  configured: boolean
+  connected: boolean
+  environment?: string
+  base_url?: string
+  connections?: Record<string, string>
+  error?: string
+}
+
+interface CodefCardSyncResult {
+  card_type: string
+  synced: number
+  duplicates: number
+  cancels: number
+  total_fetched: number
+  environment?: string
+}
+
+interface CodefBankSyncResult {
+  synced: number
+  duplicates: number
+  total_fetched: number
+  environment?: string
+}
+
+type CodefOrg = "woori_bank" | "lotte_card" | "woori_card" | "shinhan_card"
+
 interface ExpenseOneStatus {
   configured: boolean
   connected: boolean
@@ -59,7 +86,21 @@ interface ExpenseOneSyncResult {
 function SettingsContent() {
   const [mercuryToken, setMercuryToken] = useState("")
   const [mercuryStatus, setMercuryStatus] = useState<ConnectionStatus | null>(null)
-  const [codefStatus, setCodefStatus] = useState<ConnectionStatus | null>(null)
+  const [codefStatus, setCodefStatus] = useState<CodefStatus | null>(null)
+  const [codefEntityId, setCodefEntityId] = useState(2)
+  const [codefConnectOrg, setCodefConnectOrg] = useState<CodefOrg | null>(null)
+  const [codefLoginId, setCodefLoginId] = useState("")
+  const [codefLoginPw, setCodefLoginPw] = useState("")
+  const [codefSyncStart, setCodefSyncStart] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}01`
+  })
+  const [codefSyncEnd, setCodefSyncEnd] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`
+  })
+  const [codefSyncResult, setCodefSyncResult] = useState<string | null>(null)
+  const [codefError, setCodefError] = useState<string | null>(null)
   const [qboStatus, setQboStatus] = useState<ConnectionStatus | null>(null)
   const [qboSyncResult, setQboSyncResult] = useState<QBOSyncResult | null>(null)
   const [qboSeedResult, setQboSeedResult] = useState<QBOSeedResult | null>(null)
@@ -74,6 +115,19 @@ function SettingsContent() {
       .then(setExpenseoneStatus)
       .catch(() => setExpenseoneStatus({ configured: false, connected: false, error: "fetch failed" }))
   }, [])
+
+  // Codef 초기 status 로드
+  useEffect(() => {
+    fetchAPI<CodefStatus>(`/integrations/codef/status?entity_id=${codefEntityId}`)
+      .then(setCodefStatus)
+      .catch((err) =>
+        setCodefStatus({
+          configured: false,
+          connected: false,
+          error: err instanceof Error ? err.message : "fetch failed",
+        }),
+      )
+  }, [codefEntityId])
 
   // QBO callback 후 자동 status 체크
   useEffect(() => {
@@ -98,13 +152,116 @@ function SettingsContent() {
     }
   }
 
+  const loadCodefStatus = async () => {
+    try {
+      const status = await fetchAPI<CodefStatus>(
+        `/integrations/codef/status?entity_id=${codefEntityId}`,
+      )
+      setCodefStatus(status)
+    } catch (err) {
+      setCodefStatus({
+        configured: false,
+        connected: false,
+        error: err instanceof Error ? err.message : "Connection failed",
+      })
+    }
+  }
+
   const testCodef = async () => {
     setTesting("codef")
     try {
-      const status = await fetchAPI<ConnectionStatus>("/integrations/codef/status")
-      setCodefStatus(status)
+      await loadCodefStatus()
+    } finally {
+      setTesting(null)
+    }
+  }
+
+  const connectCodefOrg = async () => {
+    if (!codefConnectOrg) return
+    setTesting("codef-connect")
+    setCodefError(null)
+    try {
+      const isBank = codefConnectOrg === "woori_bank"
+      await fetchAPI("/integrations/codef/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entity_id: codefEntityId,
+          accounts: [
+            {
+              organization: codefConnectOrg,
+              business_type: isBank ? "BK" : "CD",
+              client_type: "B",
+              login_type: "1",
+              login_id: codefLoginId,
+              login_password: codefLoginPw,
+            },
+          ],
+        }),
+      })
+      setCodefLoginId("")
+      setCodefLoginPw("")
+      setCodefConnectOrg(null)
+      await loadCodefStatus()
     } catch (err) {
-      setCodefStatus({ connected: false, error: err instanceof Error ? err.message : "Connection failed" })
+      setCodefError(err instanceof Error ? err.message : "연결 실패")
+    } finally {
+      setTesting(null)
+    }
+  }
+
+  const disconnectCodefOrg = async (org: CodefOrg) => {
+    if (!confirm(`${org} 연결을 해제할까요?`)) return
+    setTesting(`codef-disconnect-${org}`)
+    try {
+      await fetchAPI("/integrations/codef/connections", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entity_id: codefEntityId, organization: org }),
+      })
+      await loadCodefStatus()
+    } catch (err) {
+      setCodefError(err instanceof Error ? err.message : "해제 실패")
+    } finally {
+      setTesting(null)
+    }
+  }
+
+  const syncCodefOrg = async (org: CodefOrg) => {
+    setTesting(`codef-sync-${org}`)
+    setCodefError(null)
+    setCodefSyncResult(null)
+    try {
+      if (org === "woori_bank") {
+        const result = await fetchAPI<CodefBankSyncResult>("/integrations/codef/sync-bank", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            entity_id: codefEntityId,
+            start_date: codefSyncStart,
+            end_date: codefSyncEnd,
+          }),
+        })
+        setCodefSyncResult(
+          `${org}: 총 ${result.total_fetched}건 — 신규 ${result.synced}, 중복 ${result.duplicates}`,
+        )
+      } else {
+        const result = await fetchAPI<CodefCardSyncResult>("/integrations/codef/sync-card", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            entity_id: codefEntityId,
+            start_date: codefSyncStart,
+            end_date: codefSyncEnd,
+            card_type: org,
+          }),
+        })
+        setCodefSyncResult(
+          `${org}: 총 ${result.total_fetched}건 — 신규 ${result.synced}, 중복 ${result.duplicates}, 취소 ${result.cancels}`,
+        )
+      }
+    } catch (err) {
+      setCodefError(err instanceof Error ? err.message : "동기화 실패")
     } finally {
       setTesting(null)
     }
@@ -235,26 +392,218 @@ function SettingsContent() {
           <CardTitle className="flex items-center gap-2">
             <Wifi className="h-5 w-5" />
             Codef API (한국 법인)
+            {codefStatus?.environment && (
+              <span
+                className={`text-xs rounded px-2 py-0.5 ml-2 ${
+                  codefStatus.environment === "production"
+                    ? "bg-green-500/20 text-green-400"
+                    : "bg-yellow-500/20 text-yellow-400"
+                }`}
+              >
+                {codefStatus.environment}
+              </span>
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            우리은행, 롯데카드, 우리카드 거래를 Codef.io를 통해 자동으로 가져옵니다.
-            현재 샌드박스 환경입니다.
+            우리은행, 롯데/우리/신한카드 거래를 Codef.io로 자동 pull.
+            샌드박스에서는 테스트 id/pw로 검증, 프로덕션은 공동인증서 필요.
           </p>
-          <Button
-            variant="outline"
-            onClick={testCodef}
-            disabled={testing === "codef"}
-          >
-            {testing === "codef" ? (
-              <RefreshCw className="h-4 w-4 animate-spin" />
-            ) : (
-              "연결 테스트"
-            )}
-          </Button>
-          {codefStatus && (
-            <StatusBadge status={codefStatus} />
+
+          <div className="flex gap-2 items-center">
+            <label className="text-xs text-muted-foreground">entity_id</label>
+            <Input
+              type="number"
+              value={codefEntityId}
+              onChange={(e) => setCodefEntityId(Number(e.target.value) || 2)}
+              className="w-20 h-8 text-xs"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={testCodef}
+              disabled={testing === "codef"}
+            >
+              {testing === "codef" ? (
+                <RefreshCw className="h-4 w-4 animate-spin" />
+              ) : (
+                "상태 확인"
+              )}
+            </Button>
+          </div>
+
+          {codefStatus && !codefStatus.configured && (
+            <div className="text-sm text-red-500">
+              <XCircle className="inline h-4 w-4 mr-1" />
+              CODEF_CLIENT_ID / CODEF_CLIENT_SECRET 환경변수 미설정
+            </div>
+          )}
+
+          {codefStatus?.configured && (
+            <>
+              <div className="text-xs text-muted-foreground">
+                {codefStatus.connected ? (
+                  <span className="text-green-500">
+                    <CheckCircle2 className="inline h-3 w-3 mr-1" />
+                    API 인증 성공 · {codefStatus.base_url}
+                  </span>
+                ) : (
+                  <span className="text-red-500">
+                    <XCircle className="inline h-3 w-3 mr-1" />
+                    API 인증 실패 — {codefStatus.error ?? "확인 필요"}
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-2 rounded-md border border-border bg-secondary/20 p-3">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <div className="text-xs text-muted-foreground">
+                    기간 (YYYYMMDD)
+                  </div>
+                  <div className="flex gap-1">
+                    <Input
+                      value={codefSyncStart}
+                      onChange={(e) => setCodefSyncStart(e.target.value)}
+                      className="w-24 h-7 text-xs font-mono"
+                      placeholder="20260301"
+                    />
+                    <span className="text-xs text-muted-foreground self-center">~</span>
+                    <Input
+                      value={codefSyncEnd}
+                      onChange={(e) => setCodefSyncEnd(e.target.value)}
+                      className="w-24 h-7 text-xs font-mono"
+                      placeholder="20260331"
+                    />
+                  </div>
+                </div>
+
+                {(["woori_bank", "lotte_card", "woori_card", "shinhan_card"] as CodefOrg[]).map(
+                  (org) => {
+                    const cid = codefStatus.connections?.[org]
+                    const syncKey = `codef-sync-${org}`
+                    const disconKey = `codef-disconnect-${org}`
+                    return (
+                      <div
+                        key={org}
+                        className="flex items-center justify-between gap-2 py-1 border-t border-border first:border-t-0"
+                      >
+                        <div className="flex flex-col flex-1">
+                          <span className="text-sm font-medium">{org}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {cid ? (
+                              <span className="text-green-400">
+                                connected · ...{cid.slice(-8)}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground/70">미연결</span>
+                            )}
+                          </span>
+                        </div>
+                        <div className="flex gap-1">
+                          {cid ? (
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => syncCodefOrg(org)}
+                                disabled={testing === syncKey}
+                              >
+                                {testing === syncKey ? (
+                                  <RefreshCw className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  "동기화"
+                                )}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => disconnectCodefOrg(org)}
+                                disabled={testing === disconKey}
+                              >
+                                해제
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setCodefConnectOrg(org)}
+                            >
+                              연결
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  },
+                )}
+              </div>
+
+              {codefConnectOrg && (
+                <div className="space-y-2 rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3">
+                  <div className="text-sm font-medium">{codefConnectOrg} 연결</div>
+                  <p className="text-xs text-muted-foreground">
+                    {codefStatus.environment === "production"
+                      ? "⚠️ 프로덕션 — id/pw 외 공동인증서도 필요할 수 있습니다. API 직접 호출 권장."
+                      : "샌드박스 — Codef 테스트 id/pw 입력"}
+                  </p>
+                  <Input
+                    placeholder="login id"
+                    value={codefLoginId}
+                    onChange={(e) => setCodefLoginId(e.target.value)}
+                    className="h-8 text-sm"
+                  />
+                  <Input
+                    type="password"
+                    placeholder="login password"
+                    value={codefLoginPw}
+                    onChange={(e) => setCodefLoginPw(e.target.value)}
+                    className="h-8 text-sm"
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={connectCodefOrg}
+                      disabled={
+                        testing === "codef-connect" || !codefLoginId || !codefLoginPw
+                      }
+                    >
+                      {testing === "codef-connect" ? (
+                        <RefreshCw className="h-3 w-3 animate-spin mr-1" />
+                      ) : null}
+                      연결 요청
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setCodefConnectOrg(null)
+                        setCodefLoginId("")
+                        setCodefLoginPw("")
+                      }}
+                    >
+                      취소
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {codefError && (
+                <div className="text-sm text-red-500">
+                  <XCircle className="inline h-4 w-4 mr-1" />
+                  {codefError}
+                </div>
+              )}
+
+              {codefSyncResult && (
+                <div className="text-sm text-green-500 rounded-md border border-green-500/30 bg-green-500/5 p-2">
+                  <CheckCircle2 className="inline h-4 w-4 mr-1" />
+                  {codefSyncResult}
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

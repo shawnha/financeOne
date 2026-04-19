@@ -102,11 +102,14 @@ def mercury_sync(
 
 # --- Codef ---
 
+VALID_CODEF_ORGS = {"woori_bank", "lotte_card", "woori_card", "shinhan_card"}
+
+
 class CodefSyncRequest(BaseModel):
     entity_id: int
-    connected_id: str
     start_date: str  # YYYYMMDD
     end_date: str
+    connected_id: Optional[str] = None  # None이면 settings에서 조회
 
     @field_validator("start_date", "end_date")
     @classmethod
@@ -120,17 +123,104 @@ class CodefSyncRequest(BaseModel):
 
     @field_validator("connected_id")
     @classmethod
-    def validate_connected_id(cls, v: str) -> str:
+    def validate_connected_id(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
         if not re.match(r"^[a-zA-Z0-9_-]+$", v):
             raise ValueError("Invalid connected_id format")
         return v
 
+
 class CodefCardSyncRequest(CodefSyncRequest):
     card_type: str = "lotte_card"  # lotte_card, woori_card, shinhan_card
 
+    @field_validator("card_type")
+    @classmethod
+    def validate_card_type(cls, v: str) -> str:
+        if v not in ("lotte_card", "woori_card", "shinhan_card"):
+            raise ValueError("card_type must be lotte_card|woori_card|shinhan_card")
+        return v
+
+
+class CodefConnectionUpsertRequest(BaseModel):
+    entity_id: int
+    organization: str  # woori_bank | lotte_card | woori_card | shinhan_card
+    connected_id: str
+
+    @field_validator("organization")
+    @classmethod
+    def validate_org(cls, v: str) -> str:
+        if v not in VALID_CODEF_ORGS:
+            raise ValueError(f"organization must be one of {VALID_CODEF_ORGS}")
+        return v
+
+    @field_validator("connected_id")
+    @classmethod
+    def validate_cid(cls, v: str) -> str:
+        if not re.match(r"^[a-zA-Z0-9_-]+$", v):
+            raise ValueError("Invalid connected_id format")
+        return v
+
+
+class CodefConnectionDeleteRequest(BaseModel):
+    entity_id: int
+    organization: str
+
+    @field_validator("organization")
+    @classmethod
+    def validate_org(cls, v: str) -> str:
+        if v not in VALID_CODEF_ORGS:
+            raise ValueError(f"organization must be one of {VALID_CODEF_ORGS}")
+        return v
+
+
+class CodefAccountSpec(BaseModel):
+    """Codef /v1/account/create 요청 단위. id/pw 로그인 또는 공동인증서."""
+    organization: str
+    business_type: str = "BK"  # BK=bank, CD=card
+    client_type: str = "B"  # B=법인, P=개인
+    login_type: str = "1"  # "0"=cert, "1"=id/pw
+
+    # id/pw 로그인
+    login_id: Optional[str] = None
+    login_password: Optional[str] = None  # plain — 서버에서 base64 인코딩
+
+    # 공동인증서 로그인 (프로덕션)
+    cert_file_b64: Optional[str] = None  # 이미 base64 encoded signCert.der
+    key_file_b64: Optional[str] = None   # 이미 base64 encoded signPri.key
+    cert_password: Optional[str] = None  # plain — base64 인코딩 후 전송
+    cert_type: Optional[str] = None  # 예: "001" 등 Codef 명세
+
+    @field_validator("organization")
+    @classmethod
+    def validate_org(cls, v: str) -> str:
+        if v not in VALID_CODEF_ORGS:
+            raise ValueError(f"organization must be one of {VALID_CODEF_ORGS}")
+        return v
+
+    @field_validator("login_type")
+    @classmethod
+    def validate_login_type(cls, v: str) -> str:
+        if v not in ("0", "1"):
+            raise ValueError("login_type must be '0' (cert) or '1' (id/pw)")
+        return v
+
+    @field_validator("business_type")
+    @classmethod
+    def validate_btype(cls, v: str) -> str:
+        if v not in ("BK", "CD"):
+            raise ValueError("business_type must be BK (bank) or CD (card)")
+        return v
+
+
+class CodefConnectRequest(BaseModel):
+    entity_id: int
+    accounts: list[CodefAccountSpec]
+    save_as: Optional[str] = None  # settings 키로 저장할 org 이름. 첫 계정 org 기본값.
+
 
 def _get_codef_client():
-    """Codef 클라이언트 생성. 환경변수에서 인증정보 조회."""
+    """Codef 클라이언트 생성. env var로 환경 결정 (sandbox/production)."""
     from backend.services.integrations.codef import CodefClient
     client_id = os.environ.get("CODEF_CLIENT_ID", "")
     client_secret = os.environ.get("CODEF_CLIENT_SECRET", "")
@@ -139,19 +229,193 @@ def _get_codef_client():
     return CodefClient(client_id, client_secret)
 
 
+def _resolve_connected_id(
+    conn: PgConnection,
+    entity_id: int,
+    organization: str,
+    provided: Optional[str],
+) -> str:
+    """body에 connected_id 있으면 우선. 없으면 settings에서 조회."""
+    if provided:
+        return provided
+    from backend.services.integrations.codef import get_connected_id
+    cid = get_connected_id(conn, entity_id, organization)
+    if not cid:
+        raise HTTPException(
+            400,
+            f"connected_id not configured for entity={entity_id}, org={organization}",
+        )
+    return cid
+
+
 @router.get("/codef/status")
-def codef_status():
-    """Codef 연결 상태 확인."""
+def codef_status(
+    entity_id: int = 2,
+    conn: PgConnection = Depends(get_db),
+):
+    """Codef 연결 상태 + 환경 + 등록된 connected_id 목록."""
+    from backend.services.integrations.codef import (
+        resolve_base_url,
+        is_production,
+        list_connected_ids,
+    )
+
+    configured = bool(
+        os.environ.get("CODEF_CLIENT_ID") and os.environ.get("CODEF_CLIENT_SECRET")
+    )
+    env = "production" if is_production() else "sandbox"
+    connections = list_connected_ids(conn, entity_id) if configured else {}
+
+    if not configured:
+        return {
+            "configured": False,
+            "connected": False,
+            "environment": env,
+            "base_url": resolve_base_url(),
+            "connections": {},
+        }
+
     try:
         client = _get_codef_client()
         client._get_token()
         client.close()
-        return {"connected": True, "environment": "sandbox"}
-    except HTTPException:
-        raise
-    except Exception as e:
+        return {
+            "configured": True,
+            "connected": True,
+            "environment": env,
+            "base_url": resolve_base_url(),
+            "connections": connections,
+        }
+    except Exception:
         logger.exception("Connection check failed")
-        return {"connected": False, "error": "Unable to connect"}
+        return {
+            "configured": True,
+            "connected": False,
+            "environment": env,
+            "base_url": resolve_base_url(),
+            "connections": connections,
+            "error": "Unable to authenticate",
+        }
+
+
+@router.get("/codef/connections")
+def codef_list_connections(
+    entity_id: int,
+    conn: PgConnection = Depends(get_db),
+):
+    """entity의 Codef connected_id 목록."""
+    from backend.services.integrations.codef import list_connected_ids
+    return {"connections": list_connected_ids(conn, entity_id)}
+
+
+@router.post("/codef/connections")
+def codef_upsert_connection(
+    body: CodefConnectionUpsertRequest,
+    conn: PgConnection = Depends(get_db),
+):
+    """connected_id 저장/갱신."""
+    from backend.services.integrations.codef import set_connected_id
+    try:
+        set_connected_id(conn, body.entity_id, body.organization, body.connected_id)
+        conn.commit()
+        return {"ok": True, "organization": body.organization}
+    except Exception:
+        conn.rollback()
+        raise
+
+
+@router.delete("/codef/connections")
+def codef_delete_connection(
+    body: CodefConnectionDeleteRequest,
+    conn: PgConnection = Depends(get_db),
+):
+    """connected_id 삭제."""
+    from backend.services.integrations.codef import delete_connected_id
+    try:
+        deleted = delete_connected_id(conn, body.entity_id, body.organization)
+        conn.commit()
+        return {"deleted": deleted, "organization": body.organization}
+    except Exception:
+        conn.rollback()
+        raise
+
+
+@router.post("/codef/connect")
+def codef_connect(
+    body: CodefConnectRequest,
+    conn: PgConnection = Depends(get_db),
+):
+    """연계 계정 등록 → connected_id 발급 + settings 저장.
+
+    샌드박스: Codef 테스트 id/pw로 검증 가능.
+    프로덕션: 공동인증서(cert_file_b64 + key_file_b64 + cert_password) 필요.
+    """
+    import base64 as _b64
+    from backend.services.integrations.codef import (
+        ORG_CODES,
+        set_connected_id,
+        is_production,
+    )
+
+    if not body.accounts:
+        raise HTTPException(400, "accounts list empty")
+
+    # Codef 요청 포맷으로 변환
+    account_list = []
+    for spec in body.accounts:
+        org_code = ORG_CODES.get(spec.organization)
+        if not org_code:
+            raise HTTPException(400, f"Unknown organization: {spec.organization}")
+
+        account = {
+            "countryCode": "KR",
+            "businessType": spec.business_type,
+            "organization": org_code,
+            "clientType": spec.client_type,
+            "loginType": spec.login_type,
+        }
+
+        if spec.login_type == "1":
+            if not spec.login_id or not spec.login_password:
+                raise HTTPException(400, "login_id + login_password required for id/pw auth")
+            account["id"] = spec.login_id
+            account["password"] = _b64.b64encode(spec.login_password.encode("utf-8")).decode()
+        else:
+            # cert 로그인 (프로덕션)
+            if not is_production():
+                logger.warning("cert auth requested in non-production env")
+            if not (spec.cert_file_b64 and spec.key_file_b64 and spec.cert_password):
+                raise HTTPException(
+                    400,
+                    "cert_file_b64 + key_file_b64 + cert_password required for cert auth",
+                )
+            account["certFile"] = spec.cert_file_b64
+            account["keyFile"] = spec.key_file_b64
+            account["certPassword"] = _b64.b64encode(spec.cert_password.encode("utf-8")).decode()
+            if spec.cert_type:
+                account["certType"] = spec.cert_type
+
+        account_list.append(account)
+
+    client = _get_codef_client()
+    try:
+        connected_id = client.create_connected_id(account_list)
+        # 저장: 각 org별로 같은 connected_id 저장 (Codef는 하나의 connected_id로 다중 기관 관리)
+        saved_orgs = []
+        for spec in body.accounts:
+            set_connected_id(conn, body.entity_id, spec.organization, connected_id)
+            saved_orgs.append(spec.organization)
+        conn.commit()
+        return {
+            "connected_id": connected_id,
+            "saved_for": saved_orgs,
+            "environment": client.environment,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        client.close()
 
 
 @router.post("/codef/sync-bank")
@@ -160,10 +424,11 @@ def codef_sync_bank(
     conn: PgConnection = Depends(get_db),
 ):
     """Codef 우리은행 거래 동기화."""
+    connected_id = _resolve_connected_id(conn, body.entity_id, "woori_bank", body.connected_id)
     client = _get_codef_client()
     try:
         result = client.sync_bank_transactions(
-            conn, body.entity_id, body.connected_id,
+            conn, body.entity_id, connected_id,
             body.start_date, body.end_date,
         )
         conn.commit()
@@ -181,14 +446,15 @@ def codef_sync_card(
     conn: PgConnection = Depends(get_db),
 ):
     """Codef 카드 승인내역 동기화."""
+    connected_id = _resolve_connected_id(conn, body.entity_id, body.card_type, body.connected_id)
     client = _get_codef_client()
     try:
-        approvals = client.get_card_approvals(
-            body.connected_id, body.start_date, body.end_date, body.card_type,
+        result = client.sync_card_approvals(
+            conn, body.entity_id, connected_id,
+            body.start_date, body.end_date, body.card_type,
         )
-        # TODO: Parse and insert card approvals into transactions
         conn.commit()
-        return {"total_fetched": len(approvals), "synced": 0, "note": "Card sync parsing not yet implemented"}
+        return result
     except Exception:
         conn.rollback()
         raise

@@ -2,6 +2,22 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-04-19 — Codef 카드 파싱 + 프로덕션-레디 연동
+
+### Added
+- Codef 카드 승인내역 파싱 (롯데/우리/신한) — `sync_card_approvals` + 정규화 파이프라인
+- Codef 샌드박스↔프로덕션 환경 토글 (`CODEF_ENV` / `CODEF_BASE_URL`)
+- Codef `create_connected_id` — id/pw 및 공동인증서 기반 연계 계정 등록
+- Codef connected_id settings 저장 (`codef_connected_id_{org}` 키)
+- Codef API: `POST /codef/connect`, `GET/POST/DELETE /codef/connections`
+- 설정 페이지 Codef 카드 확장 — 환경 배지, 기관별 연결 상태·동기화·해제 버튼, 기간 선택
+- 36개 Codef 테스트 (정규화·환경 토글·중복감지·설정 저장·sync 플로우)
+
+### Changed
+- Codef sync 엔드포인트: connected_id 미지정 시 settings에서 자동 조회
+- 카드 source_type: `codef_{card_type}` (예: `codef_lotte_card`) — Excel 업로드와 구분
+- 은행 source_type: `codef_woori_bank` (기존 `codef_api`에서 변경)
+
 ## [Unreleased] - 2026-04-08 — Slack 컨텍스트 매핑 + UX 개선
 
 ### Added
