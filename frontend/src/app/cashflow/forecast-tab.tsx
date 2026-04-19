@@ -271,7 +271,7 @@ function WarningsCard({
   entityId: string | null
   formatByEntity: (amount: number, entityId: string | null) => string
 }) {
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(false)
   const totalWarnings = alerts.length + overBudget.length
 
   return (
@@ -1271,6 +1271,9 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
   useEffect(() => { setSelectedMonthLocal(globalMonth) }, [globalMonth])
 
   const [showComparison, setShowComparison] = useState(false)
+  const [formulaOpen, setFormulaOpen] = useState(false)
+  const [cardTimingOpen, setCardTimingOpen] = useState(false)
+  const [vsActualOpen, setVsActualOpen] = useState(false)
   const [missingRecurring, setMissingRecurring] = useState<Array<{
     internal_account_id: number; name: string; code: string
     inferred_type: string; suggested_amount: number; txn_count: number; payment_method: string
@@ -2255,74 +2258,104 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
       </Card>
 
       {/* Formula (collapsible) */}
-      <Card className="p-4 bg-muted/30 font-mono text-xs leading-relaxed text-cyan-400 rounded-lg">
-        <p>{m}월 조정 예상 기말 = {m - 1 || 12}월 확정 기말</p>
-        <p className="ml-4">+ {m}월 예상 입금</p>
-        <p className="ml-4">- {m}월 예상 출금</p>
-        <p className="ml-4">- {m}월 예상 카드 사용액</p>
-        <p className="ml-4 text-amber-400">+ ({m}월 예상 카드 사용액 - {m - 1 || 12}월 카드 사용액) &larr; 시차 보정</p>
-        {data.unmapped_count > 0 && (
-          <>
-            <p className="ml-4 text-amber-400">+ 미분류 실제 입금 ({formatByEntity(data.unmapped_income, entityId)})</p>
-            <p className="ml-4 text-amber-400">- 미분류 실제 출금 ({formatByEntity(data.unmapped_expense, entityId)})</p>
-          </>
+      <Card className="bg-muted/30 rounded-lg overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setFormulaOpen((v) => !v)}
+          className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-muted/50 transition-colors"
+        >
+          <span className="text-xs font-semibold text-cyan-400 flex-1">조정 예상 기말 공식</span>
+          {formulaOpen ? <ChevronDown className="h-4 w-4 text-cyan-400/60" /> : <ChevronRight className="h-4 w-4 text-cyan-400/60" />}
+        </button>
+        {formulaOpen && (
+          <div className="px-4 pb-4 font-mono text-xs leading-relaxed text-cyan-400">
+            <p>{m}월 조정 예상 기말 = {m - 1 || 12}월 확정 기말</p>
+            <p className="ml-4">+ {m}월 예상 입금</p>
+            <p className="ml-4">- {m}월 예상 출금</p>
+            <p className="ml-4">- {m}월 예상 카드 사용액</p>
+            <p className="ml-4 text-amber-400">+ ({m}월 예상 카드 사용액 - {m - 1 || 12}월 카드 사용액) &larr; 시차 보정</p>
+            {data.unmapped_count > 0 && (
+              <>
+                <p className="ml-4 text-amber-400">+ 미분류 실제 입금 ({formatByEntity(data.unmapped_income, entityId)})</p>
+                <p className="ml-4 text-amber-400">- 미분류 실제 출금 ({formatByEntity(data.unmapped_expense, entityId)})</p>
+              </>
+            )}
+          </div>
         )}
       </Card>
 
       {/* Comparison boxes */}
       <div className="grid grid-cols-2 gap-4 max-sm:grid-cols-1">
-        {/* Card timing box */}
-        <Card className="bg-secondary rounded-xl p-4">
-          <h4 className="text-xs font-semibold text-purple-400 mb-3">카드 시차</h4>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">{m - 1 || 12}월 카드 (확정)</span>
-              <span className="font-mono tabular-nums">{formatByEntity(data.card_timing.prev_month_card, entityId)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">{m}월 카드 (진행)</span>
-              <span className="font-mono tabular-nums">{formatByEntity(data.card_timing.curr_month_card_actual, entityId)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">{m}월 카드 (예상)</span>
-              <span className="font-mono tabular-nums">{formatByEntity(data.card_timing.curr_month_card_estimate, entityId)}</span>
-            </div>
-            <div className="border-t border-border pt-2 flex justify-between font-medium">
-              <span>시차 보정</span>
-              <span className={cn("font-mono tabular-nums", data.card_timing.adjustment >= 0 ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]")}>
-                {data.card_timing.adjustment >= 0 ? "+" : ""}{formatByEntity(data.card_timing.adjustment, entityId)}
-              </span>
-            </div>
-          </div>
-        </Card>
-
-        {/* Forecast vs actual box */}
-        <Card className="bg-secondary rounded-xl p-4">
-          <h4 className="text-xs font-semibold text-[hsl(var(--warning))] mb-3">예상 vs 실제</h4>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">조정 예상 기말</span>
-              <span className="font-mono tabular-nums text-[hsl(var(--warning))]">{formatByEntity(data.adjusted_forecast_closing, entityId)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">실제 기말</span>
-              <span className="font-mono tabular-nums">{formatByEntity(data.actual_closing, entityId)}</span>
-            </div>
-            <div className="border-t border-border pt-2 flex justify-between font-medium">
-              <span>차이</span>
-              <span className={cn("font-mono tabular-nums", diffColor)}>
-                {data.diff >= 0 ? "+" : ""}{formatByEntity(data.diff, entityId)}
-              </span>
-            </div>
-            {data.adjusted_forecast_closing !== 0 && (
+        {/* Card timing box (collapsible) */}
+        <Card className="bg-secondary rounded-xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setCardTimingOpen((v) => !v)}
+            className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-secondary/70 transition-colors"
+          >
+            <span className="text-xs font-semibold text-purple-400 flex-1">카드 시차</span>
+            {cardTimingOpen ? <ChevronDown className="h-4 w-4 text-purple-400/60" /> : <ChevronRight className="h-4 w-4 text-purple-400/60" />}
+          </button>
+          {cardTimingOpen && (
+            <div className="px-4 pb-4 space-y-2 text-sm">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">정확도</span>
-                <span className={cn("font-mono tabular-nums", diffColor)}>
-                  {(100 - Math.abs(diffPct)).toFixed(1)}%
+                <span className="text-muted-foreground">{m - 1 || 12}월 카드 (확정)</span>
+                <span className="font-mono tabular-nums">{formatByEntity(data.card_timing.prev_month_card, entityId)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">{m}월 카드 (진행)</span>
+                <span className="font-mono tabular-nums">{formatByEntity(data.card_timing.curr_month_card_actual, entityId)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">{m}월 카드 (예상)</span>
+                <span className="font-mono tabular-nums">{formatByEntity(data.card_timing.curr_month_card_estimate, entityId)}</span>
+              </div>
+              <div className="border-t border-border pt-2 flex justify-between font-medium">
+                <span>시차 보정</span>
+                <span className={cn("font-mono tabular-nums", data.card_timing.adjustment >= 0 ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]")}>
+                  {data.card_timing.adjustment >= 0 ? "+" : ""}{formatByEntity(data.card_timing.adjustment, entityId)}
                 </span>
               </div>
-            )}
-          </div>
+            </div>
+          )}
+        </Card>
+
+        {/* Forecast vs actual box (collapsible) */}
+        <Card className="bg-secondary rounded-xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setVsActualOpen((v) => !v)}
+            className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-secondary/70 transition-colors"
+          >
+            <span className="text-xs font-semibold text-[hsl(var(--warning))] flex-1">예상 vs 실제</span>
+            {vsActualOpen ? <ChevronDown className="h-4 w-4 text-[hsl(var(--warning))]/60" /> : <ChevronRight className="h-4 w-4 text-[hsl(var(--warning))]/60" />}
+          </button>
+          {vsActualOpen && (
+            <div className="px-4 pb-4 space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">조정 예상 기말</span>
+                <span className="font-mono tabular-nums text-[hsl(var(--warning))]">{formatByEntity(data.adjusted_forecast_closing, entityId)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">실제 기말</span>
+                <span className="font-mono tabular-nums">{formatByEntity(data.actual_closing, entityId)}</span>
+              </div>
+              <div className="border-t border-border pt-2 flex justify-between font-medium">
+                <span>차이</span>
+                <span className={cn("font-mono tabular-nums", diffColor)}>
+                  {data.diff >= 0 ? "+" : ""}{formatByEntity(data.diff, entityId)}
+                </span>
+              </div>
+              {data.adjusted_forecast_closing !== 0 && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">정확도</span>
+                  <span className={cn("font-mono tabular-nums", diffColor)}>
+                    {(100 - Math.abs(diffPct)).toFixed(1)}%
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
         </Card>
       </div>
 
