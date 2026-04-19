@@ -403,57 +403,27 @@ class ExpenseOneSyncRequest(BaseModel):
         return v
 
 
-def _get_expenseone_client():
-    from backend.services.integrations.expenseone import (
-        ExpenseOneClient,
-        ExpenseOneError,
-        load_credentials,
-    )
-    try:
-        url, key = load_credentials()
-    except ExpenseOneError as e:
-        raise HTTPException(400, str(e))
-    return ExpenseOneClient(url, key)
-
-
 @router.get("/expenseone/status")
 def expenseone_status(
     entity_id: int = 2,
     conn: PgConnection = Depends(get_db),
 ):
-    """ExpenseOne 연결 상태 + 마지막 동기화 통계."""
-    try:
-        client = _get_expenseone_client()
-    except HTTPException as e:
-        return {"connected": False, "configured": False, "error": e.detail}
+    """ExpenseOne 연결 상태 + 마지막 동기화 통계.
 
-    try:
-        conn_info = client.check_connection()
-    finally:
-        client.close()
+    ExpenseOne은 FinanceOne과 같은 Supabase 프로젝트의 expenseone 스키마.
+    별도 credentials 불필요 — DATABASE_URL만으로 충분.
+    """
+    from backend.services.integrations import expenseone as eo
 
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT COUNT(*) FILTER (WHERE expense_id IS NOT NULL),
-               MAX(updated_at) FILTER (WHERE expense_id IS NOT NULL)
-        FROM transactions
-        WHERE entity_id = %s
-        """,
-        [entity_id],
-    )
-    row = cur.fetchone()
-    cur.close()
-
-    synced_count = row[0] if row else 0
-    last_sync = row[1].isoformat() if row and row[1] else None
+    conn_info = eo.check_connection(conn)
+    stats = eo.get_synced_stats(conn, entity_id)
 
     return {
         "configured": True,
         "connected": conn_info.get("connected", False),
         "error": conn_info.get("error"),
-        "synced_count": synced_count,
-        "last_sync": last_sync,
+        "synced_count": stats["synced_count"],
+        "last_sync": stats["last_sync"],
     }
 
 
@@ -463,14 +433,13 @@ def expenseone_sync(
     conn: PgConnection = Depends(get_db),
 ):
     """ExpenseOne 승인 경비 → FinanceOne transactions 동기화."""
-    client = _get_expenseone_client()
+    from backend.services.integrations import expenseone as eo
+
     try:
-        expenses = client.fetch_approved(body.since_date)
-        result = client.sync_to_financeone(conn, body.entity_id, expenses)
+        expenses = eo.fetch_approved(conn, body.since_date)
+        result = eo.sync_to_financeone(conn, body.entity_id, expenses)
         conn.commit()
         return result
     except Exception:
         conn.rollback()
         raise
-    finally:
-        client.close()

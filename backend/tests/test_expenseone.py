@@ -11,10 +11,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from backend.services.integrations.expenseone import (
-    ExpenseOneClient,
     ExpenseOneError,
     _category_fallback,
     _parse_date,
+    _upsert_expense,
     PRESET_CATEGORY_HINTS,
 )
 
@@ -95,34 +95,12 @@ class TestCategoryFallback:
         assert result is None
 
 
-# ── ExpenseOneClient init ────────────────────────────────
-
-
-class TestClientInit:
-    def test_missing_url_raises(self):
-        with pytest.raises(ExpenseOneError):
-            ExpenseOneClient("", "key")
-
-    def test_missing_key_raises(self):
-        with pytest.raises(ExpenseOneError):
-            ExpenseOneClient("https://x.supabase.co", "")
-
-    def test_trailing_slash_stripped(self):
-        client = ExpenseOneClient("https://x.supabase.co/", "key")
-        assert client.base_url == "https://x.supabase.co/rest/v1"
-        assert client.headers["apikey"] == "key"
-        assert client.headers["Authorization"] == "Bearer key"
-        client.close()
-
-
 # ── _upsert_expense duplicate/fuzzy logic ────────────────
 
 
 class TestUpsertExpense:
-    def _make_client(self) -> ExpenseOneClient:
-        return ExpenseOneClient("https://x.supabase.co", "key")
-
     def _sample_corporate_card(self) -> dict:
+        """DB row 딕셔너리 (snake_case, expenseone 스키마 형식)."""
         return {
             "id": "00000000-0000-0000-0000-000000000001",
             "type": "CORPORATE_CARD",
@@ -131,85 +109,57 @@ class TestUpsertExpense:
             "description": "사무용품",
             "amount": 52000,
             "category": "ODD",
-            "transactionDate": "2026-04-15",
-            "merchantName": "쿠팡",
-            "cardLastFour": "1234",
-            "isUrgent": False,
-            "isPrePaid": False,
-            "submitter": {"id": "u1", "name": "김철수", "email": "kim@hanah1.com"},
+            "transaction_date": "2026-04-15",
+            "merchant_name": "쿠팡",
+            "card_last_four": "1234",
+            "is_urgent": False,
+            "is_pre_paid": False,
+            "submitter_name": "김철수",
+            "submitter_email": "kim@hanah1.com",
         }
 
     def test_expense_id_exact_match_returns_duplicate(self):
         """Level 1: expense_id 이미 있으면 duplicate."""
-        client = self._make_client()
         cur = MagicMock()
-        cur.fetchone.side_effect = [(1,)]  # expense_id 매칭 row 존재
-        try:
-            result = client._upsert_expense(cur, 2, self._sample_corporate_card(), {})
-            assert result == "duplicate"
-        finally:
-            client.close()
+        cur.fetchone.side_effect = [(1,)]
+        result = _upsert_expense(cur, 2, self._sample_corporate_card(), {})
+        assert result == "duplicate"
 
     def test_fuzzy_match_enriches_existing(self):
         """Level 2: 날짜+금액+merchant ILIKE 매칭되면 enrich."""
-        client = self._make_client()
         cur = MagicMock()
-        # 1st fetchone: expense_id 없음 → None
-        # 2nd fetchone: fuzzy match 기존 거래 id=99
         cur.fetchone.side_effect = [None, (99,)]
-        try:
-            result = client._upsert_expense(cur, 2, self._sample_corporate_card(), {})
-            assert result == "enriched"
-            # UPDATE 가 호출됐는지 확인
-            calls = [c.args[0] for c in cur.execute.call_args_list]
-            assert any("UPDATE transactions" in sql for sql in calls)
-        finally:
-            client.close()
+        result = _upsert_expense(cur, 2, self._sample_corporate_card(), {})
+        assert result == "enriched"
+        calls = [c.args[0] for c in cur.execute.call_args_list]
+        assert any("UPDATE transactions" in sql for sql in calls)
 
     def test_new_expense_with_category_match(self):
         """중복/fuzzy 없음 + category ODD 매칭 → inserted."""
-        client = self._make_client()
         cur = MagicMock()
-        # expense_id(None), fuzzy(None), mapping cascade (exact×2, similar×1, keyword×1) 모두 None
         cur.fetchone.side_effect = [None] * 10
-        try:
-            result = client._upsert_expense(
-                cur,
-                2,
-                self._sample_corporate_card(),
-                {"odd": (100, 10)},
-            )
-            # mapping_service cascade 실패 → category fallback ODD → internal_account_id=100
-            assert result == "inserted"
-        finally:
-            client.close()
+        result = _upsert_expense(
+            cur, 2, self._sample_corporate_card(), {"odd": (100, 10)}
+        )
+        assert result == "inserted"
 
     def test_invalid_date_raises(self):
-        client = self._make_client()
         cur = MagicMock()
         exp = self._sample_corporate_card()
-        exp["transactionDate"] = "not-a-date"
-        exp["approvedAt"] = "also-bad"
-        try:
-            with pytest.raises(ExpenseOneError):
-                client._upsert_expense(cur, 2, exp, {})
-        finally:
-            client.close()
+        exp["transaction_date"] = "not-a-date"
+        exp["approved_at"] = "also-bad"
+        with pytest.raises(ExpenseOneError):
+            _upsert_expense(cur, 2, exp, {})
 
     def test_zero_amount_raises(self):
-        client = self._make_client()
         cur = MagicMock()
         exp = self._sample_corporate_card()
         exp["amount"] = 0
-        try:
-            with pytest.raises(ExpenseOneError):
-                client._upsert_expense(cur, 2, exp, {})
-        finally:
-            client.close()
+        with pytest.raises(ExpenseOneError):
+            _upsert_expense(cur, 2, exp, {})
 
     def test_deposit_request_type_uses_account_holder(self):
-        """DEPOSIT_REQUEST는 counterparty로 accountHolder를 쓴다."""
-        client = self._make_client()
+        """DEPOSIT_REQUEST는 counterparty로 account_holder를 쓴다."""
         cur = MagicMock()
         cur.fetchone.side_effect = [None] * 10
         exp = {
@@ -219,31 +169,24 @@ class TestUpsertExpense:
             "title": "외주비 지급",
             "amount": 1000000,
             "category": "기타",
-            "transactionDate": "2026-04-14",
-            "bankName": "국민은행",
-            "accountHolder": "홍길동",
-            "accountNumber": "111-222-333",
-            "isUrgent": False,
-            "isPrePaid": True,
-            "prePaidPercentage": 50,
-            "submitter": {"name": "박영희"},
+            "transaction_date": "2026-04-14",
+            "bank_name": "국민은행",
+            "account_holder": "홍길동",
+            "is_urgent": False,
+            "is_pre_paid": True,
+            "pre_paid_percentage": 50,
+            "submitter_name": "박영희",
         }
-        try:
-            client._upsert_expense(cur, 2, exp, {})
-            # INSERT 호출에서 counterparty=홍길동이 들어갔는지 확인
-            insert_call = next(
-                c for c in cur.execute.call_args_list
-                if "INSERT INTO transactions" in c.args[0]
-            )
-            params = insert_call.args[1]
-            # 파라미터 순서: entity_id, date, amount, desc, counterparty, source_type, ...
-            assert params[4] == "홍길동"  # counterparty
-            assert params[5] == "expenseone_deposit"  # source_type
-            # note에 선지급 정보 포함
-            note_idx = next(i for i, p in enumerate(params) if isinstance(p, str) and "선지급" in p)
-            assert "50%" in params[note_idx]
-        finally:
-            client.close()
+        _upsert_expense(cur, 2, exp, {})
+        insert_call = next(
+            c for c in cur.execute.call_args_list
+            if "INSERT INTO transactions" in c.args[0]
+        )
+        params = insert_call.args[1]
+        assert params[4] == "홍길동"  # counterparty
+        assert params[5] == "expenseone_deposit"  # source_type
+        note_idx = next(i for i, p in enumerate(params) if isinstance(p, str) and "선지급" in p)
+        assert "50%" in params[note_idx]
 
 
 # ── PRESET_CATEGORY_HINTS 검증 ───────────────────────────

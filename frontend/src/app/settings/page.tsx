@@ -377,20 +377,7 @@ function SettingsContent() {
             제출자·제목·카테고리 컨텍스트가 함께 저장되어 매핑 정확도가 올라갑니다.
           </p>
 
-          {expenseoneStatus && !expenseoneStatus.configured && (
-            <div className="rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3 text-sm text-yellow-500">
-              <p className="font-medium">환경변수 미설정</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                .env에 다음을 추가 후 backend 재시작:
-              </p>
-              <pre className="mt-2 text-xs font-mono text-yellow-400">
-{`EXPENSEONE_SUPABASE_URL=https://xxx.supabase.co
-EXPENSEONE_SERVICE_ROLE_KEY=eyJ...`}
-              </pre>
-            </div>
-          )}
-
-          {expenseoneStatus && expenseoneStatus.configured && (
+          {expenseoneStatus && (
             <div className="space-y-3">
               <StatusBadge
                 status={{
