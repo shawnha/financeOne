@@ -193,6 +193,8 @@ class CodefAccountSpec(BaseModel):
     der_file_b64: Optional[str] = None   # base64-encoded signCert.der
     key_file_b64: Optional[str] = None   # base64-encoded signPri.key
     cert_password: Optional[str] = None  # plain → 서버에서 RSA+base64
+    # NPKI 로컬 경로로 cert 지정 (der/key 자동 로드)
+    npki_cert_path: Optional[str] = None
 
     @field_validator("organization")
     @classmethod
@@ -343,6 +345,13 @@ def codef_delete_connection(
         raise
 
 
+@router.get("/codef/npki/certs")
+def codef_npki_list():
+    """로컬 Mac/Linux의 공동인증서 목록 (발견된 것만)."""
+    from backend.services.integrations.codef import discover_npki_certs
+    return {"certs": discover_npki_certs()}
+
+
 @router.post("/codef/connect")
 def codef_connect(
     body: CodefConnectRequest,
@@ -386,14 +395,20 @@ def codef_connect(
                 account["id"] = spec.login_id
                 account["password"] = encrypt_password(spec.login_password)
             else:
-                # 공동인증서 — Codef SDK 표준 필드: derFile, keyFile, password
-                if not (spec.der_file_b64 and spec.key_file_b64 and spec.cert_password):
+                # 공동인증서 — npki_cert_path 우선, 없으면 업로드된 der/key 사용
+                der_b64 = spec.der_file_b64
+                key_b64 = spec.key_file_b64
+                if spec.npki_cert_path:
+                    from backend.services.integrations.codef import load_npki_cert_files
+                    der_b64, key_b64 = load_npki_cert_files(spec.npki_cert_path)
+
+                if not (der_b64 and key_b64 and spec.cert_password):
                     raise HTTPException(
                         400,
-                        "der_file_b64 + key_file_b64 + cert_password required for cert auth",
+                        "인증서 파일(.der+.key) 또는 npki_cert_path + 인증서 비밀번호 필요",
                     )
-                account["derFile"] = spec.der_file_b64
-                account["keyFile"] = spec.key_file_b64
+                account["derFile"] = der_b64
+                account["keyFile"] = key_b64
                 account["password"] = encrypt_password(spec.cert_password)
 
             account_list.append(account)

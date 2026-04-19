@@ -679,3 +679,86 @@ def delete_connected_id(conn: PgConnection, entity_id: int, org: str) -> bool:
         return cur.rowcount > 0
     finally:
         cur.close()
+
+
+# ── NPKI 공동인증서 로컬 탐색 ─────────────────────────
+
+_NPKI_ROOTS = [
+    "~/Library/Preferences/NPKI",
+    "~/NPKI",
+]
+
+
+def discover_npki_certs() -> list[dict]:
+    """Mac/Linux의 NPKI 폴더에서 공동인증서 목록 탐색.
+
+    Returns:
+        [{ca, cn, path, label}] — path는 cert 폴더 (signCert.der + signPri.key 포함)
+    """
+    import os as _os
+    from pathlib import Path
+
+    results: list[dict] = []
+    for root_spec in _NPKI_ROOTS:
+        root = Path(_os.path.expanduser(root_spec))
+        if not root.exists():
+            continue
+        for ca_dir in root.iterdir():
+            if not ca_dir.is_dir():
+                continue
+            user_dir = ca_dir / "USER"
+            if not user_dir.exists():
+                continue
+            for cert_dir in user_dir.iterdir():
+                if not cert_dir.is_dir():
+                    continue
+                sign_cert = cert_dir / "signCert.der"
+                sign_key = cert_dir / "signPri.key"
+                if not (sign_cert.exists() and sign_key.exists()):
+                    continue
+                # cert 폴더명: "cn=..,ou=..,o=..,c=.." → CN 추출
+                dir_name = cert_dir.name
+                cn = dir_name
+                if dir_name.startswith("cn="):
+                    cn_raw = dir_name.split(",", 1)[0][3:]
+                    cn = cn_raw.strip()
+                results.append({
+                    "ca": ca_dir.name,
+                    "cn": cn,
+                    "path": str(cert_dir),
+                    "label": f"{cn} ({ca_dir.name})",
+                })
+    # sort by CA then CN for stable order
+    results.sort(key=lambda x: (x["ca"], x["cn"]))
+    return results
+
+
+def load_npki_cert_files(cert_path: str) -> tuple[str, str]:
+    """cert 폴더에서 signCert.der + signPri.key 읽어 base64 반환.
+
+    Args:
+        cert_path: 인증서 폴더 절대경로
+    Returns:
+        (der_file_b64, key_file_b64)
+    Raises:
+        CodefError: 파일 없음/범위 밖 경로.
+    """
+    import os as _os
+    from pathlib import Path
+
+    allowed_roots = [Path(_os.path.expanduser(r)).resolve() for r in _NPKI_ROOTS]
+    target = Path(cert_path).resolve()
+    # 허용된 NPKI 루트 하위 경로만 허용 (디렉토리 traversal 방지)
+    if not any(
+        str(target).startswith(str(root)) for root in allowed_roots if root.exists()
+    ):
+        raise CodefError(f"Cert path outside allowed NPKI roots: {cert_path}")
+
+    der = target / "signCert.der"
+    key = target / "signPri.key"
+    if not der.exists() or not key.exists():
+        raise CodefError(f"signCert.der 또는 signPri.key 없음: {cert_path}")
+
+    der_b64 = base64.b64encode(der.read_bytes()).decode("ascii")
+    key_b64 = base64.b64encode(key.read_bytes()).decode("ascii")
+    return der_b64, key_b64

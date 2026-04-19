@@ -48,6 +48,13 @@ interface CodefStatus {
   error?: string
 }
 
+interface NpkiCert {
+  ca: string
+  cn: string
+  path: string
+  label: string
+}
+
 interface CodefCardSyncResult {
   card_type: string
   synced: number
@@ -96,6 +103,9 @@ function SettingsContent() {
   const [codefDerFileB64, setCodefDerFileB64] = useState("")
   const [codefKeyFileB64, setCodefKeyFileB64] = useState("")
   const [codefCertFileName, setCodefCertFileName] = useState("")
+  const [codefNpkiCerts, setCodefNpkiCerts] = useState<NpkiCert[]>([])
+  const [codefNpkiCertPath, setCodefNpkiCertPath] = useState("")
+  const [codefCertSource, setCodefCertSource] = useState<"npki" | "upload">("npki")
   const [codefSyncStart, setCodefSyncStart] = useState(() => {
     const d = new Date()
     return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}01`
@@ -133,6 +143,40 @@ function SettingsContent() {
         }),
       )
   }, [codefEntityId])
+
+  // NPKI 인증서 목록 로드 (한 번만)
+  useEffect(() => {
+    fetchAPI<{ certs: NpkiCert[] }>("/integrations/codef/npki/certs")
+      .then((r) => setCodefNpkiCerts(r.certs))
+      .catch(() => setCodefNpkiCerts([]))
+  }, [])
+
+  // 인증서 모드 진입 시, 법인/기관에 맞는 인증서 자동 선택
+  useEffect(() => {
+    if (codefAuthMode !== "cert" || !codefConnectOrg || codefNpkiCerts.length === 0) return
+    const entityKeyword =
+      codefEntityId === 2 ? "한아원" : codefEntityId === 3 ? "리테일" : ""
+    const orgKeyword =
+      codefConnectOrg === "woori_bank"
+        ? ["WOORI", "우리"]
+        : codefConnectOrg === "shinhan_card"
+        ? ["SHB", "신한"]
+        : []
+    const match = codefNpkiCerts.find((c) => {
+      const hayLabel = c.label
+      const hayPath = c.path
+      const matchesEntity =
+        !entityKeyword ||
+        (codefEntityId === 3
+          ? hayLabel.includes("리테일")
+          : hayLabel.includes("한아원") && !hayLabel.includes("리테일"))
+      const matchesOrg =
+        orgKeyword.length === 0 ||
+        orgKeyword.some((k) => hayLabel.includes(k) || hayPath.includes(k))
+      return matchesEntity && matchesOrg
+    })
+    if (match) setCodefNpkiCertPath(match.path)
+  }, [codefAuthMode, codefConnectOrg, codefEntityId, codefNpkiCerts])
 
   // QBO callback 후 자동 status 체크
   useEffect(() => {
@@ -188,6 +232,8 @@ function SettingsContent() {
     setCodefDerFileB64("")
     setCodefKeyFileB64("")
     setCodefCertFileName("")
+    setCodefNpkiCertPath("")
+    setCodefCertSource("npki")
     setCodefConnectOrg(null)
     setCodefAuthMode("idpw")
   }
@@ -224,9 +270,13 @@ function SettingsContent() {
         account.login_password = codefLoginPw
       } else {
         account.login_type = "0"
-        account.der_file_b64 = codefDerFileB64
-        account.key_file_b64 = codefKeyFileB64
         account.cert_password = codefCertPw
+        if (codefCertSource === "npki" && codefNpkiCertPath) {
+          account.npki_cert_path = codefNpkiCertPath
+        } else {
+          account.der_file_b64 = codefDerFileB64
+          account.key_file_b64 = codefKeyFileB64
+        }
       }
       await fetchAPI("/integrations/codef/connect", {
         method: "POST",
@@ -578,7 +628,11 @@ function SettingsContent() {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => setCodefConnectOrg(org)}
+                              onClick={() => {
+                                setCodefConnectOrg(org)
+                                // 은행은 공동인증서 필수 → 자동 전환
+                                setCodefAuthMode(org === "woori_bank" ? "cert" : "idpw")
+                              }}
                             >
                               연결
                             </Button>
@@ -638,37 +692,90 @@ function SettingsContent() {
                     </>
                   ) : (
                     <>
-                      <p className="text-xs text-muted-foreground">
-                        공동인증서 경로: <code>~/NPKI/yessign/USER/cn=*/</code> — signCert.der(인증서) + signPri.key(개인키)
-                      </p>
-                      <div>
-                        <label className="text-xs text-muted-foreground block mb-1">
-                          signCert.der (공동인증서 파일)
-                        </label>
-                        <input
-                          type="file"
-                          accept=".der,application/octet-stream"
-                          onChange={(e) => {
-                            const f = e.target.files?.[0]
-                            if (f) handleCertFile(f, "der")
-                          }}
-                          className="text-xs"
-                        />
+                      <div className="flex gap-2 items-center">
+                        <div className="flex rounded-md overflow-hidden border border-border text-xs">
+                          {[
+                            { key: "npki" as const, label: "설치된 인증서" },
+                            { key: "upload" as const, label: "파일 직접 업로드" },
+                          ].map((s) => (
+                            <button
+                              key={s.key}
+                              onClick={() => setCodefCertSource(s.key)}
+                              className={`px-2 py-1 ${
+                                codefCertSource === s.key
+                                  ? "bg-accent/20 text-accent"
+                                  : "bg-transparent text-muted-foreground hover:bg-secondary/50"
+                              }`}
+                            >
+                              {s.label}
+                            </button>
+                          ))}
+                        </div>
+                        <span className="text-xs text-muted-foreground/70">
+                          {codefNpkiCerts.length}개 인증서 발견
+                        </span>
                       </div>
-                      <div>
-                        <label className="text-xs text-muted-foreground block mb-1">
-                          signPri.key (개인키 파일)
-                        </label>
-                        <input
-                          type="file"
-                          accept=".key,application/octet-stream"
-                          onChange={(e) => {
-                            const f = e.target.files?.[0]
-                            if (f) handleCertFile(f, "key")
-                          }}
-                          className="text-xs"
-                        />
-                      </div>
+
+                      {codefCertSource === "npki" ? (
+                        codefNpkiCerts.length > 0 ? (
+                          <select
+                            value={codefNpkiCertPath}
+                            onChange={(e) => setCodefNpkiCertPath(e.target.value)}
+                            className="h-8 w-full rounded-md border border-border bg-background text-sm px-2"
+                          >
+                            <option value="">인증서 선택...</option>
+                            {codefNpkiCerts.map((c) => (
+                              <option key={c.path} value={c.path}>
+                                {c.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            ~/Library/Preferences/NPKI 또는 ~/NPKI 에서 인증서를 찾지 못함. 파일 업로드 사용.
+                          </p>
+                        )
+                      ) : (
+                        <>
+                          <p className="text-xs text-muted-foreground">
+                            signCert.der + signPri.key 두 파일 업로드
+                          </p>
+                          <div>
+                            <label className="text-xs text-muted-foreground block mb-1">
+                              signCert.der
+                            </label>
+                            <input
+                              type="file"
+                              accept=".der,application/octet-stream"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0]
+                                if (f) handleCertFile(f, "der")
+                              }}
+                              className="text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground block mb-1">
+                              signPri.key
+                            </label>
+                            <input
+                              type="file"
+                              accept=".key,application/octet-stream"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0]
+                                if (f) handleCertFile(f, "key")
+                              }}
+                              className="text-xs"
+                            />
+                          </div>
+                          {codefCertFileName && (
+                            <p className="text-xs text-muted-foreground/70">
+                              선택됨: {codefCertFileName}
+                            </p>
+                          )}
+                        </>
+                      )}
+
                       <Input
                         type="password"
                         placeholder="공동인증서 비밀번호"
@@ -676,11 +783,6 @@ function SettingsContent() {
                         onChange={(e) => setCodefCertPw(e.target.value)}
                         className="h-8 text-sm"
                       />
-                      {codefCertFileName && (
-                        <p className="text-xs text-muted-foreground/70">
-                          선택됨: {codefCertFileName}
-                        </p>
-                      )}
                     </>
                   )}
 
@@ -693,7 +795,10 @@ function SettingsContent() {
                         testing === "codef-connect" ||
                         (codefAuthMode === "idpw"
                           ? !codefLoginId || !codefLoginPw
-                          : !codefDerFileB64 || !codefKeyFileB64 || !codefCertPw)
+                          : !codefCertPw ||
+                            (codefCertSource === "npki"
+                              ? !codefNpkiCertPath
+                              : !codefDerFileB64 || !codefKeyFileB64))
                       }
                     >
                       {testing === "codef-connect" ? (
