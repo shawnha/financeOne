@@ -149,10 +149,17 @@ class GowidClient:
                 skipped += 1
                 continue
 
-            # gowid_expense_id 기준 중복 감지 (transactions.expense_id 재활용)
+            gowid_id = item.get("expenseId")
+            id_marker = f"gowid_id:{gowid_id}"
+
+            # 중복 감지 — note에 'gowid_id:<int>' marker 저장하고 prefix matching
             cur.execute(
-                "SELECT id FROM transactions WHERE expense_id = %s LIMIT 1",
-                [str(item.get("expenseId"))],
+                """
+                SELECT id FROM transactions
+                WHERE entity_id = %s AND source_type = %s AND note LIKE %s
+                LIMIT 1
+                """,
+                [entity_id, SOURCE_TYPE, f"{id_marker}%"],
             )
             if cur.fetchone():
                 duplicates += 1
@@ -164,6 +171,10 @@ class GowidClient:
                 description=tx["description"],
             )
 
+            note_with_id = id_marker
+            if tx.get("note"):
+                note_with_id += f" | {tx['note']}"
+
             cur.execute(
                 """
                 INSERT INTO transactions
@@ -172,13 +183,11 @@ class GowidClient:
                      card_number, parsed_member_name,
                      internal_account_id, standard_account_id,
                      mapping_confidence, mapping_source,
-                     expense_id, expense_submitted_by, expense_title, note,
-                     created_at, updated_at)
+                     note, created_at, updated_at)
                 VALUES (%s, %s, %s, 'KRW', 'out', %s, %s, %s, FALSE, FALSE,
                         %s, %s,
                         %s, %s, %s, %s,
-                        %s, %s, %s, %s,
-                        NOW(), NOW())
+                        %s, NOW(), NOW())
                 """,
                 [
                     entity_id, tx["date"], float(tx["amount"]),
@@ -188,8 +197,7 @@ class GowidClient:
                     mapping.get("standard_account_id") if mapping else None,
                     mapping.get("confidence") if mapping else None,
                     mapping.get("match_type") if mapping else None,
-                    str(item.get("expenseId")), tx["card_alias"], tx["description"][:200],
-                    tx.get("note"),
+                    note_with_id,
                 ],
             )
             synced += 1
