@@ -592,6 +592,197 @@ def codef_sync_card(
         client.close()
 
 
+class CodefCompareCardRequest(BaseModel):
+    entity_id: int
+    card_type: str
+    start_date: str  # YYYYMMDD
+    end_date: str    # YYYYMMDD
+    connected_id: Optional[str] = None
+
+
+@router.post("/codef/compare-card")
+def codef_compare_card(
+    body: CodefCompareCardRequest,
+    conn: PgConnection = Depends(get_db),
+):
+    """Codef 카드 승인내역 fetch (DB INSERT 없음) + 기존 DB 거래와 비교.
+
+    목적: 다른 소스(Gowid 등)로 이미 들어온 거래와 Codef 응답을 대조하여
+    정식 전환 전 정합성을 확인.
+
+    반환:
+        codef: {cards[], rows[], total_fetched, sum_amount}
+        db_existing: {by_source: {<source_type>: {count, sum}}}
+        diff: {
+            only_in_codef: [rows...],
+            only_in_db: [rows...],
+            matched: N
+        }
+    매칭 키: (date, amount) — counterparty는 소스별 표기 차이 있어 제외.
+    """
+    from decimal import Decimal
+    from backend.services.integrations.codef import (
+        CodefError, _normalize_card_row,
+    )
+    from datetime import datetime
+
+    def _fmt_date(s: str) -> str:
+        return f"{s[:4]}-{s[4:6]}-{s[6:8]}" if len(s) == 8 else s
+
+    try:
+        start_iso = _fmt_date(body.start_date)
+        end_iso = _fmt_date(body.end_date)
+        datetime.strptime(start_iso, "%Y-%m-%d")
+        datetime.strptime(end_iso, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(400, "start_date / end_date must be YYYYMMDD")
+
+    connected_id = _resolve_connected_id(conn, body.entity_id, body.card_type, body.connected_id)
+    client = _get_codef_client()
+
+    codef_rows: list[dict] = []
+    cards_summary: list[dict] = []
+    try:
+        cards = client.get_card_list(connected_id, body.card_type)
+        if not cards:
+            raise HTTPException(400, f"{body.card_type}: Codef 보유 카드 없음")
+
+        for card in cards:
+            card_no = card.get("resCardNo", "")
+            card_name = card.get("resCardName", "") or ""
+            try:
+                approvals = client.get_card_approvals(
+                    connected_id, body.start_date, body.end_date,
+                    body.card_type, card_no=card_no,
+                )
+            except CodefError as e:
+                logger.warning("card %s approval-list 실패: %s", card_no, e)
+                approvals = []
+            for a in approvals:
+                a["_codefCardNo"] = card_no
+                a["_codefCardName"] = card_name
+            cards_summary.append({
+                "card_no": card_no,
+                "card_name": card_name,
+                "fetched": len(approvals),
+            })
+            for raw in approvals:
+                tx = _normalize_card_row(raw)
+                if not tx:
+                    continue
+                codef_rows.append({
+                    "date": str(tx["date"]),
+                    "amount": float(tx["amount"]),
+                    "counterparty": tx.get("counterparty"),
+                    "type": tx.get("type"),
+                    "is_cancel": bool(tx.get("is_cancel")),
+                    "card_number": tx.get("card_number"),
+                    "member_name": tx.get("member_name"),
+                    "description": tx.get("description"),
+                })
+    except CodefError as e:
+        log_id = _log_codef_error(conn, body.entity_id, body.card_type, e)
+        raise HTTPException(400, _codef_error_detail(e, log_id))
+    finally:
+        client.close()
+
+    # ── 기존 DB 거래 조회 (같은 card_type의 lotte_card 또는 codef_lotte_card 등)
+    plain = body.card_type
+    prefixed = f"codef_{body.card_type}"
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT source_type, date, amount, counterparty, type, is_cancel,
+                   card_number, parsed_member_name
+            FROM transactions
+            WHERE entity_id = %s
+              AND source_type IN (%s, %s)
+              AND date BETWEEN %s::date AND %s::date
+            ORDER BY date, amount
+            """,
+            [body.entity_id, plain, prefixed, start_iso, end_iso],
+        )
+        db_rows = []
+        db_by_source: dict[str, dict[str, float]] = {}
+        for r in cur.fetchall():
+            src, d, amt, cp, t, cancel, card_num, member = r
+            amt_f = float(amt)
+            db_rows.append({
+                "source_type": src,
+                "date": str(d),
+                "amount": amt_f,
+                "counterparty": cp,
+                "type": t,
+                "is_cancel": bool(cancel),
+                "card_number": card_num,
+                "member_name": member,
+            })
+            stats = db_by_source.setdefault(src, {"count": 0, "sum": 0.0})
+            stats["count"] += 1
+            stats["sum"] += amt_f
+    finally:
+        cur.close()
+
+    # ── diff: 매칭 key = (date, amount) 튜플 (최소 key — counterparty 표기 차이 회피)
+    # 다중 occurrence 지원 위해 list의 count 기반으로 매칭
+    def _key(r):
+        return (r["date"], round(r["amount"], 2))
+
+    codef_keys: dict = {}
+    for r in codef_rows:
+        k = _key(r)
+        codef_keys.setdefault(k, []).append(r)
+    db_keys: dict = {}
+    for r in db_rows:
+        k = _key(r)
+        db_keys.setdefault(k, []).append(r)
+
+    only_in_codef = []
+    matched = 0
+    for k, cr_list in codef_keys.items():
+        db_list = db_keys.get(k, [])
+        for i, cr in enumerate(cr_list):
+            if i < len(db_list):
+                matched += 1
+            else:
+                only_in_codef.append(cr)
+
+    only_in_db = []
+    for k, db_list in db_keys.items():
+        cr_list = codef_keys.get(k, [])
+        for i, dr in enumerate(db_list):
+            if i >= len(cr_list):
+                only_in_db.append(dr)
+
+    codef_sum = sum(r["amount"] for r in codef_rows)
+    db_sum_total = sum(s["sum"] for s in db_by_source.values())
+    db_count_total = sum(s["count"] for s in db_by_source.values())
+
+    return {
+        "range": {"start": start_iso, "end": end_iso},
+        "codef": {
+            "cards": cards_summary,
+            "total_fetched": len(codef_rows),
+            "sum_amount": round(codef_sum, 2),
+            "environment": client.environment,
+        },
+        "db_existing": {
+            "by_source": {
+                k: {"count": v["count"], "sum": round(v["sum"], 2)}
+                for k, v in db_by_source.items()
+            },
+            "total_count": db_count_total,
+            "total_sum": round(db_sum_total, 2),
+        },
+        "diff": {
+            "matched": matched,
+            "only_in_codef": only_in_codef,
+            "only_in_db": only_in_db,
+        },
+    }
+
+
 @router.get("/codef/errors")
 def codef_errors(
     entity_id: Optional[int] = None,
