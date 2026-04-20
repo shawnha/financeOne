@@ -783,6 +783,20 @@ def codef_compare_card(
     }
 
 
+@router.get("/codef/scheduler/status")
+def codef_scheduler_status():
+    """스케줄러 현재 상태 + 최근 실행 요약."""
+    from backend.services.scheduler import get_status
+    return get_status()
+
+
+@router.post("/codef/scheduler/run-now")
+async def codef_scheduler_run_now():
+    """수동 트리거 — 즉시 sync job 1회 실행."""
+    from backend.services.scheduler import run_now
+    return await run_now()
+
+
 @router.get("/codef/errors")
 def codef_errors(
     entity_id: Optional[int] = None,

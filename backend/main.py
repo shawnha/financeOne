@@ -10,12 +10,15 @@ _VERSION = (Path(__file__).resolve().parent.parent / "VERSION").read_text().stri
 
 from backend.database.connection import init_pool, close_pool
 from backend.routers import entities, transactions, accounts, upload, dashboard, statements, slack, journal_entries, integrations, exchange_rates, intercompany, notes, cashflow, forecasts, card_settings, expenseone_match
+from backend.services.scheduler import start_scheduler, shutdown_scheduler
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_pool()
+    start_scheduler()
     yield
+    shutdown_scheduler()
     await close_pool()
 
 

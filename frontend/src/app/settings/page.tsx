@@ -95,6 +95,28 @@ interface CodefErrorLogEntry {
   created_at: string | null
 }
 
+interface SchedulerResult {
+  entity_id?: number
+  org?: string
+  ok?: boolean
+  range?: string
+  detail?: unknown
+}
+
+interface SchedulerStatus {
+  running: boolean
+  enabled: boolean
+  interval_min: number
+  last_run: {
+    started_at: string | null
+    finished_at: string | null
+    ok_count: number
+    error_count: number
+    results: SchedulerResult[]
+  } | null
+  jobs?: Array<{ id: string; name: string; next_run_time: string | null }>
+}
+
 type CodefOrg =
   | "woori_bank"
   | "ibk_bank"
@@ -199,6 +221,8 @@ function SettingsContent() {
   const [codefErrorDetail, setCodefErrorDetail] = useState<CodefErrorDetail | null>(null)
   const [codefErrorLog, setCodefErrorLog] = useState<CodefErrorLogEntry[]>([])
   const [codefErrorLogLoading, setCodefErrorLogLoading] = useState(false)
+  const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus | null>(null)
+  const [schedulerRunning, setSchedulerRunning] = useState(false)
   const [qboStatus, setQboStatus] = useState<ConnectionStatus | null>(null)
   const [qboSyncResult, setQboSyncResult] = useState<QBOSyncResult | null>(null)
   const [qboSeedResult, setQboSeedResult] = useState<QBOSeedResult | null>(null)
@@ -465,6 +489,36 @@ function SettingsContent() {
   useEffect(() => {
     loadCodefErrorLog()
   }, [loadCodefErrorLog])
+
+  const loadSchedulerStatus = useCallback(async () => {
+    try {
+      const data = await fetchAPI<SchedulerStatus>(
+        "/integrations/codef/scheduler/status",
+      )
+      setSchedulerStatus(data)
+    } catch {
+      // silent
+    }
+  }, [])
+
+  const runSchedulerNow = async () => {
+    setSchedulerRunning(true)
+    try {
+      await fetchAPI("/integrations/codef/scheduler/run-now", { method: "POST" })
+      await loadSchedulerStatus()
+      await loadCodefErrorLog()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "실행 실패")
+    } finally {
+      setSchedulerRunning(false)
+    }
+  }
+
+  useEffect(() => {
+    loadSchedulerStatus()
+    const id = setInterval(loadSchedulerStatus, 30_000)
+    return () => clearInterval(id)
+  }, [loadSchedulerStatus])
 
   const connectCodefOrg = async () => {
     if (!codefConnectOrg) return
@@ -1137,6 +1191,98 @@ function SettingsContent() {
                   {codefSyncResult}
                 </div>
               )}
+
+              {/* 자동 sync 스케줄러 상태 */}
+              <div className="rounded-md border border-white/[0.05] p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <RefreshCw className="h-4 w-4 text-blue-400" />
+                    자동 sync 스케줄러
+                    {schedulerStatus?.running ? (
+                      <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] text-emerald-300 ring-1 ring-emerald-500/30">
+                        running
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-white/[0.08] px-2 py-0.5 text-[10px] text-muted-foreground">
+                        stopped
+                      </span>
+                    )}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={runSchedulerNow}
+                    disabled={schedulerRunning || !schedulerStatus?.running}
+                    className="h-7 text-xs"
+                  >
+                    <RefreshCw
+                      className={`h-3 w-3 mr-1 ${schedulerRunning ? "animate-spin" : ""}`}
+                    />
+                    지금 실행
+                  </Button>
+                </div>
+                {schedulerStatus && (
+                  <div className="text-xs text-muted-foreground space-y-1">
+                    <div>
+                      주기 <span className="text-foreground">{schedulerStatus.interval_min}분</span>
+                      {schedulerStatus.jobs?.[0]?.next_run_time && (
+                        <>
+                          {" · 다음 실행 "}
+                          <span className="text-foreground">
+                            {new Date(schedulerStatus.jobs[0].next_run_time).toLocaleString("ko-KR")}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground/70">
+                      안전장치: 최초 sync를 수동으로 실행한 org만 자동 sync 대상 (신규 연결 즉시 대량 INSERT 방지)
+                    </div>
+                    {schedulerStatus.last_run?.started_at && (
+                      <div className="pt-1 border-t border-white/[0.03] space-y-0.5">
+                        <div>
+                          마지막 실행{" "}
+                          <span className="text-foreground">
+                            {new Date(schedulerStatus.last_run.started_at).toLocaleString("ko-KR")}
+                          </span>
+                          {" — ok "}
+                          <span className="text-emerald-300">{schedulerStatus.last_run.ok_count}</span>
+                          {" / err "}
+                          <span className="text-red-300">{schedulerStatus.last_run.error_count}</span>
+                        </div>
+                        {schedulerStatus.last_run.results.map((r, i) => {
+                          const d = r.detail as Record<string, unknown> | string | undefined
+                          const isObj = d && typeof d === "object"
+                          const synced = isObj ? (d as Record<string, unknown>).synced : undefined
+                          const duplicates = isObj ? (d as Record<string, unknown>).duplicates : undefined
+                          const totalFetched = isObj ? (d as Record<string, unknown>).total_fetched : undefined
+                          const txId = isObj ? (d as Record<string, unknown>).transaction_id : undefined
+                          return (
+                          <div key={i} className="pl-2 text-[11px]">
+                            <span className={r.ok ? "text-emerald-300" : "text-red-300"}>
+                              {r.ok ? "✓" : "✗"}
+                            </span>{" "}
+                            entity={r.entity_id} {r.org}
+                            {r.range && <span className="text-muted-foreground/70"> · {r.range}</span>}
+                            {synced !== undefined && (
+                              <span className="text-muted-foreground/70">
+                                {` · synced ${synced} / dup ${duplicates}`}
+                                {totalFetched !== undefined && ` / fetched ${totalFetched}`}
+                              </span>
+                            )}
+                            {txId !== undefined && txId !== null && (
+                              <span className="text-amber-300/80">{` · tx=${String(txId)}`}</span>
+                            )}
+                            {typeof d === "string" && (
+                              <span className="text-muted-foreground/70"> · {d}</span>
+                            )}
+                          </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
               {/* 최근 Codef 오류 로그 — 기술 문의용 transactionId 보존 */}
               <div className="rounded-md border border-white/[0.05] p-3 space-y-2">
