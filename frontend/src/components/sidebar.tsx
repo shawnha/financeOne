@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils"
+import { fetchAPI } from "@/lib/api"
 import {
   LayoutDashboard,
   TrendingUp,
@@ -20,9 +21,18 @@ import {
   ArrowLeftRight,
   DollarSign,
   Link2,
+  Receipt,
 } from "lucide-react"
 
-const sections = [
+type SidebarItem = {
+  label: string
+  icon: typeof LayoutDashboard
+  href: string
+  enabled: boolean
+  badgeKey?: "expenseone_unmatched"
+}
+
+const sections: { label: string; items: SidebarItem[] }[] = [
   {
     label: "요약",
     items: [
@@ -38,6 +48,13 @@ const sections = [
       { label: "거래내역", icon: CreditCard, href: "/transactions", enabled: true },
       { label: "업로드", icon: Upload, href: "/upload", enabled: true },
       { label: "Slack 매칭", icon: MessageSquare, href: "/slack-match", enabled: true },
+      {
+        label: "ExpenseOne 매칭",
+        icon: Receipt,
+        href: "/expenseone-match",
+        enabled: true,
+        badgeKey: "expenseone_unmatched",
+      },
       { label: "법인간 거래", icon: ArrowLeftRight, href: "/intercompany", enabled: true },
       { label: "환율 관리", icon: DollarSign, href: "/exchange-rates", enabled: true },
     ],
@@ -76,6 +93,33 @@ export function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const entityId = searchParams.get("entity") || "1"
   const entityInfo = ENTITY_NAMES[entityId] || ENTITY_NAMES["1"]
+
+  // ── ExpenseOne 미매칭 뱃지 카운트 ─────────────
+  const [expenseOneUnmatched, setExpenseOneUnmatched] = useState<number | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const refresh = async () => {
+      try {
+        const data = await fetchAPI<{ unmatched_count: number }>(
+          "/expenseone-match/unmatched-count",
+        )
+        if (!cancelled) setExpenseOneUnmatched(data.unmatched_count)
+      } catch {
+        // 조용히 실패 — 뱃지만 숨김
+      }
+    }
+    refresh()
+    const id = setInterval(refresh, 60_000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [pathname])
+
+  const badgeCounts: Record<string, number | null> = {
+    expenseone_unmatched: expenseOneUnmatched,
+  }
 
   useEffect(() => {
     setMobileOpen(false)
@@ -147,6 +191,9 @@ export function Sidebar() {
                   )
                 }
 
+                const badgeCount = item.badgeKey ? badgeCounts[item.badgeKey] : null
+                const showBadge = badgeCount !== null && badgeCount !== undefined && badgeCount > 0
+
                 return (
                   <li key={item.href}>
                     <Link
@@ -162,7 +209,19 @@ export function Sidebar() {
                       )}
                     >
                       <Icon className={cn("h-4 w-4 shrink-0", active && "text-accent")} />
-                      {item.label}
+                      <span className="flex-1 truncate">{item.label}</span>
+                      {showBadge && (
+                        <span
+                          className={cn(
+                            "inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full",
+                            "text-[10px] font-medium tabular-nums",
+                            "bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/30",
+                          )}
+                          aria-label={`${badgeCount}건 미매칭`}
+                        >
+                          {badgeCount! > 99 ? "99+" : badgeCount}
+                        </span>
+                      )}
                     </Link>
                   </li>
                 )
