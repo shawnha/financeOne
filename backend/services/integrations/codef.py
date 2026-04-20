@@ -40,18 +40,20 @@ CODEF_PRODUCTION_URL = "https://api.codef.io"
 CODEF_SANDBOX_URL = CODEF_DEMO_URL
 CODEF_TOKEN_URL = "https://oauth.codef.io/oauth/token"
 
-# Codef 기관 코드 (live API brute-force로 검증된 값, 2026-04-20)
+# Codef 기관 코드
+# 주의: 이전에 brute-force로 추정한 lotte=0301 / kb=0311은 뒤바뀐 값이었다.
+# Codef 지원팀 확인 결과 0301=KB국민카드, 0311=롯데카드 (2026-04-20 정정).
 ORG_CODES = {
     "woori_bank": "0020",
     "ibk_bank": "0003",
-    "lotte_card": "0301",
+    "lotte_card": "0311",     # ← 0301 (KB) 에서 정정. 롯데 CF-12803 재현 원인
     "bc_card": "0302",
     "samsung_card": "0303",
     "shinhan_card": "0304",   # 이전 0309는 우리카드. 0304가 진짜 신한
     "hyundai_card": "0305",
     "nh_card": "0306",
     "woori_card": "0309",     # 이전 0315는 무효. 0309가 진짜 우리카드
-    "kb_card": "0311",
+    "kb_card": "0301",        # ← 0311 (롯데) 에서 정정
     "hana_card": "0313",
 }
 
