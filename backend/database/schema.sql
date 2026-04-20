@@ -367,6 +367,26 @@ CREATE INDEX IF NOT EXISTS idx_eo_match_tx ON transaction_expenseone_match(trans
 CREATE UNIQUE INDEX IF NOT EXISTS uq_eo_match_expense ON transaction_expenseone_match(expense_id);
 CREATE INDEX IF NOT EXISTS idx_eo_match_type_conf ON transaction_expenseone_match(expense_type, is_confirmed);
 
+-- 16c. codef_api_log — Codef API 오류 기록 (transactionId 보존 — 기술 문의용)
+CREATE TABLE IF NOT EXISTS codef_api_log (
+  id              SERIAL PRIMARY KEY,
+  entity_id       INTEGER,
+  organization    TEXT,                -- 'lotte_card' | 'woori_bank' | ...
+  endpoint        TEXT,
+  result_code     TEXT,                -- 'CF-00000' | 'CF-12803' | 'CF-04015' | ...
+  message         TEXT,
+  extra_message   TEXT,
+  transaction_id  TEXT,                -- Codef 문의용 식별자
+  is_error        BOOLEAN NOT NULL DEFAULT FALSE,
+  request_params  JSONB,               -- masked
+  response_body   JSONB,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_codef_log_created ON codef_api_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_codef_log_error ON codef_api_log(is_error, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_codef_log_entity_org ON codef_api_log(entity_id, organization, created_at DESC);
+
 -- 17. journal_entries — 분개 헤더
 CREATE TABLE IF NOT EXISTS journal_entries (
   id             SERIAL PRIMARY KEY,

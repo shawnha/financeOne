@@ -171,7 +171,38 @@ def encrypt_password(plain: str, public_key_pem: Optional[str] = None) -> str:
 
 
 class CodefError(Exception):
-    pass
+    """Codef API 오류. transactionId 등 컨텍스트를 포함해 tech 문의에 활용 가능."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: Optional[str] = None,
+        transaction_id: Optional[str] = None,
+        extra_message: Optional[str] = None,
+        endpoint: Optional[str] = None,
+        request_params: Optional[dict] = None,
+        response_body: Any = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.transaction_id = transaction_id
+        self.extra_message = extra_message
+        self.endpoint = endpoint
+        self.request_params = request_params
+        self.response_body = response_body
+
+    def to_dict(self) -> dict:
+        """UI/로그 직렬화용 — 민감 필드는 호출자가 _mask_sensitive 처리한 dict를 넘길 것."""
+        return {
+            "message": str(self),
+            "code": self.code,
+            "transaction_id": self.transaction_id,
+            "extra_message": self.extra_message,
+            "endpoint": self.endpoint,
+            "request_params": self.request_params,
+            "response_body": self.response_body,
+        }
 
 
 class CodefClient:
@@ -228,9 +259,11 @@ class CodefClient:
         resp.raise_for_status()
         data = _parse_codef_response(resp.text)
 
-        result = data.get("result", {})
+        result = data.get("result", {}) if isinstance(data, dict) else {}
         result_code = result.get("code", "")
-        body = data.get("data", {})
+        result_tx_id = result.get("transactionId")  # Codef tech 문의 식별자
+        body = data.get("data", {}) if isinstance(data, dict) else {}
+        masked_params = _mask_sensitive(params)
 
         # /v1/account/create 는 부분 성공 가능 — errorList에 실패 기관별 사유
         # result.code=CF-00000이어도 errorList에 내용 있을 수 있음 (부분 성공)
@@ -240,29 +273,47 @@ class CodefClient:
             item_code = first.get("code", "")
             item_msg = first.get("message", "")
             item_extra = first.get("extraMessage", "")
-            masked_params = _mask_sensitive(params)
+            item_tx_id = first.get("transactionId") or result_tx_id
             logger.warning(
-                "Codef per-account error: code=%s msg=%s extra=%s payload=%s",
-                item_code, item_msg, item_extra, masked_params,
+                "Codef per-account error: code=%s msg=%s extra=%s tx=%s payload=%s",
+                item_code, item_msg, item_extra, item_tx_id, masked_params,
             )
-            # 전체 응답도 실패로 취급
             full = f"{item_code} - {item_msg}"
             if item_extra:
                 full += f" | {item_extra}"
-            raise CodefError(f"Codef 계정 등록 실패: {full}")
+            if item_tx_id:
+                full += f" | tx={item_tx_id}"
+            raise CodefError(
+                f"Codef 계정 등록 실패: {full}",
+                code=item_code or None,
+                transaction_id=item_tx_id,
+                extra_message=item_extra or None,
+                endpoint=endpoint,
+                request_params=masked_params,
+                response_body=data,
+            )
 
         if result_code != "CF-00000":
             msg = result.get("message", "")
             extra = result.get("extraMessage", "") or result.get("extraInfo", "")
-            masked_params = _mask_sensitive(params)
             logger.warning(
-                "Codef non-OK response: code=%s msg=%s extra=%s endpoint=%s payload=%s data=%s",
-                result_code, msg, extra, endpoint, masked_params, body,
+                "Codef non-OK response: code=%s msg=%s extra=%s tx=%s endpoint=%s payload=%s data=%s",
+                result_code, msg, extra, result_tx_id, endpoint, masked_params, body,
             )
             full_msg = f"{result_code} - {msg}"
             if extra:
                 full_msg += f" | {extra}"
-            raise CodefError(f"Codef error: {full_msg}")
+            if result_tx_id:
+                full_msg += f" | tx={result_tx_id}"
+            raise CodefError(
+                f"Codef error: {full_msg}",
+                code=result_code or None,
+                transaction_id=result_tx_id,
+                extra_message=extra or None,
+                endpoint=endpoint,
+                request_params=masked_params,
+                response_body=data,
+            )
         # data는 dict 또는 list 모두 가능 (예: card-list는 list)
         return body if body is not None else {}
 

@@ -243,6 +243,74 @@ def _get_codef_client():
     return CodefClient(client_id, client_secret)
 
 
+def _log_codef_error(
+    conn: PgConnection,
+    entity_id: Optional[int],
+    organization: Optional[str],
+    err,
+) -> Optional[int]:
+    """CodefError 발생 시 codef_api_log에 기록.
+
+    호출 전 conn.rollback()을 먼저 수행하는 것을 가정 (동기화 실패한 tx 무효화).
+    로그는 별도 savepoint로 커밋.
+    """
+    import json as _json
+    from backend.services.integrations.codef import CodefError
+    tx_id = getattr(err, "transaction_id", None)
+    code = getattr(err, "code", None)
+    extra = getattr(err, "extra_message", None)
+    endpoint = getattr(err, "endpoint", None)
+    params = getattr(err, "request_params", None)
+    body = getattr(err, "response_body", None)
+    message = str(err)
+
+    # response_body가 dict/list/None 모두 가능 — JSONB로 직렬화
+    def _jsonable(v):
+        if v is None:
+            return None
+        try:
+            return _json.dumps(v, ensure_ascii=False, default=str)
+        except Exception:
+            return _json.dumps({"_unserializable": True})
+
+    cur = conn.cursor()
+    try:
+        # 앞선 rollback 직후 search_path가 reset될 수 있으므로 스키마 명시
+        cur.execute("SET search_path TO financeone, public")
+        cur.execute(
+            """
+            INSERT INTO financeone.codef_api_log
+                (entity_id, organization, endpoint, result_code, message,
+                 extra_message, transaction_id, is_error, request_params, response_body)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE, %s::jsonb, %s::jsonb)
+            RETURNING id
+            """,
+            [entity_id, organization, endpoint, code, message, extra, tx_id,
+             _jsonable(params), _jsonable(body)],
+        )
+        log_id = cur.fetchone()[0]
+        conn.commit()
+        return log_id
+    except Exception:
+        conn.rollback()
+        logger.exception("failed to persist codef_api_log entry")
+        return None
+    finally:
+        cur.close()
+
+
+def _codef_error_detail(err, log_id: Optional[int] = None) -> dict:
+    """HTTPException.detail 로 반환할 구조화된 에러 정보."""
+    return {
+        "message": str(err),
+        "code": getattr(err, "code", None),
+        "transaction_id": getattr(err, "transaction_id", None),
+        "extra_message": getattr(err, "extra_message", None),
+        "endpoint": getattr(err, "endpoint", None),
+        "log_id": log_id,
+    }
+
+
 def _resolve_connected_id(
     conn: PgConnection,
     entity_id: int,
@@ -455,7 +523,9 @@ def codef_connect(
         raise
     except CodefError as e:
         conn.rollback()
-        raise HTTPException(400, f"Codef 연결 실패: {str(e)}")
+        first_org = body.accounts[0].organization if body.accounts else None
+        log_id = _log_codef_error(conn, body.entity_id, first_org, e)
+        raise HTTPException(400, _codef_error_detail(e, log_id))
     except Exception as e:
         conn.rollback()
         logger.exception("Codef connect failed")
@@ -483,7 +553,8 @@ def codef_sync_bank(
         return result
     except CodefError as e:
         conn.rollback()
-        raise HTTPException(400, f"Codef 은행 sync 실패: {str(e)}")
+        log_id = _log_codef_error(conn, body.entity_id, "woori_bank", e)
+        raise HTTPException(400, _codef_error_detail(e, log_id))
     except Exception as e:
         conn.rollback()
         logger.exception("Codef bank sync failed")
@@ -511,13 +582,107 @@ def codef_sync_card(
         return result
     except CodefError as e:
         conn.rollback()
-        raise HTTPException(400, f"Codef 카드 sync 실패: {str(e)}")
+        log_id = _log_codef_error(conn, body.entity_id, body.card_type, e)
+        raise HTTPException(400, _codef_error_detail(e, log_id))
     except Exception as e:
         conn.rollback()
         logger.exception("Codef card sync failed")
         raise HTTPException(500, f"내부 오류: {type(e).__name__}")
     finally:
         client.close()
+
+
+@router.get("/codef/errors")
+def codef_errors(
+    entity_id: Optional[int] = None,
+    organization: Optional[str] = None,
+    limit: int = 20,
+    conn: PgConnection = Depends(get_db),
+):
+    """Codef 기술 문의용 최근 오류 로그.
+
+    각 항목에 transaction_id 포함 — Codef 측에 전달할 식별자.
+    """
+    cur = conn.cursor()
+    try:
+        limit = max(1, min(limit, 100))
+        where = ["is_error = TRUE"]
+        params: list = []
+        if entity_id is not None:
+            where.append("entity_id = %s")
+            params.append(entity_id)
+        if organization:
+            where.append("organization = %s")
+            params.append(organization)
+        cur.execute(
+            f"""
+            SELECT id, entity_id, organization, endpoint, result_code,
+                   message, extra_message, transaction_id, created_at
+            FROM financeone.codef_api_log
+            WHERE {' AND '.join(where)}
+            ORDER BY created_at DESC, id DESC
+            LIMIT %s
+            """,
+            params + [limit],
+        )
+        rows = cur.fetchall()
+        return {
+            "errors": [
+                {
+                    "id": r[0],
+                    "entity_id": r[1],
+                    "organization": r[2],
+                    "endpoint": r[3],
+                    "result_code": r[4],
+                    "message": r[5],
+                    "extra_message": r[6],
+                    "transaction_id": r[7],
+                    "created_at": r[8].isoformat() if r[8] else None,
+                }
+                for r in rows
+            ]
+        }
+    finally:
+        cur.close()
+
+
+@router.get("/codef/errors/{log_id}")
+def codef_error_detail(
+    log_id: int,
+    conn: PgConnection = Depends(get_db),
+):
+    """단건 상세 — 요청 파라미터(마스킹됨) + 전체 응답 body 포함."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT id, entity_id, organization, endpoint, result_code,
+                   message, extra_message, transaction_id, is_error,
+                   request_params, response_body, created_at
+            FROM financeone.codef_api_log
+            WHERE id = %s
+            """,
+            [log_id],
+        )
+        r = cur.fetchone()
+        if not r:
+            raise HTTPException(404, "log not found")
+        return {
+            "id": r[0],
+            "entity_id": r[1],
+            "organization": r[2],
+            "endpoint": r[3],
+            "result_code": r[4],
+            "message": r[5],
+            "extra_message": r[6],
+            "transaction_id": r[7],
+            "is_error": r[8],
+            "request_params": r[9],
+            "response_body": r[10],
+            "created_at": r[11].isoformat() if r[11] else None,
+        }
+    finally:
+        cur.close()
 
 
 # --- QuickBooks Online ---

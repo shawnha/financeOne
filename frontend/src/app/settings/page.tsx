@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect, Suspense } from "react"
-import { fetchAPI } from "@/lib/api"
+import { useCallback, useState, useEffect, Suspense } from "react"
+import { fetchAPI, APIError } from "@/lib/api"
 import { EntityTabs } from "@/components/entity-tabs"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -15,6 +15,8 @@ import {
   Wifi,
   Link,
   Receipt,
+  Copy,
+  AlertCircle,
 } from "lucide-react"
 
 interface ConnectionStatus {
@@ -70,6 +72,27 @@ interface CodefBankSyncResult {
   duplicates: number
   total_fetched: number
   environment?: string
+}
+
+interface CodefErrorDetail {
+  message: string
+  code: string | null
+  transaction_id: string | null
+  extra_message: string | null
+  endpoint: string | null
+  log_id: number | null
+}
+
+interface CodefErrorLogEntry {
+  id: number
+  entity_id: number | null
+  organization: string | null
+  endpoint: string | null
+  result_code: string | null
+  message: string | null
+  extra_message: string | null
+  transaction_id: string | null
+  created_at: string | null
 }
 
 type CodefOrg =
@@ -173,6 +196,9 @@ function SettingsContent() {
   })
   const [codefSyncResult, setCodefSyncResult] = useState<string | null>(null)
   const [codefError, setCodefError] = useState<string | null>(null)
+  const [codefErrorDetail, setCodefErrorDetail] = useState<CodefErrorDetail | null>(null)
+  const [codefErrorLog, setCodefErrorLog] = useState<CodefErrorLogEntry[]>([])
+  const [codefErrorLogLoading, setCodefErrorLogLoading] = useState(false)
   const [qboStatus, setQboStatus] = useState<ConnectionStatus | null>(null)
   const [qboSyncResult, setQboSyncResult] = useState<QBOSyncResult | null>(null)
   const [qboSeedResult, setQboSeedResult] = useState<QBOSeedResult | null>(null)
@@ -394,10 +420,57 @@ function SettingsContent() {
     )
   }
 
+  const handleCodefError = useCallback(
+    (err: unknown, fallback: string) => {
+      if (err instanceof APIError) {
+        const detail = err.detail
+        if (detail && typeof detail === "object" && "transaction_id" in detail) {
+          setCodefErrorDetail(detail as unknown as CodefErrorDetail)
+          setCodefError(err.message || fallback)
+          loadCodefErrorLog()
+          return
+        }
+      }
+      setCodefErrorDetail(null)
+      setCodefError(err instanceof Error ? err.message : fallback)
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
+
+  const loadCodefErrorLog = useCallback(async () => {
+    setCodefErrorLogLoading(true)
+    try {
+      const data = await fetchAPI<{ errors: CodefErrorLogEntry[] }>(
+        "/integrations/codef/errors?limit=20",
+      )
+      setCodefErrorLog(data.errors)
+    } catch {
+      // silent — 로그 섹션은 부가 기능
+    } finally {
+      setCodefErrorLogLoading(false)
+    }
+  }, [])
+
+  const copyToClipboard = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      alert(`${label} 복사됨:\n${text}`)
+    } catch {
+      // fallback
+      window.prompt(`${label} 복사`, text)
+    }
+  }
+
+  useEffect(() => {
+    loadCodefErrorLog()
+  }, [loadCodefErrorLog])
+
   const connectCodefOrg = async () => {
     if (!codefConnectOrg) return
     setTesting("codef-connect")
     setCodefError(null)
+    setCodefErrorDetail(null)
     try {
       const isBank = codefConnectOrg === "woori_bank"
       const account: Record<string, unknown> = {
@@ -432,7 +505,7 @@ function SettingsContent() {
       resetCodefForm()
       await loadCodefStatus()
     } catch (err) {
-      setCodefError(err instanceof Error ? err.message : "연결 실패")
+      handleCodefError(err, "연결 실패")
     } finally {
       setTesting(null)
     }
@@ -449,7 +522,7 @@ function SettingsContent() {
       })
       await loadCodefStatus()
     } catch (err) {
-      setCodefError(err instanceof Error ? err.message : "해제 실패")
+      handleCodefError(err, "해제 실패")
     } finally {
       setTesting(null)
     }
@@ -458,6 +531,7 @@ function SettingsContent() {
   const syncCodefOrg = async (org: CodefOrg) => {
     setTesting(`codef-sync-${org}`)
     setCodefError(null)
+    setCodefErrorDetail(null)
     setCodefSyncResult(null)
     try {
       if (org === "woori_bank") {
@@ -489,7 +563,7 @@ function SettingsContent() {
         )
       }
     } catch (err) {
-      setCodefError(err instanceof Error ? err.message : "동기화 실패")
+      handleCodefError(err, "동기화 실패")
     } finally {
       setTesting(null)
     }
@@ -998,9 +1072,62 @@ function SettingsContent() {
               )}
 
               {codefError && (
-                <div className="text-sm text-red-500">
-                  <XCircle className="inline h-4 w-4 mr-1" />
-                  {codefError}
+                <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm space-y-2">
+                  <div className="flex items-start gap-2 text-red-400">
+                    <XCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <span className="break-all">{codefError}</span>
+                  </div>
+                  {codefErrorDetail && (
+                    <div className="pl-6 space-y-1.5 text-xs">
+                      {codefErrorDetail.code && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground w-24 shrink-0">코드</span>
+                          <span className="font-mono text-red-300">{codefErrorDetail.code}</span>
+                        </div>
+                      )}
+                      {codefErrorDetail.transaction_id && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground w-24 shrink-0">transactionId</span>
+                          <span className="font-mono text-amber-300 break-all">
+                            {codefErrorDetail.transaction_id}
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 px-2 text-[10px]"
+                            onClick={() =>
+                              copyToClipboard(
+                                codefErrorDetail.transaction_id!,
+                                "transactionId",
+                              )
+                            }
+                          >
+                            <Copy className="h-3 w-3 mr-1" />
+                            복사
+                          </Button>
+                        </div>
+                      )}
+                      {codefErrorDetail.endpoint && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground w-24 shrink-0">endpoint</span>
+                          <span className="font-mono text-muted-foreground break-all">
+                            {codefErrorDetail.endpoint}
+                          </span>
+                        </div>
+                      )}
+                      {codefErrorDetail.extra_message && (
+                        <div className="flex items-start gap-2">
+                          <span className="text-muted-foreground w-24 shrink-0">extraMessage</span>
+                          <span className="text-muted-foreground break-all">
+                            {codefErrorDetail.extra_message}
+                          </span>
+                        </div>
+                      )}
+                      <div className="pt-1 text-[11px] text-muted-foreground/80">
+                        위 transactionId를 Codef 기술 문의에 전달하세요.
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1010,6 +1137,82 @@ function SettingsContent() {
                   {codefSyncResult}
                 </div>
               )}
+
+              {/* 최근 Codef 오류 로그 — 기술 문의용 transactionId 보존 */}
+              <div className="rounded-md border border-white/[0.05] p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <AlertCircle className="h-4 w-4 text-amber-400" />
+                    Codef 오류 로그 (최근 20건)
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={loadCodefErrorLog}
+                    disabled={codefErrorLogLoading}
+                    className="h-7 text-xs"
+                  >
+                    <RefreshCw
+                      className={`h-3 w-3 mr-1 ${codefErrorLogLoading ? "animate-spin" : ""}`}
+                    />
+                    새로고침
+                  </Button>
+                </div>
+                {codefErrorLog.length === 0 ? (
+                  <div className="text-xs text-muted-foreground py-2">
+                    기록된 오류가 없습니다.
+                  </div>
+                ) : (
+                  <div className="max-h-[320px] overflow-y-auto divide-y divide-white/[0.05]">
+                    {codefErrorLog.map((log) => (
+                      <div key={log.id} className="py-2 text-xs space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {log.result_code && (
+                            <span className="font-mono text-red-300">{log.result_code}</span>
+                          )}
+                          {log.organization && (
+                            <span className="rounded bg-white/[0.05] px-1.5 py-0.5 text-muted-foreground">
+                              {log.organization}
+                            </span>
+                          )}
+                          {log.created_at && (
+                            <span className="text-muted-foreground/70">
+                              {new Date(log.created_at).toLocaleString("ko-KR")}
+                            </span>
+                          )}
+                          {log.entity_id !== null && (
+                            <span className="text-muted-foreground/70">
+                              entity={log.entity_id}
+                            </span>
+                          )}
+                        </div>
+                        {log.message && (
+                          <div className="text-muted-foreground break-all">{log.message}</div>
+                        )}
+                        {log.transaction_id && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-muted-foreground shrink-0">transactionId</span>
+                            <span className="font-mono text-amber-300 break-all">
+                              {log.transaction_id}
+                            </span>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-6 px-2 text-[10px]"
+                              onClick={() =>
+                                copyToClipboard(log.transaction_id!, "transactionId")
+                              }
+                            >
+                              <Copy className="h-3 w-3 mr-1" />
+                              복사
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </>
           )}
         </CardContent>

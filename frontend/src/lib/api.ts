@@ -5,9 +5,19 @@ export class APIError extends Error {
   constructor(
     public status: number,
     message: string,
+    public detail?: unknown,
   ) {
     super(message)
   }
+}
+
+function extractMessage(detail: unknown, fallback: string): string {
+  if (typeof detail === "string") return detail
+  if (detail && typeof detail === "object" && "message" in detail) {
+    const m = (detail as { message: unknown }).message
+    if (typeof m === "string") return m
+  }
+  return fallback
 }
 
 export async function fetchAPI<T>(
@@ -26,7 +36,8 @@ export async function fetchAPI<T>(
     const body = await res
       .json()
       .catch(() => ({ detail: res.statusText }))
-    throw new APIError(res.status, body.detail || res.statusText)
+    const detail = body?.detail
+    throw new APIError(res.status, extractMessage(detail, res.statusText), detail)
   }
 
   return res.json()
