@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 _VERSION = (Path(__file__).resolve().parent.parent / "VERSION").read_text().strip()
 
 from backend.database.connection import init_pool, close_pool
-from backend.routers import entities, transactions, accounts, upload, dashboard, statements, slack, journal_entries, integrations, exchange_rates, intercompany, notes, cashflow, forecasts, card_settings
+from backend.routers import entities, transactions, accounts, upload, dashboard, statements, slack, journal_entries, integrations, exchange_rates, intercompany, notes, cashflow, forecasts, card_settings, expenseone_match
 
 
 @asynccontextmanager
@@ -48,6 +48,7 @@ app.include_router(notes.router)
 app.include_router(cashflow.router)
 app.include_router(forecasts.router)
 app.include_router(card_settings.router)
+app.include_router(expenseone_match.router)
 
 
 @app.get("/health")
