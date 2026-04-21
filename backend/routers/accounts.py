@@ -431,6 +431,31 @@ def create_member(
         )
         cols = [d[0] for d in cur.description]
         row = dict(zip(cols, cur.fetchone()))
+        new_member_id = row["id"]
+
+        # 카드번호 기반 자동 relink (exact + 뒤 3자리 fallback) — PATCH와 동일 정책
+        relinked = 0
+        if normalized_cards:
+            placeholders = ",".join(["%s"] * len(normalized_cards))
+            cur.execute(
+                f"""UPDATE transactions SET member_id = %s
+                    WHERE entity_id = %s AND card_number IN ({placeholders})
+                      AND member_id IS NULL""",
+                [new_member_id, body.entity_id] + normalized_cards,
+            )
+            relinked += cur.rowcount
+            tails = list({c[-3:] for c in normalized_cards if c and len(c) >= 3})
+            if tails:
+                tail_ph = ",".join(["%s"] * len(tails))
+                cur.execute(
+                    f"""UPDATE transactions SET member_id = %s
+                        WHERE entity_id = %s AND member_id IS NULL
+                          AND card_number IS NOT NULL AND LENGTH(card_number) >= 3
+                          AND RIGHT(card_number, 3) IN ({tail_ph})""",
+                    [new_member_id, body.entity_id] + tails,
+                )
+                relinked += cur.rowcount
+        row["relinked_transactions"] = relinked
         conn.commit()
         return row
     except Exception as e:

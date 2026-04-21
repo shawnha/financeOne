@@ -157,9 +157,9 @@ function MembersContent() {
   }
 
   // Open dialog for create
-  const handleAdd = () => {
+  const handleAdd = (prefillCard?: string) => {
     setEditingId(null)
-    setForm(EMPTY_FORM)
+    setForm({ ...EMPTY_FORM, card_numbers: prefillCard || "" })
     setDialogOpen(true)
   }
 
@@ -197,17 +197,27 @@ function MembersContent() {
     }
     try {
       if (editingId) {
-        await fetchAPI(`/accounts/members/${editingId}`, {
-          method: "PATCH",
-          body: JSON.stringify(body),
-        })
-        toast.success("멤버가 수정되었습니다")
+        const res = await fetchAPI<{ relinked_transactions?: number }>(
+          `/accounts/members/${editingId}`,
+          { method: "PATCH", body: JSON.stringify(body) },
+        )
+        const relinked = res.relinked_transactions ?? 0
+        toast.success(
+          relinked > 0
+            ? `멤버 수정 · ${relinked}건 거래 자동 연결`
+            : "멤버가 수정되었습니다",
+        )
       } else {
-        await fetchAPI("/accounts/members", {
-          method: "POST",
-          body: JSON.stringify(body),
-        })
-        toast.success("멤버가 추가되었습니다")
+        const res = await fetchAPI<{ relinked_transactions?: number }>(
+          "/accounts/members",
+          { method: "POST", body: JSON.stringify(body) },
+        )
+        const relinked = res.relinked_transactions ?? 0
+        toast.success(
+          relinked > 0
+            ? `멤버 추가 · ${relinked}건 거래 자동 연결`
+            : "멤버가 추가되었습니다",
+        )
       }
       setDialogOpen(false)
       load()
@@ -327,6 +337,17 @@ function MembersContent() {
                       <Link2 className="mr-1 h-3 w-3" />
                       {busy ? "배정중…" : "배정"}
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() => handleAdd(card.card_number)}
+                      className="h-8 text-xs"
+                      title="이 카드번호를 미리 채워 새 멤버 추가"
+                    >
+                      <Plus className="mr-1 h-3 w-3" />
+                      새 멤버
+                    </Button>
                   </div>
                 )
               })}
@@ -340,7 +361,7 @@ function MembersContent() {
           <CardTitle className="text-base font-medium">
             멤버 목록 ({members.length}명)
           </CardTitle>
-          <Button size="sm" onClick={handleAdd}>
+          <Button size="sm" onClick={() => handleAdd()}>
             <Plus className="mr-1.5 h-4 w-4" />
             멤버 추가
           </Button>
