@@ -972,16 +972,21 @@ function ForecastModal({
     }
   }, [editItem])
 
-  // 라인 합계 자동 계산 → amount 필드 동기화 (라인이 있을 때만)
+  // 라인 합계 자동 계산 — 유효 라인(이름·금액 둘 다 있는 것)이 1개 이상 있을 때만
+  // amount 필드를 덮어쓴다. 그 전에는 기존 금액 유지.
+  const validLineCount = useMemo(
+    () => lineItems.filter(l => (l.name || "").trim() && (Number(l.amount) || 0) > 0).length,
+    [lineItems],
+  )
   const lineSum = useMemo(
     () => lineItems.reduce((s, l) => s + (Number(l.amount) || 0), 0),
     [lineItems],
   )
   useEffect(() => {
-    if (lineItems.length > 0) {
-      setAmount(lineSum ? lineSum.toLocaleString() : "0")
+    if (validLineCount > 0) {
+      setAmount(lineSum.toLocaleString())
     }
-  }, [lineSum, lineItems.length])
+  }, [lineSum, validLineCount])
 
   // Fetch internal accounts on mount
   useEffect(() => {
@@ -1244,7 +1249,7 @@ function ForecastModal({
           )}
           <div>
             <label className="text-xs text-muted-foreground">
-              금액 {lineItems.length > 0 && <span className="text-blue-400">· 세부 합계 자동</span>}
+              금액 {validLineCount > 0 && <span className="text-blue-400">· 세부 합계 자동</span>}
             </label>
             <Input
               type="text"
@@ -1252,14 +1257,14 @@ function ForecastModal({
               placeholder="0"
               value={amount}
               onChange={(e) => {
-                if (lineItems.length > 0) return  // 라인 있으면 직접 수정 막음
+                if (validLineCount > 0) return  // 유효 라인 있으면 직접 수정 막음
                 const raw = e.target.value.replace(/[^\d]/g, "")
                 setAmount(raw ? Number(raw).toLocaleString() : "")
               }}
-              readOnly={lineItems.length > 0}
-              className={cn("mt-1 font-mono", lineItems.length > 0 && "bg-muted/30 cursor-not-allowed")}
+              readOnly={validLineCount > 0}
+              className={cn("mt-1 font-mono", validLineCount > 0 && "bg-muted/30 cursor-not-allowed")}
             />
-            {prevActual !== null && !isEdit && lineItems.length === 0 && (
+            {prevActual !== null && !isEdit && validLineCount === 0 && (
               <button
                 type="button"
                 onClick={() => setAmount(prevActual.toLocaleString())}
@@ -1275,7 +1280,7 @@ function ForecastModal({
             <div className="flex items-center justify-between">
               <label className="text-xs text-muted-foreground">
                 세부 항목 (선택)
-                {lineItems.length > 0 && (
+                {validLineCount > 0 && (
                   <span className="ml-2 text-[10px]">— 합계 ₩{lineSum.toLocaleString()}</span>
                 )}
               </label>
