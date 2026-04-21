@@ -38,6 +38,12 @@ import { AccountCombobox } from "@/components/account-combobox"
 
 // ── Types ──────────────────────────────────────────────
 
+interface ForecastLineItem {
+  name: string
+  amount: number
+  note?: string | null
+}
+
 interface ForecastItem {
   id: number
   category: string
@@ -54,6 +60,7 @@ interface ForecastItem {
   actual_from_transactions: number | null
   expected_day: number | null
   payment_method: string
+  line_items: ForecastLineItem[] | null
 }
 
 interface UnbudgetedActual {
@@ -946,6 +953,8 @@ function ForecastModal({
   const [recurring, setRecurring] = useState(editItem?.is_recurring || false)
   const [expectedDay, setExpectedDay] = useState(editItem?.expected_day ? String(editItem.expected_day) : "")
   const [paymentMethod, setPaymentMethod] = useState<"bank" | "card">((editItem?.payment_method as "bank" | "card") || "bank")
+  const [note, setNote] = useState(editItem?.note ?? "")
+  const [lineItems, setLineItems] = useState<ForecastLineItem[]>(editItem?.line_items ?? [])
   const [saving, setSaving] = useState(false)
 
   // Sync state when editItem changes
@@ -958,8 +967,21 @@ function ForecastModal({
       setRecurring(editItem.is_recurring)
       setExpectedDay(editItem.expected_day ? String(editItem.expected_day) : "")
       setPaymentMethod((editItem.payment_method as "bank" | "card") || "bank")
+      setNote(editItem.note ?? "")
+      setLineItems(editItem.line_items ?? [])
     }
   }, [editItem])
+
+  // 라인 합계 자동 계산 → amount 필드 동기화 (라인이 있을 때만)
+  const lineSum = useMemo(
+    () => lineItems.reduce((s, l) => s + (Number(l.amount) || 0), 0),
+    [lineItems],
+  )
+  useEffect(() => {
+    if (lineItems.length > 0) {
+      setAmount(lineSum ? lineSum.toLocaleString() : "0")
+    }
+  }, [lineSum, lineItems.length])
 
   // Fetch internal accounts on mount
   useEffect(() => {
@@ -1014,10 +1036,22 @@ function ForecastModal({
     setRecurring(false)
     setExpectedDay("")
     setPaymentMethod("bank")
+    setNote("")
+    setLineItems([])
   }
 
   const handleSave = async () => {
     if ((!category && !selectedAccountId) || !amount) return
+    // line_items 정제 — 이름·금액 둘 다 있는 것만
+    const cleanLines = lineItems
+      .map(l => ({
+        name: (l.name || "").trim(),
+        amount: Number(l.amount) || 0,
+        note: l.note?.trim() || null,
+      }))
+      .filter(l => l.name && l.amount > 0)
+    const lineItemsPayload = cleanLines.length > 0 ? cleanLines : null
+
     setSaving(true)
     try {
       if (isEdit && editItem) {
@@ -1032,6 +1066,8 @@ function ForecastModal({
             is_recurring: recurring,
             expected_day: expectedDay ? Number(expectedDay) : null,
             payment_method: paymentMethod,
+            note: note.trim() || null,
+            line_items: lineItemsPayload,
           }),
         })
       } else if (isParentAccount && childAccounts.length > 0) {
@@ -1074,6 +1110,8 @@ function ForecastModal({
             internal_account_id: selectedAccountId ? Number(selectedAccountId) : null,
             expected_day: expectedDay ? Number(expectedDay) : null,
             payment_method: paymentMethod,
+            note: note.trim() || null,
+            line_items: lineItemsPayload,
           }),
         })
       }
@@ -1205,19 +1243,23 @@ function ForecastModal({
             </>
           )}
           <div>
-            <label className="text-xs text-muted-foreground">금액</label>
+            <label className="text-xs text-muted-foreground">
+              금액 {lineItems.length > 0 && <span className="text-blue-400">· 세부 합계 자동</span>}
+            </label>
             <Input
               type="text"
               inputMode="numeric"
               placeholder="0"
               value={amount}
               onChange={(e) => {
+                if (lineItems.length > 0) return  // 라인 있으면 직접 수정 막음
                 const raw = e.target.value.replace(/[^\d]/g, "")
                 setAmount(raw ? Number(raw).toLocaleString() : "")
               }}
-              className="mt-1 font-mono"
+              readOnly={lineItems.length > 0}
+              className={cn("mt-1 font-mono", lineItems.length > 0 && "bg-muted/30 cursor-not-allowed")}
             />
-            {prevActual !== null && !isEdit && (
+            {prevActual !== null && !isEdit && lineItems.length === 0 && (
               <button
                 type="button"
                 onClick={() => setAmount(prevActual.toLocaleString())}
@@ -1225,6 +1267,71 @@ function ForecastModal({
               >
                 전월 {isParentAccount ? "하위 합계" : "실적"}: ₩{prevActual.toLocaleString()} ← 클릭하여 적용
               </button>
+            )}
+          </div>
+
+          {/* 세부 라인 항목 — 여러 거래처를 합쳐서 하나의 forecast로 */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-muted-foreground">
+                세부 항목 (선택)
+                {lineItems.length > 0 && (
+                  <span className="ml-2 text-[10px]">— 합계 ₩{lineSum.toLocaleString()}</span>
+                )}
+              </label>
+              <button
+                type="button"
+                onClick={() => setLineItems((prev) => [...prev, { name: "", amount: 0 }])}
+                className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+              >
+                + 세부 추가
+              </button>
+            </div>
+            {lineItems.length > 0 && (
+              <div className="space-y-1.5 rounded-md border border-white/[0.05] bg-white/[0.02] p-2">
+                {lineItems.map((li, idx) => (
+                  <div key={idx} className="flex items-center gap-1.5">
+                    <Input
+                      placeholder="이름 (예: A법률사무소)"
+                      value={li.name}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        setLineItems((prev) =>
+                          prev.map((p, i) => (i === idx ? { ...p, name: v } : p)),
+                        )
+                      }}
+                      className="h-8 text-xs flex-1"
+                    />
+                    <Input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="0"
+                      value={li.amount ? Number(li.amount).toLocaleString() : ""}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/[^\d]/g, "")
+                        const num = raw ? Number(raw) : 0
+                        setLineItems((prev) =>
+                          prev.map((p, i) => (i === idx ? { ...p, amount: num } : p)),
+                        )
+                      }}
+                      className="h-8 text-xs font-mono w-28 text-right"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setLineItems((prev) => prev.filter((_, i) => i !== idx))
+                      }
+                      className="text-muted-foreground hover:text-rose-400 text-sm px-1"
+                      title="세부 삭제"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                <p className="text-[10px] text-muted-foreground/70 pt-1">
+                  이름·금액이 둘 다 있는 행만 저장됩니다. 합계가 금액 필드에 반영됩니다.
+                </p>
+              </div>
             )}
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -1252,6 +1359,16 @@ function ForecastModal({
                 <option value="card">카드</option>
               </select>
             </div>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">메모</label>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="필요 시 추가 설명..."
+              rows={2}
+              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring"
+            />
           </div>
           <label className="flex items-center gap-2 cursor-pointer">
             <Checkbox checked={recurring} onCheckedChange={(v) => setRecurring(!!v)} />
@@ -1362,6 +1479,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
         actual_from_transactions: null,
         expected_day: null,
         payment_method: "bank",
+        line_items: null,
       }
 
       nodes.push({

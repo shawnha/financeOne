@@ -3,6 +3,7 @@
 카테고리별 예상 입금/출금을 생성·조회·수정·삭제.
 """
 
+import json
 from fastapi import APIRouter, Query, Depends, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -12,6 +13,12 @@ from backend.database.connection import get_db
 from backend.utils.db import fetch_all
 
 router = APIRouter(prefix="/api/forecasts", tags=["forecasts"])
+
+
+class ForecastLineItem(BaseModel):
+    name: str
+    amount: float
+    note: Optional[str] = None
 
 
 class ForecastCreate(BaseModel):
@@ -27,6 +34,7 @@ class ForecastCreate(BaseModel):
     note: Optional[str] = None
     expected_day: Optional[int] = Field(None, ge=1, le=31)  # CQ-2
     payment_method: str = "bank"
+    line_items: Optional[list[ForecastLineItem]] = None
 
 
 class ForecastUpdate(BaseModel):
@@ -40,6 +48,19 @@ class ForecastUpdate(BaseModel):
     note: Optional[str] = None
     expected_day: Optional[int] = Field(None, ge=1, le=31)
     payment_method: Optional[str] = None
+    line_items: Optional[list[ForecastLineItem]] = None
+
+
+def _line_items_sum(line_items: Optional[list[ForecastLineItem]]) -> Optional[float]:
+    if not line_items:
+        return None
+    return float(sum(li.amount for li in line_items))
+
+
+def _line_items_json(line_items: Optional[list[ForecastLineItem]]) -> Optional[str]:
+    if line_items is None:
+        return None
+    return json.dumps([li.model_dump() for li in line_items], ensure_ascii=False)
 
 
 @router.get("")
@@ -57,7 +78,8 @@ def list_forecasts(
             SELECT f.id, f.entity_id, f.year, f.month, f.category, f.subcategory, f.type,
                    f.forecast_amount, f.actual_amount, f.is_recurring,
                    f.internal_account_id, ia.name AS internal_account_name,
-                   f.note, f.expected_day, f.payment_method, f.created_at, f.updated_at
+                   f.note, f.expected_day, f.payment_method, f.line_items,
+                   f.created_at, f.updated_at
             FROM forecasts f
             LEFT JOIN internal_accounts ia ON f.internal_account_id = ia.id
             WHERE f.entity_id = %s AND f.year = %s AND f.month = %s
@@ -71,7 +93,8 @@ def list_forecasts(
             SELECT f.id, f.entity_id, f.year, f.month, f.category, f.subcategory, f.type,
                    f.forecast_amount, f.actual_amount, f.is_recurring,
                    f.internal_account_id, ia.name AS internal_account_name,
-                   f.note, f.expected_day, f.payment_method, f.created_at, f.updated_at
+                   f.note, f.expected_day, f.payment_method, f.line_items,
+                   f.created_at, f.updated_at
             FROM forecasts f
             LEFT JOIN internal_accounts ia ON f.internal_account_id = ia.id
             WHERE f.entity_id = %s AND f.year = %s
@@ -95,13 +118,18 @@ def create_forecast(
         raise HTTPException(400, "type must be 'in' or 'out'")
 
     cur = conn.cursor()
+    # line_items가 있으면 합계를 forecast_amount로 자동 세팅
+    line_sum = _line_items_sum(body.line_items)
+    effective_amount = line_sum if line_sum is not None else body.forecast_amount
+    line_json = _line_items_json(body.line_items)
+
     cur.execute(
         """
         INSERT INTO forecasts
             (entity_id, year, month, category, subcategory, type,
              forecast_amount, is_recurring, internal_account_id, note,
-             expected_day, payment_method)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             expected_day, payment_method, line_items)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
         ON CONFLICT (entity_id, year, month, internal_account_id, type)
           WHERE internal_account_id IS NOT NULL
         DO UPDATE SET forecast_amount = EXCLUDED.forecast_amount,
@@ -110,13 +138,14 @@ def create_forecast(
                       note = EXCLUDED.note,
                       expected_day = EXCLUDED.expected_day,
                       payment_method = EXCLUDED.payment_method,
+                      line_items = EXCLUDED.line_items,
                       updated_at = NOW()
         RETURNING id
         """,
         [body.entity_id, body.year, body.month, body.category,
-         body.subcategory, body.type, body.forecast_amount,
+         body.subcategory, body.type, effective_amount,
          body.is_recurring, body.internal_account_id, body.note,
-         body.expected_day, body.payment_method],
+         body.expected_day, body.payment_method, line_json],
     )
     forecast_id = cur.fetchone()[0]
     conn.commit()
@@ -170,6 +199,15 @@ def update_forecast(
     if body.payment_method is not None:
         updates.append("payment_method = %s")
         params.append(body.payment_method)
+    if body.line_items is not None:
+        # line_items 업데이트 시 forecast_amount도 자동 재계산 (명시적 forecast_amount 있으면 존중)
+        updates.append("line_items = %s::jsonb")
+        params.append(_line_items_json(body.line_items))
+        if body.forecast_amount is None:
+            line_sum = _line_items_sum(body.line_items)
+            if line_sum is not None:
+                updates.append("forecast_amount = %s")
+                params.append(line_sum)
 
     if not updates:
         raise HTTPException(400, "No fields to update")
