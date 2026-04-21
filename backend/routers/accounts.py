@@ -579,6 +579,156 @@ def delete_member(
 
 
 # ---------------------------------------------------------------------------
+# 미매칭 카드 — 멤버 관리 UI 지원 엔드포인트
+# ---------------------------------------------------------------------------
+
+CARD_SOURCE_TYPES = (
+    "lotte_card", "codef_lotte_card",
+    "woori_card", "codef_woori_card",
+    "shinhan_card", "codef_shinhan_card",
+    "bc_card", "samsung_card", "hyundai_card",
+    "nh_card", "kb_card", "hana_card",
+)
+
+_SOURCE_LABELS = {
+    "lotte_card": "롯데카드", "codef_lotte_card": "롯데카드(Codef)",
+    "woori_card": "우리카드", "codef_woori_card": "우리카드(Codef)",
+    "shinhan_card": "신한카드", "codef_shinhan_card": "신한카드(Codef)",
+    "bc_card": "BC카드", "samsung_card": "삼성카드", "hyundai_card": "현대카드",
+    "nh_card": "NH카드", "kb_card": "KB국민카드", "hana_card": "하나카드",
+}
+
+
+@router.get("/members/unmatched-cards")
+def list_unmatched_cards(
+    entity_id: int = Query(...),
+    conn: PgConnection = Depends(get_db),
+):
+    """멤버 미배정 카드 목록 — 멤버 관리 UI용.
+
+    같은 (card_number, source_type)에 해당하는 transactions 중 member_id가
+    NULL인 건을 그룹핑. tx_count + 최근 거래 날짜 반환.
+    """
+    cur = conn.cursor()
+    try:
+        placeholders = ",".join(["%s"] * len(CARD_SOURCE_TYPES))
+        cur.execute(
+            f"""
+            SELECT source_type, card_number, COUNT(*) AS tx_count,
+                   MIN(date) AS first_date, MAX(date) AS last_date,
+                   COALESCE(SUM(CASE WHEN type='out' AND NOT is_cancel THEN amount
+                                     WHEN type='in'  AND is_cancel THEN -amount
+                                     ELSE 0 END), 0) AS net_amount
+            FROM transactions
+            WHERE entity_id = %s
+              AND member_id IS NULL
+              AND card_number IS NOT NULL
+              AND source_type IN ({placeholders})
+            GROUP BY source_type, card_number
+            ORDER BY tx_count DESC, source_type, card_number
+            """,
+            [entity_id, *CARD_SOURCE_TYPES],
+        )
+        rows = cur.fetchall()
+        return {
+            "cards": [
+                {
+                    "source_type": r[0],
+                    "source_label": _SOURCE_LABELS.get(r[0], r[0]),
+                    "card_number": r[1],
+                    "tx_count": r[2],
+                    "first_date": r[3].isoformat() if r[3] else None,
+                    "last_date": r[4].isoformat() if r[4] else None,
+                    "net_amount": float(r[5] or 0),
+                }
+                for r in rows
+            ]
+        }
+    finally:
+        cur.close()
+
+
+class AssignCardBody(BaseModel):
+    card_number: str
+
+
+@router.post("/members/{member_id}/assign-card")
+def assign_card_to_member(
+    member_id: int,
+    body: AssignCardBody,
+    conn: PgConnection = Depends(get_db),
+):
+    """카드번호를 특정 멤버에게 배정.
+
+    - 카드번호를 '****XXXX' 포맷으로 정규화해 member.card_numbers에 append
+      (중복 시 skip)
+    - 해당 card_number의 미연결 transactions (exact + 뒤 3자리 fallback)의
+      member_id를 업데이트
+    """
+    cur = conn.cursor()
+    try:
+        normalized = _normalize_card_number(body.card_number)
+        if not normalized:
+            raise HTTPException(400, "invalid card_number")
+
+        # 멤버 정보 + 기존 카드 조회
+        cur.execute(
+            "SELECT entity_id, name, card_numbers FROM members WHERE id = %s AND is_active = true",
+            [member_id],
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "member not found or inactive")
+        entity_id, name, existing_cards = row
+        existing_cards = existing_cards or []
+
+        # append (중복 아닐 때만)
+        if normalized not in existing_cards:
+            new_cards = list(existing_cards) + [normalized]
+            cur.execute(
+                "UPDATE members SET card_numbers = %s WHERE id = %s",
+                [new_cards, member_id],
+            )
+        else:
+            new_cards = existing_cards
+
+        # transactions relink: exact + 뒤 3자리 fallback
+        tail3 = normalized[-3:] if len(normalized) >= 3 else None
+        cur.execute(
+            """
+            UPDATE transactions
+            SET member_id = %s
+            WHERE entity_id = %s
+              AND member_id IS NULL
+              AND card_number IS NOT NULL
+              AND (
+                card_number = %s
+                OR (LENGTH(card_number) >= 3 AND RIGHT(card_number, 3) = %s)
+              )
+            """,
+            [member_id, entity_id, normalized, tail3 or ""],
+        )
+        relinked = cur.rowcount
+        conn.commit()
+        return {
+            "ok": True,
+            "member_id": member_id,
+            "member_name": name,
+            "card_number": normalized,
+            "relinked_transactions": relinked,
+            "card_numbers": new_cards,
+        }
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, str(e))
+    finally:
+        cur.close()
+
+
+# ---------------------------------------------------------------------------
 # Mapping rules — CRUD
 # ---------------------------------------------------------------------------
 

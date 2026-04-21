@@ -22,7 +22,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import {
-  Users, Plus, Trash2, AlertTriangle,
+  Users, Plus, Trash2, AlertTriangle, CreditCard, Link2,
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -37,6 +37,16 @@ interface Member {
   card_numbers: string[]
   slack_user_id: string | null
   tx_count: number | null
+}
+
+interface UnmatchedCard {
+  source_type: string
+  source_label: string
+  card_number: string
+  tx_count: number
+  first_date: string | null
+  last_date: string | null
+  net_amount: number
 }
 
 type MemberRole = "admin" | "member" | "corporate" | "staff"
@@ -93,16 +103,23 @@ function MembersContent() {
   const [form, setForm] = useState<FormData>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Member | null>(null)
+  const [unmatchedCards, setUnmatchedCards] = useState<UnmatchedCard[]>([])
+  const [cardAssignMemberId, setCardAssignMemberId] = useState<Record<string, string>>({})
+  const [cardAssignBusy, setCardAssignBusy] = useState<string | null>(null)
 
   // Fetch members
   const load = useCallback(async () => {
     if (!entityId) return
     setLoading(true)
     try {
-      const data = await fetchAPI<Member[]>(
-        `/accounts/members?entity_id=${entityId}`,
-      )
-      setMembers(data)
+      const [memberList, unmatched] = await Promise.all([
+        fetchAPI<Member[]>(`/accounts/members?entity_id=${entityId}`),
+        fetchAPI<{ cards: UnmatchedCard[] }>(
+          `/accounts/members/unmatched-cards?entity_id=${entityId}`,
+        ),
+      ])
+      setMembers(memberList)
+      setUnmatchedCards(unmatched.cards)
     } catch {
       toast.error("멤버 목록을 불러오지 못했습니다")
     } finally {
@@ -113,6 +130,31 @@ function MembersContent() {
   useEffect(() => {
     load()
   }, [load])
+
+  const handleAssignCard = async (card: UnmatchedCard) => {
+    const key = `${card.source_type}:${card.card_number}`
+    const targetMemberId = cardAssignMemberId[key]
+    if (!targetMemberId) {
+      toast.error("배정할 멤버를 선택해주세요")
+      return
+    }
+    setCardAssignBusy(key)
+    try {
+      const res = await fetchAPI<{ relinked_transactions: number; member_name: string }>(
+        `/accounts/members/${targetMemberId}/assign-card`,
+        {
+          method: "POST",
+          body: JSON.stringify({ card_number: card.card_number }),
+        },
+      )
+      toast.success(`${res.member_name}에게 배정 · ${res.relinked_transactions}건 거래 연결`)
+      await load()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "배정 실패")
+    } finally {
+      setCardAssignBusy(null)
+    }
+  }
 
   // Open dialog for create
   const handleAdd = () => {
@@ -220,6 +262,79 @@ function MembersContent() {
 
   return (
     <>
+      {/* 미매칭 카드 섹션 — 멤버에 배정되지 않은 카드번호 목록 */}
+      {unmatchedCards.length > 0 && (
+        <Card className="mb-4 border-amber-500/30 bg-amber-500/[0.02]">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base font-medium">
+              <CreditCard className="h-4 w-4 text-amber-400" />
+              미매칭 카드
+              <Badge variant="outline" className="border-amber-500/30 text-amber-300">
+                {unmatchedCards.length}장
+              </Badge>
+            </CardTitle>
+            <p className="text-xs text-muted-foreground mt-1">
+              거래는 있지만 어떤 멤버에게도 배정되지 않은 카드입니다. 멤버를 선택해 배정하면 관련 거래가 자동 연결됩니다.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {unmatchedCards.map((card) => {
+                const key = `${card.source_type}:${card.card_number}`
+                const selected = cardAssignMemberId[key] || ""
+                const busy = cardAssignBusy === key
+                return (
+                  <div
+                    key={key}
+                    className="flex items-center gap-3 rounded-lg border border-white/[0.05] bg-background/50 px-3 py-2.5"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 text-sm">
+                        <span className="font-mono text-foreground">{card.card_number}</span>
+                        <Badge variant="outline" className="text-[10px]">
+                          {card.source_label}
+                        </Badge>
+                      </div>
+                      <div className="mt-1 text-[11px] text-muted-foreground">
+                        {card.tx_count}건 · {card.first_date?.slice(5)}~{card.last_date?.slice(5)} ·
+                        {" "}₩ {Math.abs(card.net_amount).toLocaleString()}
+                      </div>
+                    </div>
+                    <Select
+                      value={selected}
+                      onValueChange={(v) =>
+                        setCardAssignMemberId((prev) => ({ ...prev, [key]: v }))
+                      }
+                    >
+                      <SelectTrigger className="h-8 w-[160px] text-xs">
+                        <SelectValue placeholder="멤버 선택" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {members.map((m) => (
+                          <SelectItem key={m.id} value={String(m.id)}>
+                            {m.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!selected || busy}
+                      onClick={() => handleAssignCard(card)}
+                      className="h-8 text-xs"
+                    >
+                      <Link2 className="mr-1 h-3 w-3" />
+                      {busy ? "배정중…" : "배정"}
+                    </Button>
+                  </div>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base font-medium">
