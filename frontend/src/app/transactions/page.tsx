@@ -151,6 +151,7 @@ interface Filters {
   slackMatched: boolean
   unclassified: boolean
   unconfirmed: boolean
+  hideCancelled: boolean
 }
 
 type EditingCell = {
@@ -213,6 +214,7 @@ const INITIAL_FILTERS: Filters = {
   slackMatched: false,
   unclassified: false,
   unconfirmed: false,
+  hideCancelled: true,
 }
 
 // ---------------------------------------------------------------------------
@@ -429,6 +431,7 @@ export default function TransactionsPage() {
     if (filters.slackMatched) params.set("slack_matched", "true")
     if (filters.unclassified) params.set("unclassified", "true")
     if (filters.unconfirmed) params.set("unconfirmed", "true")
+    if (filters.hideCancelled) params.set("hide_cancelled", "true")
 
     try {
       const result = await fetchAPI<PaginatedResponse>(`/transactions?${params.toString()}`)
@@ -440,7 +443,7 @@ export default function TransactionsPage() {
       setErrorMsg(msg)
       setViewState("error")
     }
-  }, [entityId, page, perPage, debouncedSearch, filters.dateFrom, filters.dateTo, filters.memberId, filters.internalAccountId, filters.standardAccountId, filters.sourceType, filters.txType, filters.mappingSource, filters.recentlyMapped, filters.slackMatched, filters.unclassified, filters.unconfirmed])
+  }, [entityId, page, perPage, debouncedSearch, filters.dateFrom, filters.dateTo, filters.memberId, filters.internalAccountId, filters.standardAccountId, filters.sourceType, filters.txType, filters.mappingSource, filters.recentlyMapped, filters.slackMatched, filters.unclassified, filters.unconfirmed, filters.hideCancelled])
 
   useEffect(() => {
     fetchTransactions()
@@ -1019,6 +1022,22 @@ export default function TransactionsPage() {
             )}
           >
             미확정
+          </button>
+
+          {/* Hide cancelled toggle — 기본 ON. 취소된 거래 + 페어된 원거래 숨김 */}
+          <button
+            onClick={() => updateFilter("hideCancelled", !filters.hideCancelled)}
+            className={cn(
+              "h-8 px-3 rounded-full border text-xs font-medium transition-colors",
+              filters.hideCancelled
+                ? "border-white/10 text-muted-foreground hover:bg-white/[0.04]"
+                : "bg-rose-500/15 text-rose-300 border-rose-500/30",
+            )}
+            title={filters.hideCancelled
+              ? "취소된 거래 + 같은 날·금액의 원승인 건을 숨기는 중 (클릭 시 모두 표시)"
+              : "취소 거래 모두 표시 중 (클릭 시 숨김)"}
+          >
+            {filters.hideCancelled ? "취소 숨김" : "취소 포함"}
           </button>
 
           {/* Filter expand button (opens Tier 2) */}

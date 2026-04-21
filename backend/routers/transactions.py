@@ -42,6 +42,7 @@ def list_transactions(
     slack_matched: Optional[bool] = None,
     unclassified: Optional[bool] = None,
     unconfirmed: Optional[bool] = None,
+    hide_cancelled: Optional[bool] = None,
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     conn: PgConnection = Depends(get_db),
@@ -90,6 +91,22 @@ def list_transactions(
         where.append("t.is_confirmed = false AND t.internal_account_id IS NULL")
     if unconfirmed:
         where.append("t.is_confirmed = false AND t.internal_account_id IS NOT NULL")
+    if hide_cancelled:
+        # 같은 날·같은 금액의 승인/취소 페어 및 단독 취소 row 모두 숨김
+        # (type='in' + is_cancel=TRUE) 또는 (해당 취소와 페어가 되는 원거래) 제외
+        where.append("""
+            t.is_cancel = FALSE
+            AND NOT EXISTS (
+                SELECT 1 FROM transactions c
+                WHERE c.entity_id = t.entity_id
+                  AND c.date = t.date
+                  AND c.amount = t.amount
+                  AND c.card_number IS NOT DISTINCT FROM t.card_number
+                  AND c.source_type = t.source_type
+                  AND c.is_cancel = TRUE
+                  AND c.id != t.id
+            )
+        """)
     need_join_for_search = False
     if search:
         # 숫자만이면 금액 검색 (±3%), 아니면 텍스트 검색 (내역/거래처/메모/내부계정명/날짜)
