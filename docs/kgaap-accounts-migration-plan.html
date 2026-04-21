@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FinanceOne — K-GAAP 표준계정 체계 전환 계획</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap');
+  :root{
+    --bg:#050508;--bg2:#0d1117;--bg3:#161b22;--bg4:#1f2937;
+    --border:rgba(255,255,255,0.06);--border2:rgba(255,255,255,0.12);
+    --text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;
+    --green:#22C55E;--red:#EF4444;--amber:#F59E0B;--blue:#3B82F6;
+    --purple:#8B5CF6;--cyan:#06B6D4;--pink:#EC4899;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;
+       font-size:14px;line-height:1.6;padding:40px 32px;max-width:1400px;margin:0 auto}
+  .mono{font-family:'Geist Mono',monospace}
+  .hero{margin-bottom:32px;padding-bottom:24px;border-bottom:1px solid var(--border)}
+  .hero h1{font-size:28px;font-weight:700;letter-spacing:-0.5px;margin-bottom:6px}
+  .hero h1 span{color:var(--cyan)}
+  .hero .sub{color:var(--text2);font-size:13px;margin-bottom:10px}
+  .hero .meta{font-size:11px;color:var(--text3)}
+  .hero .meta span{margin-right:16px}
+
+  section{margin-bottom:40px}
+  h2{font-size:17px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:10px}
+  h2 .num{font-size:11px;font-weight:500;color:var(--text3);
+          background:var(--bg3);padding:3px 8px;border-radius:6px;letter-spacing:.5px}
+
+  .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px}
+  .kpi{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px}
+  .kpi .l{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px}
+  .kpi .v{font-size:26px;font-weight:700;font-family:'Geist Mono',monospace;margin:4px 0}
+  .kpi.amber .v{color:var(--amber)}
+  .kpi.blue .v{color:var(--blue)}
+  .kpi.red .v{color:var(--red)}
+  .kpi.green .v{color:var(--green)}
+  .kpi .d{font-size:11px;color:var(--text2)}
+
+  table{width:100%;border-collapse:collapse;font-size:12.5px;background:var(--bg2);
+        border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  th{text-align:left;padding:10px 12px;background:var(--bg3);font-weight:500;
+     color:var(--text2);font-size:11px;text-transform:uppercase;letter-spacing:.5px;
+     border-bottom:1px solid var(--border)}
+  td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  td.mono, th.mono{font-family:'Geist Mono',monospace}
+  .tag{font-size:10px;padding:2px 8px;border-radius:4px;font-weight:500;
+       text-transform:uppercase;letter-spacing:.3px;display:inline-block}
+  .tag.asset{background:rgba(34,197,94,.12);color:#4ade80}
+  .tag.liability{background:rgba(239,68,68,.12);color:#f87171}
+  .tag.equity{background:rgba(139,92,246,.12);color:#c4b5fd}
+  .tag.revenue{background:rgba(59,130,246,.12);color:#93c5fd}
+  .tag.expense{background:rgba(245,158,11,.12);color:#fcd34d}
+  .tag.ledger{background:rgba(6,182,212,.15);color:var(--cyan)}
+  .tag.supp{background:rgba(100,116,139,.15);color:var(--text2)}
+  .tag.used{background:rgba(239,68,68,.15);color:#fca5a5}
+  .tag.unused{background:rgba(100,116,139,.1);color:var(--text3)}
+
+  .arrow{color:var(--text3);margin:0 8px}
+  .old{color:var(--text3);text-decoration:line-through}
+  .new{color:var(--cyan);font-weight:600}
+  .chg{display:flex;align-items:center;gap:6px}
+
+  .flow{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-top:16px}
+  .flow .step{background:var(--bg2);border:1px solid var(--border);border-radius:10px;
+              padding:14px;position:relative}
+  .flow .step .n{position:absolute;top:-8px;left:10px;background:var(--bg);padding:0 6px;
+                 font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px}
+  .flow .step .t{font-size:12px;font-weight:600;margin-bottom:3px}
+  .flow .step .d{font-size:10.5px;color:var(--text2);line-height:1.4}
+  .flow .step .tag{margin-top:6px}
+
+  .note{font-size:12px;color:var(--text2);padding:12px 14px;background:var(--bg3);
+        border-radius:8px;border-left:3px solid var(--cyan);margin:16px 0;line-height:1.6}
+  .note strong{color:var(--cyan)}
+  .warn{font-size:12px;padding:12px 14px;background:rgba(245,158,11,.05);
+        border-radius:8px;border-left:3px solid var(--amber);margin:16px 0;color:var(--text2)}
+  .warn strong{color:var(--amber)}
+
+  .scroll{max-height:480px;overflow-y:auto;border:1px solid var(--border);border-radius:12px}
+  .scroll table{border:none;border-radius:0}
+
+  .promises{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px}
+  .promise{padding:14px;background:var(--bg2);border-radius:10px;border:1px solid var(--border)}
+  .promise.keep{border-color:rgba(34,197,94,.3)}
+  .promise.change{border-color:rgba(6,182,212,.3)}
+  .promise .h{font-size:12px;font-weight:600;text-transform:uppercase;
+              letter-spacing:.5px;margin-bottom:8px}
+  .promise.keep .h{color:var(--green)}
+  .promise.change .h{color:var(--cyan)}
+  .promise ul{list-style:none;padding:0}
+  .promise li{font-size:12.5px;padding:4px 0 4px 18px;position:relative;color:var(--text2)}
+  .promise.keep li::before{content:'✓';position:absolute;left:0;color:var(--green);font-weight:700}
+  .promise.change li::before{content:'→';position:absolute;left:0;color:var(--cyan);font-weight:700}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>K-GAAP 표준계정 <span>체계 전환</span></h1>
+  <div class="sub">회계법인 상세 코드 체계 채택 — 한국 법인(한아원코리아·한아원리테일) 공용 / HOI는 별도 US GAAP 유지</div>
+  <div class="meta">
+    <span>📅 2026-04-21</span>
+    <span>📁 backend/database/seeds/standard_accounts_kgaap.py</span>
+    <span>🎯 목표: 가결산 자료와 FinanceOne 원장 line-by-line 대조</span>
+  </div>
+</div>
+
+<!-- KPI -->
+<div class="kpi-row">
+  <div class="kpi blue">
+    <div class="l">새 seed 규모</div>
+    <div class="v">70</div>
+    <div class="d">원장 실사용 49 + 표준 보완 21</div>
+  </div>
+  <div class="kpi amber">
+    <div class="l">코드 충돌</div>
+    <div class="v">12</div>
+    <div class="d">기존 code와 새 code가 다른 의미</div>
+  </div>
+  <div class="kpi green">
+    <div class="l">신규 추가</div>
+    <div class="v">57</div>
+    <div class="d">회계법인 세분 + 표준 보완</div>
+  </div>
+  <div class="kpi red">
+    <div class="l">기존 사용 중</div>
+    <div class="v">17 / 55</div>
+    <div class="d">internal_accounts/transactions 연결됨 — 재매핑 대상</div>
+  </div>
+</div>
+
+<!-- 약속 -->
+<section>
+<h2><span class="num">0</span> 보존 약속 &amp; 변경 범위</h2>
+<div class="promises">
+  <div class="promise keep">
+    <div class="h">건드리지 않는 것</div>
+    <ul>
+      <li><span class="mono">internal_accounts</span> 자체 (이름, 트리, is_recurring, is_active)</li>
+      <li>사용자 수동 매핑한 <span class="mono">transactions.internal_account_id</span></li>
+      <li><span class="mono">is_confirmed=TRUE</span> 거래의 확정 상태</li>
+      <li><span class="mono">mapping_rules</span> (AI/수동 학습)</li>
+    </ul>
+  </div>
+  <div class="promise change">
+    <div class="h">자동 교체되는 것</div>
+    <ul>
+      <li><span class="mono">internal_accounts.standard_account_id</span> 자동 재매핑 (검토 UI)</li>
+      <li><span class="mono">transactions.standard_account_id</span> 재계산 (파생값)</li>
+      <li><span class="mono">standard_accounts</span> 테이블 재정의 (code 재할당)</li>
+      <li><span class="mono">statement_generator</span> 집계 그룹핑 로직 추가</li>
+    </ul>
+  </div>
+</div>
+</section>
+
+<!-- 충돌 -->
+<section>
+<h2><span class="num">1</span> 코드 충돌 — 12건 (같은 코드가 다른 의미)</h2>
+<table>
+<tr>
+  <th class="mono">code</th>
+  <th>기존 standard_accounts</th>
+  <th>새 K-GAAP seed (회계법인)</th>
+  <th>영향</th>
+</tr>
+<tr><td class="mono">10100</td><td class="chg"><span class="old">현금및현금성자산</span></td>
+    <td class="new">현금 <span class="tag asset">자산</span></td><td class="mono">IA=0 TX=0</td></tr>
+<tr><td class="mono">10200</td><td class="chg"><span class="old">단기금융상품</span></td>
+    <td class="new">당좌예금 <span class="tag asset">자산</span></td><td class="mono">IA=0 TX=0</td></tr>
+<tr><td class="mono">10300</td><td class="chg"><span class="old">매출채권</span></td>
+    <td class="new">보통예금 <span class="tag asset">자산</span></td><td class="mono">IA=0 TX=0</td></tr>
+<tr><td class="mono">10400</td><td class="chg"><span class="old">미수금</span></td>
+    <td class="new">단기금융상품 <span class="tag asset">자산</span></td><td class="mono">IA=0 TX=0</td></tr>
+<tr><td class="mono">10800</td><td class="chg"><span class="old">부가세대급금</span></td>
+    <td class="new">외상매출금 <span class="tag asset">자산</span></td><td class="mono">IA=0 TX=0</td></tr>
+<tr><td class="mono">12700</td><td class="chg"><span class="old">비품</span></td>
+    <td class="new">감가상각누계액(비품) <span class="tag asset">자산</span></td><td class="mono">IA=0 TX=0</td></tr>
+<tr><td class="mono">13100</td><td class="chg"><span class="old">장기대여금</span></td>
+    <td class="new">선급금 <span class="tag asset">자산</span></td><td class="mono">IA=0 TX=0</td></tr>
+<tr><td class="mono">30300</td><td class="chg"><span class="old">이익잉여금</span></td>
+    <td class="new">주.임.종장기차입금 <span class="tag liability">부채</span></td>
+    <td class="mono">IA=0 TX=0 · 대분류 변경</td></tr>
+<tr><td class="mono">30400</td><td class="chg"><span class="old">기타포괄손익누계액</span></td>
+    <td class="new">장기차입금 <span class="tag liability">부채</span></td>
+    <td class="mono">IA=0 TX=0 · 대분류 변경</td></tr>
+<tr><td class="mono">40100</td><td class="chg"><span class="old">매출</span></td>
+    <td class="new">상품매출 <span class="tag revenue">수익</span></td><td class="mono">IA=0 TX=0</td></tr>
+<tr><td class="mono">40200</td><td class="chg"><span class="old">서비스매출</span></td>
+    <td class="new">매출환입및에누리 <span class="tag revenue">수익</span></td><td class="mono">IA=0 TX=0</td></tr>
+<tr><td class="mono">51100</td><td class="chg"><span class="old">보험료</span></td>
+    <td class="new">감가상각비 <span class="tag expense">비용</span></td><td class="mono">IA=0 TX=0</td></tr>
+</table>
+<div class="note">
+  <strong>관찰:</strong> 모든 충돌 code가 IA=0 TX=0 (미사용) — 안전하게 재정의 가능.
+  사용 중인 기존 code는 모두 새 seed에 없는 code(50200, 51300 등)라서 충돌하지 않음.
+</div>
+</section>
+
+<!-- 기존 사용 중 17개 → 자동 재매핑 제안 -->
+<section>
+<h2><span class="num">2</span> 기존 사용 중 17개 → 제안 자동 재매핑</h2>
+<p style="font-size:12px;color:var(--text2);margin-bottom:12px">
+internal_accounts 130개와 transactions 3663개가 아래 기존 코드에 연결되어 있다.
+이름 유사도로 새 K-GAAP 코드에 자동 매핑 (사용자 검토 후 확정).
+</p>
+<table>
+<tr>
+  <th class="mono">기존</th>
+  <th>기존 이름</th>
+  <th>→ 새 K-GAAP</th>
+  <th class="mono">IA</th>
+  <th class="mono">TX</th>
+</tr>
+<tr><td class="mono">50200</td><td>급여</td>
+    <td class="new mono">80200 직원급여 <span class="tag expense">판관비</span></td>
+    <td class="mono">6</td><td class="mono">8</td></tr>
+<tr><td class="mono">50300</td><td>퇴직급여</td>
+    <td class="new mono">80500 퇴직급여 <span class="tag supp">보완필요</span></td>
+    <td class="mono">3</td><td class="mono">1</td></tr>
+<tr><td class="mono">50400</td><td>복리후생비</td>
+    <td class="new mono">81100 복리후생비</td>
+    <td class="mono">12</td><td class="mono">1,071</td></tr>
+<tr><td class="mono">50500</td><td>임차료</td>
+    <td class="new mono">81900 지급임차료</td>
+    <td class="mono">5</td><td class="mono">7</td></tr>
+<tr><td class="mono">50600</td><td>접대비</td>
+    <td class="new mono">81300 접대비(기업업무추진비)</td>
+    <td class="mono">3</td><td class="mono">11</td></tr>
+<tr><td class="mono">50700</td><td>통신비</td>
+    <td class="new mono">82800 통신비</td>
+    <td class="mono">3</td><td class="mono">9</td></tr>
+<tr><td class="mono">50800</td><td>수도광열비</td>
+    <td class="new mono">84000 수도광열비</td>
+    <td class="mono">3</td><td class="mono">0</td></tr>
+<tr><td class="mono">50900</td><td>세금과공과</td>
+    <td class="new mono">81700 세금과공과금</td>
+    <td class="mono">9</td><td class="mono">22</td></tr>
+<tr><td class="mono">51300</td><td>여비교통비</td>
+    <td class="new mono">81200 여비교통비</td>
+    <td class="mono">14</td><td class="mono">1,177</td></tr>
+<tr><td class="mono">51400</td><td>소모품비</td>
+    <td class="new mono">83000 소모품비</td>
+    <td class="mono">3</td><td class="mono">115</td></tr>
+<tr><td class="mono">51500</td><td>지급수수료</td>
+    <td class="new mono">83100 지급수수료</td>
+    <td class="mono">6</td><td class="mono">60</td></tr>
+<tr><td class="mono">51510</td><td>SaaS 구독료</td>
+    <td class="new mono">83100 지급수수료 <span class="tag supp">집계</span></td>
+    <td class="mono">20</td><td class="mono">332</td></tr>
+<tr><td class="mono">51520</td><td>결제수수료</td>
+    <td class="new mono">83100 지급수수료 <span class="tag supp">집계</span></td>
+    <td class="mono">3</td><td class="mono">32</td></tr>
+<tr><td class="mono">51530</td><td>배달플랫폼수수료</td>
+    <td class="new mono">83100 지급수수료 <span class="tag supp">집계</span></td>
+    <td class="mono">3</td><td class="mono">0</td></tr>
+<tr><td class="mono">51600</td><td>광고선전비</td>
+    <td class="new mono">83300 광고선전비</td>
+    <td class="mono">17</td><td class="mono">657</td></tr>
+<tr><td class="mono">40300</td><td>이자수익</td>
+    <td class="new mono">90100 이자수익 <span class="tag revenue">영업외</span></td>
+    <td class="mono">3</td><td class="mono">4</td></tr>
+<tr><td class="mono">40600</td><td>잡이익</td>
+    <td class="new mono">93000 잡이익 <span class="tag revenue">영업외</span></td>
+    <td class="mono">6</td><td class="mono">6</td></tr>
+<tr><td class="mono">52300</td><td>잡손실</td>
+    <td class="new mono">96000 잡손실 <span class="tag expense">영업외</span></td>
+    <td class="mono">5</td><td class="mono">52</td></tr>
+</table>
+<div class="warn">
+  <strong>주의:</strong> SaaS 구독료 / 결제수수료 / 배달플랫폼수수료 3개는 회계법인 원장에서
+  모두 <span class="mono">83100 지급수수료</span>로 집계된다. 내부 관리 관점에서 세분화가
+  필요하면 <span class="mono">internal_accounts</span>에서 그대로 유지 — 재무제표 공시만
+  상위 집계.
+</div>
+</section>
+
+<!-- 새 seed 요약 -->
+<section>
+<h2><span class="num">3</span> 새 K-GAAP seed 70개 (분류별)</h2>
+<div class="scroll">
+<table>
+<tr>
+  <th class="mono">code</th>
+  <th>한글</th>
+  <th>EN</th>
+  <th>대분류</th>
+  <th>공시 그룹</th>
+  <th>출처</th>
+</tr>
+<tr><td class="mono">10100</td><td>현금</td><td>Cash</td><td><span class="tag asset">자산</span></td><td>당좌자산</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">10200</td><td>당좌예금</td><td>Checking deposits</td><td><span class="tag asset">자산</span></td><td>당좌자산</td><td><span class="tag supp">보완</span></td></tr>
+<tr><td class="mono">10300</td><td>보통예금</td><td>Bank deposits</td><td><span class="tag asset">자산</span></td><td>당좌자산</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">10400</td><td>단기금융상품</td><td>Short-term financial instruments</td><td><span class="tag asset">자산</span></td><td>당좌자산</td><td><span class="tag supp">보완</span></td></tr>
+<tr><td class="mono">10800</td><td>외상매출금</td><td>Accounts receivable</td><td><span class="tag asset">자산</span></td><td>당좌자산</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">10900</td><td>단기대여금</td><td>Short-term loans</td><td><span class="tag asset">자산</span></td><td>당좌자산</td><td><span class="tag supp">보완</span></td></tr>
+<tr><td class="mono">12000</td><td>미수금</td><td>Non-trade receivables</td><td><span class="tag asset">자산</span></td><td>당좌자산</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">13100</td><td>선급금</td><td>Prepayments</td><td><span class="tag asset">자산</span></td><td>당좌자산</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">13400</td><td>가지급금</td><td>Suspense accounts</td><td><span class="tag asset">자산</span></td><td>당좌자산</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">13500</td><td>부가세대급금</td><td>VAT receivable</td><td><span class="tag asset">자산</span></td><td>당좌자산</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">13600</td><td>선납세금</td><td>Prepaid taxes</td><td><span class="tag asset">자산</span></td><td>당좌자산</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">13700</td><td>주.임.종단기채권</td><td>Short-term receivables - employees</td><td><span class="tag asset">자산</span></td><td>당좌자산</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">14600</td><td>상품</td><td>Merchandise inventory</td><td><span class="tag asset">자산</span></td><td>재고자산</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">17900</td><td>장기대여금</td><td>Long-term loans</td><td><span class="tag asset">자산</span></td><td>투자자산</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">18400</td><td>회사설정계정과목</td><td>Company-defined account</td><td><span class="tag asset">자산</span></td><td>기타비유동</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">21200</td><td>비품</td><td>Furniture and fixtures</td><td><span class="tag asset">자산</span></td><td>유형자산</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">21900</td><td>시설장치</td><td>Facilities and equipment</td><td><span class="tag asset">자산</span></td><td>유형자산</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">96200</td><td>임차보증금</td><td>Leasehold deposits</td><td><span class="tag asset">자산</span></td><td>기타비유동</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">25100</td><td>외상매입금</td><td>Accounts payable</td><td><span class="tag liability">부채</span></td><td>유동부채</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">25400</td><td>예수금</td><td>Withholdings</td><td><span class="tag liability">부채</span></td><td>유동부채</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">25500</td><td>부가세예수금</td><td>VAT payable</td><td><span class="tag liability">부채</span></td><td>유동부채</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">26200</td><td>미지급비용</td><td>Accrued expenses</td><td><span class="tag liability">부채</span></td><td>유동부채</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">27500</td><td>미지급급여</td><td>Accrued payroll</td><td><span class="tag liability">부채</span></td><td>유동부채</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">30300</td><td>주.임.종장기차입금</td><td>Long-term borrowings - employees</td><td><span class="tag liability">부채</span></td><td>비유동부채</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">31500</td><td>조건부지분인수계약부채</td><td>Conditional equity purchase obligation</td><td><span class="tag liability">부채</span></td><td>비유동부채</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">33100</td><td>자본금</td><td>Paid-in capital</td><td><span class="tag equity">자본</span></td><td>자본금</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">34100</td><td>주식발행초과금</td><td>Additional paid-in capital</td><td><span class="tag equity">자본</span></td><td>자본잉여금</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">37600</td><td>이월결손금</td><td>Retained deficit carried forward</td><td><span class="tag equity">자본</span></td><td>이익잉여금</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">37800</td><td>미처리결손금</td><td>Unappropriated deficit</td><td><span class="tag equity">자본</span></td><td>이익잉여금</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">40000</td><td>손익</td><td>P&amp;L closing</td><td><span class="tag revenue">수익</span></td><td>결산</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">40100</td><td>상품매출</td><td>Merchandise sales</td><td><span class="tag revenue">수익</span></td><td>매출</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">40200</td><td>매출환입및에누리</td><td>Sales returns</td><td><span class="tag revenue">수익</span></td><td>매출</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">41200</td><td>서비스매출</td><td>Service revenue</td><td><span class="tag revenue">수익</span></td><td>매출</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">45100</td><td>상품매출원가</td><td>Cost of goods sold</td><td><span class="tag expense">비용</span></td><td>매출원가</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">80200</td><td>직원급여</td><td>Salaries</td><td><span class="tag expense">비용</span></td><td>판매관리비</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">81100</td><td>복리후생비</td><td>Employee benefits</td><td><span class="tag expense">비용</span></td><td>판매관리비</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">81200</td><td>여비교통비</td><td>Travel and transportation</td><td><span class="tag expense">비용</span></td><td>판매관리비</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">81300</td><td>접대비(기업업무추진비)</td><td>Business entertainment</td><td><span class="tag expense">비용</span></td><td>판매관리비</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">81700</td><td>세금과공과금</td><td>Taxes and dues</td><td><span class="tag expense">비용</span></td><td>판매관리비</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">81900</td><td>지급임차료</td><td>Rent expense</td><td><span class="tag expense">비용</span></td><td>판매관리비</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">82100</td><td>보험료</td><td>Insurance</td><td><span class="tag expense">비용</span></td><td>판매관리비</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">82400</td><td>운반비</td><td>Freight out</td><td><span class="tag expense">비용</span></td><td>판매관리비</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">82800</td><td>통신비</td><td>Communications</td><td><span class="tag expense">비용</span></td><td>판매관리비</td><td><span class="tag supp">보완</span></td></tr>
+<tr><td class="mono">82900</td><td>사무용품비</td><td>Office supplies</td><td><span class="tag expense">비용</span></td><td>판매관리비</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">83000</td><td>소모품비</td><td>Consumables</td><td><span class="tag expense">비용</span></td><td>판매관리비</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">83100</td><td>지급수수료</td><td>Fees and commissions</td><td><span class="tag expense">비용</span></td><td>판매관리비</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">83300</td><td>광고선전비</td><td>Advertising</td><td><span class="tag expense">비용</span></td><td>판매관리비</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">83900</td><td>판매수수료</td><td>Sales commissions</td><td><span class="tag expense">비용</span></td><td>판매관리비</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">84000</td><td>수도광열비</td><td>Utilities</td><td><span class="tag expense">비용</span></td><td>판매관리비</td><td><span class="tag supp">보완</span></td></tr>
+<tr><td class="mono">90100</td><td>이자수익</td><td>Interest income</td><td><span class="tag revenue">수익</span></td><td>영업외수익</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">90700</td><td>외환차익</td><td>FX gain</td><td><span class="tag revenue">수익</span></td><td>영업외수익</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">92900</td><td>국고보조금수익</td><td>Government subsidy</td><td><span class="tag revenue">수익</span></td><td>영업외수익</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">93000</td><td>잡이익</td><td>Misc income</td><td><span class="tag revenue">수익</span></td><td>영업외수익</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">93300</td><td>이자비용</td><td>Interest expense</td><td><span class="tag expense">비용</span></td><td>영업외비용</td><td><span class="tag supp">보완</span></td></tr>
+<tr><td class="mono">93600</td><td>외환차손</td><td>FX loss</td><td><span class="tag expense">비용</span></td><td>영업외비용</td><td><span class="tag supp">보완</span></td></tr>
+<tr><td class="mono">96000</td><td>잡손실</td><td>Misc losses</td><td><span class="tag expense">비용</span></td><td>영업외비용</td><td><span class="tag ledger">원장</span></td></tr>
+<tr><td class="mono">99800</td><td>법인세등</td><td>Corporate income tax</td><td><span class="tag expense">비용</span></td><td>법인세비용</td><td><span class="tag supp">보완</span></td></tr>
+</table>
+</div>
+<p style="font-size:11px;color:var(--text3);margin-top:8px">
+나머지 10개 보완 계정 (감가상각누계액·미지급금·선수금·단기차입금·이익준비금 등) 생략 — 전체는 <span class="mono">backend/database/seeds/standard_accounts_kgaap.py</span> 참조
+</p>
+</section>
+
+<!-- 실행 플로우 -->
+<section>
+<h2><span class="num">4</span> A-1 실행 순서 (현재 A-1a 완료)</h2>
+<div class="flow">
+  <div class="step">
+    <span class="n">A-1a</span>
+    <div class="t">seed 초안 생성</div>
+    <div class="d">회계법인 원장 48개 + 보완 21개 = 70개 마스터 Python module + 영향 분석</div>
+    <span class="tag" style="background:rgba(34,197,94,.15);color:var(--green)">완료</span>
+  </div>
+  <div class="step">
+    <span class="n">A-1b</span>
+    <div class="t">스키마 확장</div>
+    <div class="d"><span class="mono">standard_accounts</span>에 <span class="mono">name_en</span>, <span class="mono">parent_code</span> 컬럼 추가. Alembic migration.</div>
+    <span class="tag ledger">대기</span>
+  </div>
+  <div class="step">
+    <span class="n">A-1c</span>
+    <div class="t">seed 적용</div>
+    <div class="d">기존 55개(사용 안 됨) 제거 + 새 70개 INSERT. 기존 사용 중 17개는 재매핑 후 제거.</div>
+    <span class="tag ledger">대기</span>
+  </div>
+  <div class="step">
+    <span class="n">A-1d</span>
+    <div class="t">IA 재매핑</div>
+    <div class="d">130개 <span class="mono">internal_accounts.standard_account_id</span> 자동 재매핑 (이름 매칭 + 섹션2 제안표)</div>
+    <span class="tag ledger">대기</span>
+  </div>
+  <div class="step">
+    <span class="n">A-1e</span>
+    <div class="t">TX 재계산</div>
+    <div class="d">3,663개 <span class="mono">transactions.standard_account_id</span> <span class="mono">internal_account</span>로부터 재계산</div>
+    <span class="tag ledger">대기</span>
+  </div>
+  <div class="step">
+    <span class="n">A-1f</span>
+    <div class="t">공시 그룹핑</div>
+    <div class="d"><span class="mono">statement_generator</span>에 상세 코드 → 공시 항목 집계 로직 추가 (한/영 토글)</div>
+    <span class="tag ledger">대기</span>
+  </div>
+  <div class="step">
+    <span class="n">A-1g</span>
+    <div class="t">원장 vs FO 대조</div>
+    <div class="d">자동 diff 스크립트 — 2026 1월 회계법인 원장과 FinanceOne 원장 line-by-line 비교</div>
+    <span class="tag ledger">대기</span>
+  </div>
+</div>
+</section>
+
+<div class="note">
+  <strong>다음 액션:</strong> 섹션 1~3 검토 후 진행 승인해주시면 A-1b(스키마 마이그레이션) → A-1c(seed 적용) → A-1d(자동 재매핑) 순으로 실행하겠습니다.
+  모호한 항목 (18400 회사설정계정과목, 96200 임차보증금 등) 사용자 의견 주시면 반영합니다.
+</div>
+
+</body>
+</html>
