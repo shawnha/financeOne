@@ -35,6 +35,34 @@ class InternalAccountUpdate(BaseModel):
     is_recurring: Optional[bool] = None
 
 
+def _normalize_card_number(raw: str) -> str:
+    """멤버 카드번호를 '****XXXX' (뒤 4자리) 포맷으로 정규화.
+
+    허용 입력: '1114', '****1114', '5105-xxxx-xxxx-1114', '5105 1234 5678 1114' 등.
+    뒤 4자리만 추출해 마스킹 prefix 부여.
+    """
+    if not raw:
+        return raw
+    digits = "".join(c for c in raw if c.isdigit())
+    if len(digits) >= 4:
+        return f"****{digits[-4:]}"
+    return raw.strip()
+
+
+def _normalize_card_list(raw: Optional[list[str]]) -> Optional[list[str]]:
+    if raw is None:
+        return None
+    # dedupe preserving order
+    seen = set()
+    out: list[str] = []
+    for c in raw:
+        n = _normalize_card_number(c)
+        if n and n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out
+
+
 class MemberCreate(BaseModel):
     entity_id: int
     name: str
@@ -392,13 +420,14 @@ def create_member(
 ):
     cur = conn.cursor()
     try:
+        normalized_cards = _normalize_card_list(body.card_numbers) or []
         cur.execute(
             """
             INSERT INTO members (entity_id, name, role, card_numbers, slack_user_id)
             VALUES (%s, %s, %s, %s, %s)
             RETURNING id, entity_id, name, role, is_active, card_numbers, slack_user_id
             """,
-            [body.entity_id, body.name, body.role, body.card_numbers or [], body.slack_user_id],
+            [body.entity_id, body.name, body.role, normalized_cards, body.slack_user_id],
         )
         cols = [d[0] for d in cur.description]
         row = dict(zip(cols, cur.fetchone()))
@@ -420,6 +449,10 @@ def update_member(
     updates = body.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
+
+    # 카드번호 정규화 (****XXXX)
+    if "card_numbers" in updates:
+        updates["card_numbers"] = _normalize_card_list(updates["card_numbers"])
 
     set_clauses = []
     params = []
@@ -450,7 +483,7 @@ def update_member(
         card_numbers = row.get("card_numbers") or []
         member_name = row["name"]
         relinked = 0
-        # 카드번호로 미연결 거래 연결
+        # 카드번호로 미연결 거래 연결 — exact + 뒤 3자리 fallback
         if card_numbers:
             placeholders = ",".join(["%s"] * len(card_numbers))
             cur.execute(
@@ -460,6 +493,22 @@ def update_member(
                 [member_id, entity_id] + card_numbers + [member_id],
             )
             relinked += cur.rowcount
+            # 뒤 3자리 기반 fallback (Codef는 '5105*********477' 포맷)
+            # members.card_numbers 는 '****XXXX' 로 정규화되어 있으므로
+            # 뒤 3자리끼리 비교.
+            tails = list({c[-3:] for c in card_numbers if c and len(c) >= 3})
+            if tails:
+                tail_placeholders = ",".join(["%s"] * len(tails))
+                cur.execute(
+                    f"""UPDATE transactions SET member_id = %s
+                        WHERE entity_id = %s
+                          AND member_id IS NULL
+                          AND card_number IS NOT NULL
+                          AND LENGTH(card_number) >= 3
+                          AND RIGHT(card_number, 3) IN ({tail_placeholders})""",
+                    [member_id, entity_id] + tails,
+                )
+                relinked += cur.rowcount
         # parsed_member_name으로 미연결 거래 연결
         cur.execute(
             """UPDATE transactions SET member_id = %s

@@ -362,13 +362,15 @@ function MembersContent() {
               </Select>
             </div>
             <div className="grid gap-2">
-              <label className="text-sm font-medium">카드번호 (끝 4자리)</label>
+              <label className="text-sm font-medium">카드번호</label>
               <Input
-                placeholder="예: 1114, 5477"
+                placeholder="예: 1114, 5477, ****6225"
                 value={form.card_numbers}
                 onChange={(e) => setForm((f) => ({ ...f, card_numbers: e.target.value }))}
               />
-              <p className="text-[11px] text-muted-foreground">여러 장이면 쉼표로 구분</p>
+              <p className="text-[11px] text-muted-foreground">
+                한 사람이 여러 장을 가지면 쉼표로 구분. 뒤 4자리만 입력하면 자동으로 <span className="font-mono">****XXXX</span> 형태로 저장됩니다.
+              </p>
             </div>
           </div>
           <DialogFooter>

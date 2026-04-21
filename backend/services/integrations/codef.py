@@ -678,6 +678,7 @@ class CodefClient:
                 if row:
                     member_id = row[0]
             if member_id is None and tx.get("card_number"):
+                # 1) 정확 매칭 (같은 포맷으로 등록된 케이스)
                 cur.execute(
                     "SELECT id FROM members WHERE entity_id = %s AND %s = ANY(card_numbers) AND is_active = true LIMIT 1",
                     [entity_id, tx["card_number"]],
@@ -685,6 +686,29 @@ class CodefClient:
                 row = cur.fetchone()
                 if row:
                     member_id = row[0]
+                else:
+                    # 2) 뒤 3자리 fallback — Codef는 '5105*********477' (뒤 3),
+                    #    members는 보통 '****5477' (뒤 4) 형식으로 등록됨.
+                    #    공통 접미사인 뒤 3자리로 매칭 시도.
+                    card_num = tx["card_number"]
+                    if card_num and len(card_num) >= 3:
+                        tail3 = card_num[-3:]
+                        cur.execute(
+                            """
+                            SELECT id FROM members
+                            WHERE entity_id = %s AND is_active = true
+                              AND EXISTS (
+                                SELECT 1 FROM unnest(card_numbers) cn
+                                WHERE RIGHT(cn, 3) = %s
+                              )
+                            ORDER BY id
+                            LIMIT 1
+                            """,
+                            [entity_id, tail3],
+                        )
+                        row = cur.fetchone()
+                        if row:
+                            member_id = row[0]
 
             # 자동 매핑
             mapping = auto_map_transaction(
