@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useState, useCallback, useMemo, useRef } from "react"
+import React, { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react"
 import { useGlobalMonth } from "@/hooks/use-global-month"
 import Link from "next/link"
 import { Card } from "@/components/ui/card"
@@ -1421,12 +1421,22 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
   const [editingAmount, setEditingAmount] = useState("")
   const [editModalItem, setEditModalItem] = useState<ForecastItem | null>(null)
   const [collapsedIds, setCollapsedIds] = useState<Set<number> | null>(null) // null = not yet initialized
+  const [expandedLeaves, setExpandedLeaves] = useState<Set<number>>(new Set()) // line_items 펼친 forecast.id
 
   const toggleCollapse = useCallback((accountId: number) => {
     setCollapsedIds(prev => {
       const next = new Set(prev ?? [])
       if (next.has(accountId)) next.delete(accountId)
       else next.add(accountId)
+      return next
+    })
+  }, [])
+
+  const toggleLeafExpand = useCallback((forecastId: number) => {
+    setExpandedLeaves(prev => {
+      const next = new Set(prev)
+      if (next.has(forecastId)) next.delete(forecastId)
+      else next.add(forecastId)
       return next
     })
   }, [])
@@ -2013,15 +2023,32 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                   const itemBalance = runningBalance
                   const itemActualBalance = balanceActual != null ? runningActual : null
 
-                  return (
+                  // 세부 라인/메모 확장 가능 여부
+                  const hasLineItems = !isVirtualParent && item.line_items && item.line_items.length > 0
+                  const hasNote = !isVirtualParent && !!item.note && item.note.trim().length > 0
+                  const canExpandLeaf = hasLineItems || hasNote
+                  const isLeafExpanded = canExpandLeaf && expandedLeaves.has(item.id)
+
+                  const rowClickHandler = isVirtualParent && item.internal_account_id
+                    ? () => toggleCollapse(item.internal_account_id!)
+                    : (canExpandLeaf
+                        ? (e: React.MouseEvent) => {
+                            if ((e.target as HTMLElement).closest("button, a, input")) return
+                            toggleLeafExpand(item.id)
+                          }
+                        : undefined)
+
+                  const mainRow = (
                     <tr
                       key={item.id}
                       className={cn(
                         "border-t border-border hover:bg-white/[0.02] transition-colors group",
                         depth > 0 && "bg-muted/[0.03]",
                         isVirtualParent && "bg-white/[0.01] cursor-pointer",
+                        canExpandLeaf && "cursor-pointer",
                       )}
-                      onClick={isVirtualParent && item.internal_account_id ? () => toggleCollapse(item.internal_account_id!) : undefined}
+                      title={canExpandLeaf ? (isLeafExpanded ? "클릭하여 접기" : "클릭하여 세부 보기") : undefined}
+                      onClick={rowClickHandler}
                     >
                       <td className="px-4 py-2.5">
                         {depth === 0 && !isVirtualParent && (
@@ -2267,6 +2294,51 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                         )}
                       </td>
                     </tr>
+                  )
+
+                  if (!canExpandLeaf) return mainRow
+
+                  const expandedRows: React.ReactNode[] = []
+                  if (isLeafExpanded && hasLineItems) {
+                    item.line_items!.forEach((li, idx) => {
+                      expandedRows.push(
+                        <tr key={`${item.id}-li-${idx}`} className="border-t border-border/30 bg-white/[0.015]">
+                          <td />
+                          <td className="px-4 py-1.5" style={{ paddingLeft: `${(depth + 1) * 20 + 28}px` }}>
+                            <div className="flex items-center text-xs text-muted-foreground">
+                              <span className="text-muted-foreground/40 mr-2">•</span>
+                              <span>{li.name || "(이름 없음)"}</span>
+                              {li.note && (
+                                <span className="ml-2 text-[10px] text-muted-foreground/60">— {li.note}</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className={cn(
+                            "px-4 py-1.5 text-right font-mono tabular-nums text-xs text-muted-foreground",
+                          )}>
+                            {item.type === "in" ? "+" : "-"}{formatByEntity(li.amount, entityId)}
+                          </td>
+                          <td />
+                        </tr>
+                      )
+                    })
+                  }
+                  if (isLeafExpanded && hasNote) {
+                    expandedRows.push(
+                      <tr key={`${item.id}-note`} className="border-t border-border/30 bg-white/[0.015]">
+                        <td />
+                        <td colSpan={3} className="px-4 py-1.5" style={{ paddingLeft: `${(depth + 1) * 20 + 28}px` }}>
+                          <span className="text-[11px] text-muted-foreground italic">📝 {item.note}</span>
+                        </td>
+                      </tr>
+                    )
+                  }
+
+                  return (
+                    <Fragment key={`frag-${item.id}`}>
+                      {mainRow}
+                      {expandedRows}
+                    </Fragment>
                   )
                 }
 
