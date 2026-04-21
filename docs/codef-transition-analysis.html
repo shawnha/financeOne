@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FinanceOne — Codef 전환 분석 (롯데카드)</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap');
+  :root{
+    --bg:#050508;--bg2:#0d1117;--bg3:#161b22;--bg4:#1f2937;
+    --border:rgba(255,255,255,0.06);--border2:rgba(255,255,255,0.12);
+    --text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;
+    --green:#22C55E;--red:#EF4444;--amber:#F59E0B;--blue:#3B82F6;
+    --purple:#8B5CF6;--cyan:#06B6D4;--pink:#EC4899;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;
+       font-size:14px;line-height:1.6;padding:40px 32px;max-width:1400px;margin:0 auto}
+  .mono{font-family:'Geist Mono',monospace}
+  .hero{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:32px;
+        padding-bottom:24px;border-bottom:1px solid var(--border)}
+  .hero h1{font-size:28px;font-weight:700;letter-spacing:-0.5px;margin-bottom:6px}
+  .hero h1 span{color:var(--amber)}
+  .hero .sub{color:var(--text2);font-size:13px}
+  .hero .meta{font-size:11px;color:var(--text3);margin-top:10px}
+  .hero .meta span{margin-right:16px}
+  .verdict{padding:12px 18px;border-radius:10px;font-weight:600;font-size:13px;
+           background:linear-gradient(135deg,rgba(34,197,94,.15),rgba(34,197,94,.05));
+           border:1px solid rgba(34,197,94,.3);color:var(--green);white-space:nowrap}
+  .verdict.pending{background:linear-gradient(135deg,rgba(245,158,11,.15),rgba(245,158,11,.05));
+                   border-color:rgba(245,158,11,.3);color:var(--amber)}
+  .verdict .l{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;
+              font-weight:500;margin-bottom:4px}
+
+  section{margin-bottom:40px}
+  h2{font-size:17px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:10px}
+  h2 .num{font-size:11px;font-weight:500;color:var(--text3);
+          background:var(--bg3);padding:3px 8px;border-radius:6px;letter-spacing:.5px}
+
+  /* 3-way comparison grid */
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:20px;
+        transition:border-color .2s}
+  .card:hover{border-color:var(--border2)}
+  .card .head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+  .card .title{font-size:13px;font-weight:600}
+  .card .tag{font-size:10px;padding:3px 8px;border-radius:5px;text-transform:uppercase;
+             letter-spacing:.5px;font-weight:500}
+  .tag.gowid{background:rgba(236,72,153,.15);color:var(--pink)}
+  .tag.codef{background:rgba(59,130,246,.15);color:var(--blue)}
+  .tag.db{background:rgba(100,116,139,.15);color:var(--text2)}
+  .card .stat{font-size:24px;font-weight:700;font-family:'Geist Mono',monospace;margin-bottom:2px}
+  .card .sub{font-size:11px;color:var(--text2)}
+  .card .sep{height:1px;background:var(--border);margin:12px 0}
+  .card dl{display:grid;grid-template-columns:1fr auto;gap:6px 14px;font-size:12px}
+  .card dt{color:var(--text2)}
+  .card dd{font-family:'Geist Mono',monospace;text-align:right}
+
+  /* bar chart */
+  .bars{margin-top:10px}
+  .bar-row{display:grid;grid-template-columns:90px 1fr 100px;align-items:center;gap:10px;
+           font-size:12px;padding:6px 0}
+  .bar-row .lbl{color:var(--text2);font-size:11px}
+  .bar-row .track{height:22px;background:var(--bg3);border-radius:5px;overflow:hidden;
+                  position:relative}
+  .bar-row .fill{height:100%;display:flex;align-items:center;justify-content:flex-end;
+                 padding-right:8px;font-size:10px;font-family:'Geist Mono',monospace;
+                 color:#000;font-weight:600}
+  .fill.pink{background:linear-gradient(90deg,#EC4899,#F472B6)}
+  .fill.slate{background:linear-gradient(90deg,#64748B,#94A3B8)}
+  .fill.blue{background:linear-gradient(90deg,#3B82F6,#60A5FA)}
+  .bar-row .val{text-align:right;font-family:'Geist Mono',monospace;font-size:12px}
+
+  /* diff pills */
+  .pills{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .pill{font-size:11px;padding:4px 10px;border-radius:20px;background:var(--bg3);
+        border:1px solid var(--border);color:var(--text2)}
+  .pill.pos{background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.25);color:var(--green)}
+  .pill.neg{background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.25);color:var(--red)}
+  .pill.warn{background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.25);color:var(--amber)}
+
+  /* Flow steps */
+  .flow{display:grid;grid-template-columns:1fr 24px 1fr 24px 1fr 24px 1fr;gap:10px;
+        align-items:stretch;margin-top:16px}
+  .flow .step{background:var(--bg2);border:1px solid var(--border);border-radius:12px;
+              padding:16px;position:relative}
+  .flow .step .n{position:absolute;top:-10px;left:14px;background:var(--bg);padding:0 8px;
+                 font-size:10px;color:var(--text3);letter-spacing:1px;text-transform:uppercase}
+  .flow .step .t{font-size:13px;font-weight:600;margin-bottom:4px}
+  .flow .step .d{font-size:11px;color:var(--text2);line-height:1.5}
+  .flow .step .tag{display:inline-block;font-size:9px;padding:2px 6px;border-radius:4px;
+                   margin-top:8px;text-transform:uppercase;letter-spacing:.5px}
+  .tag.destruct{background:rgba(239,68,68,.15);color:var(--red)}
+  .tag.sync{background:rgba(59,130,246,.15);color:var(--blue)}
+  .tag.auto{background:rgba(34,197,94,.15);color:var(--green)}
+  .flow .arr{display:flex;align-items:center;justify-content:center;color:var(--text3);
+             font-size:18px}
+
+  /* Risk table */
+  .risk-table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .risk-table th{text-align:left;padding:10px 12px;background:var(--bg3);font-weight:500;
+                 color:var(--text2);font-size:11px;text-transform:uppercase;letter-spacing:.5px;
+                 border-bottom:1px solid var(--border)}
+  .risk-table td{padding:12px;border-bottom:1px solid var(--border);vertical-align:top}
+  .risk-table tr:last-child td{border-bottom:none}
+  .risk-table .sev{font-size:10px;padding:3px 8px;border-radius:5px;text-transform:uppercase;
+                   letter-spacing:.5px;font-weight:600;white-space:nowrap}
+  .sev.low{background:rgba(34,197,94,.15);color:var(--green)}
+  .sev.mid{background:rgba(245,158,11,.15);color:var(--amber)}
+  .sev.high{background:rgba(239,68,68,.15);color:var(--red)}
+
+  /* decision matrix */
+  .matrix{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+  .option{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:22px;
+          position:relative}
+  .option.recommended{border-color:rgba(34,197,94,.4);
+                      box-shadow:0 0 0 1px rgba(34,197,94,.2),0 0 40px rgba(34,197,94,.05)}
+  .option .badge{position:absolute;top:-10px;right:16px;background:var(--green);color:#000;
+                 font-size:10px;font-weight:600;padding:4px 10px;border-radius:5px;
+                 letter-spacing:.5px;text-transform:uppercase}
+  .option h3{font-size:16px;font-weight:600;margin-bottom:6px}
+  .option .l{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;
+             margin-bottom:14px}
+  .option ul{list-style:none;padding:0}
+  .option li{font-size:12.5px;padding:6px 0 6px 22px;position:relative;color:var(--text2)}
+  .option li.pro::before{content:'+';position:absolute;left:0;top:6px;color:var(--green);
+                          font-weight:700;font-size:14px}
+  .option li.con::before{content:'−';position:absolute;left:0;top:6px;color:var(--red);
+                          font-weight:700;font-size:14px}
+
+  /* summary footer */
+  .final{background:linear-gradient(135deg,var(--bg2),var(--bg3));border:1px solid var(--border);
+         border-radius:14px;padding:24px;margin-top:12px}
+  .final h2{margin-bottom:12px}
+  .final .checks{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}
+  .check{font-size:12.5px;padding:12px 14px;background:var(--bg);border:1px solid var(--border);
+         border-radius:10px}
+  .check .st{font-size:11px;color:var(--text3);margin-bottom:4px;letter-spacing:.5px;
+             text-transform:uppercase}
+  .check.ok .st{color:var(--green)}
+  .check.ok::before{content:'✓ ';color:var(--green);font-weight:700}
+  .check.wait .st{color:var(--amber)}
+  .check.wait::before{content:'○ ';color:var(--amber);font-weight:700}
+
+  .note{font-size:12px;color:var(--text3);padding:12px 14px;background:var(--bg3);border-radius:8px;
+        border-left:3px solid var(--amber);margin-top:10px;line-height:1.6}
+  .note strong{color:var(--amber)}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div>
+    <h1>Codef 전환 <span>분석</span></h1>
+    <div class="sub">롯데카드 데이터 소스를 Gowid → Codef로 전환할지 의사결정 자료</div>
+    <div class="meta">
+      <span>📅 2026-04-21</span>
+      <span>🏢 한아원코리아 (entity_id=2)</span>
+      <span>📊 대상 기간: 2026-04-01 ~ 04-20 (dry-run 기준)</span>
+      <span>📁 docs/codef-transition-analysis.html</span>
+    </div>
+  </div>
+  <div class="verdict pending">
+    <div class="l">결정</div>
+    전환 권장 · 승인 대기
+  </div>
+</div>
+
+<!-- ① 3채널 비교 -->
+<section>
+<h2><span class="num">01</span> 세 채널의 현재 상태</h2>
+<div class="grid3">
+
+  <div class="card">
+    <div class="head">
+      <div class="title">Gowid API (live)</div>
+      <span class="tag gowid">외부 — 실시간</span>
+    </div>
+    <div class="stat">312건</div>
+    <div class="sub mono">₩ 14,333,173</div>
+    <div class="sep"></div>
+    <dl>
+      <dt>해외결제 포함</dt><dd>Claude / Vercel / Midjourney</dd>
+      <dt>취소 처리</dt><dd>API 단 net화</dd>
+      <dt>ExpenseOne 메타</dt><dd>신청자·영수증·목적</dd>
+      <dt>동기화 지연</dt><dd>4/20 일부 미반영</dd>
+    </dl>
+    <div class="pills">
+      <span class="pill pos">메타데이터 풍부</span>
+      <span class="pill warn">실시간성 약함</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="head">
+      <div class="title">DB — source_type=lotte_card</div>
+      <span class="tag db">내부 — 과거 sync</span>
+    </div>
+    <div class="stat">300건</div>
+    <div class="sub mono">₩ 13,993,103</div>
+    <div class="sep"></div>
+    <dl>
+      <dt>출처</dt><dd>Gowid sync 스냅샷</dd>
+      <dt>마지막 sync</dt><dd>2026-04-20 이전</dd>
+      <dt>누락 12건</dt><dd>4/20 최신 거래</dd>
+      <dt>외화 환산</dt><dd>Gowid krwAmount</dd>
+    </dl>
+    <div class="pills">
+      <span class="pill">재무제표 기준</span>
+      <span class="pill warn">12건 stale</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="head">
+      <div class="title">Codef API (live)</div>
+      <span class="tag codef">외부 — 실시간</span>
+    </div>
+    <div class="stat">315건 <span style="font-size:14px;color:var(--text3)">(net)</span></div>
+    <div class="sub mono">₩ 14,405,007 · gross 376건 / 15,707,113</div>
+    <div class="sep"></div>
+    <dl>
+      <dt>승인·취소 로그</dt><dd>별도 row (is_cancel=TRUE)</dd>
+      <dt>자동 상계</dt><dd>type=in/out 부호 처리</dd>
+      <dt>은행 통일</dt><dd>우리/IBK도 Codef</dd>
+      <dt>원본 로그</dt><dd>감사 추적 가능</dd>
+    </dl>
+    <div class="pills">
+      <span class="pill pos">실시간 + 원본</span>
+      <span class="pill pos">감사 완결</span>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ② 수치 시각 -->
+<section>
+<h2><span class="num">02</span> 4월 거래 건수·금액 비교</h2>
+<div class="card" style="padding:24px">
+  <div class="bars">
+    <div class="bar-row">
+      <span class="lbl">Gowid fresh</span>
+      <div class="track"><div class="fill pink" style="width:82.8%">312</div></div>
+      <span class="val">₩ 14,333,173</span>
+    </div>
+    <div class="bar-row">
+      <span class="lbl">DB lotte_card</span>
+      <div class="track"><div class="fill slate" style="width:79.5%">300</div></div>
+      <span class="val">₩ 13,993,103</span>
+    </div>
+    <div class="bar-row">
+      <span class="lbl">Codef net</span>
+      <div class="track"><div class="fill blue" style="width:83.6%">315</div></div>
+      <span class="val">₩ 14,405,007</span>
+    </div>
+    <div class="bar-row">
+      <span class="lbl">Codef gross</span>
+      <div class="track"><div class="fill blue" style="width:100%;opacity:.5">376</div></div>
+      <span class="val">₩ 15,707,113</span>
+    </div>
+  </div>
+  <div class="sep"></div>
+  <div class="pills">
+    <span class="pill pos">Codef net ↔ Gowid fresh 차이: 3건 / 71,834원 (0.5%)</span>
+    <span class="pill">Codef 취소 61건 / 1,302,106원 → type=in 자동 상계</span>
+    <span class="pill warn">DB 현재는 12건 stale (Gowid sync 시점 경계)</span>
+  </div>
+</div>
+</section>
+
+<!-- ③ 전환 후 상태 -->
+<section>
+<h2><span class="num">03</span> 전환 전 vs 전환 후 — 시스템 구조</h2>
+<div class="matrix">
+
+  <div class="option">
+    <h3>현재 상태 (As-Is)</h3>
+    <div class="l">Gowid를 FinanceOne + ExpenseOne 공용</div>
+    <ul>
+      <li class="pro">ExpenseOne과 1:1 매칭 트리비얼 (같은 소스)</li>
+      <li class="pro">전환 비용 제로</li>
+      <li class="con">Gowid SPOF — 장애 시 양쪽 모두 정지</li>
+      <li class="con">은행(Codef) / 카드(Gowid) 백엔드 이원화</li>
+      <li class="con">해외결제 누락 가능성 (4월 Vercel/Claude 일시 미반영)</li>
+      <li class="con">취소 이력 소실 (net만 남음)</li>
+      <li class="con">교차 검증 불가</li>
+    </ul>
+  </div>
+
+  <div class="option recommended">
+    <span class="badge">추천</span>
+    <h3>전환 후 (To-Be)</h3>
+    <div class="l">FinanceOne = Codef / ExpenseOne = Gowid (분리)</div>
+    <ul>
+      <li class="pro">은행·카드 모두 Codef로 백엔드 통일</li>
+      <li class="pro">교차 검증 — 두 독립 소스로 결측/오류 조기 발견</li>
+      <li class="pro">이중화 SPOF 제거</li>
+      <li class="pro">취소 별도 row 보존 (감사·추적 완결)</li>
+      <li class="pro">해외결제 실시간 반영</li>
+      <li class="pro">백그라운드 cron이 자동 인수인계</li>
+      <li class="con">ExpenseOne ↔ Codef 매칭에서 시차 &gt;1일 건은 수동 매칭 증가</li>
+    </ul>
+  </div>
+</div>
+</section>
+
+<!-- ④ 실행 플로우 -->
+<section>
+<h2><span class="num">04</span> 전환 실행 순서</h2>
+<div class="flow">
+  <div class="step">
+    <span class="n">Step 1</span>
+    <div class="t">Gowid 롯데 4월 300건 삭제</div>
+    <div class="d"><span class="mono">DELETE FROM transactions WHERE entity_id=2 AND source_type='lotte_card' AND date BETWEEN '2026-04-01' AND '2026-04-30'</span></div>
+    <span class="tag destruct">파괴적</span>
+  </div>
+  <div class="arr">→</div>
+  <div class="step">
+    <span class="n">Step 2</span>
+    <div class="t">Codef 롯데 sync 실행</div>
+    <div class="d"><span class="mono">POST /api/integrations/codef/sync-card</span> · 376건 INSERT (source_type=codef_lotte_card, 취소 is_cancel=TRUE 포함)</div>
+    <span class="tag sync">API 호출</span>
+  </div>
+  <div class="arr">→</div>
+  <div class="step">
+    <span class="n">Step 3</span>
+    <div class="t">set_last_sync 자동 호출</div>
+    <div class="d"><span class="mono">codef_last_sync_lotte_card</span> settings 설정되어 30분 스케줄러가 자동 인수인계</div>
+    <span class="tag auto">자동</span>
+  </div>
+  <div class="arr">→</div>
+  <div class="step">
+    <span class="n">Step 4</span>
+    <div class="t">ExpenseOne 매칭 재연결</div>
+    <div class="d"><span class="mono">expenseone_matcher</span>의 source_type 리스트에 이미 <span class="mono">codef_lotte_card</span> 포함 — 자동 재매칭</div>
+    <span class="tag auto">자동</span>
+  </div>
+</div>
+</section>
+
+<!-- ⑤ 리스크 -->
+<section>
+<h2><span class="num">05</span> 리스크 & 완화</h2>
+<div class="card" style="padding:0;overflow:hidden">
+<table class="risk-table">
+  <thead>
+    <tr>
+      <th style="width:80px">심각도</th>
+      <th>리스크</th>
+      <th>완화 방안</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><span class="sev high">High</span></td>
+      <td>Step 1 DELETE 실패 시 Gowid 원본 손실</td>
+      <td>삭제 전 <span class="mono">SELECT * ... → /tmp/lotte_backup_2026-04.csv</span> 백업 + 삭제 row ID 기록</td>
+    </tr>
+    <tr>
+      <td><span class="sev mid">Mid</span></td>
+      <td>ExpenseOne 매칭 8건이 일시 깨짐</td>
+      <td><span class="mono">transaction_expenseone_match</span>는 expense_id unique — DELETE CASCADE로 자동 해제. Codef sync 후 같은 card_last4+date+amount로 자동 재매칭. 실패 건은 /expenseone-match 메뉴에서 수동 매칭.</td>
+    </tr>
+    <tr>
+      <td><span class="sev mid">Mid</span></td>
+      <td>Codef 롯데가 Gowid와 다른 시차로 거래를 기록해 재무제표 차이</td>
+      <td>Dry-run 결과 Codef net vs Gowid fresh 차이 0.5%. 회계법인 ±5% 허용 한계 내. 월말에 한 번 더 검증.</td>
+    </tr>
+    <tr>
+      <td><span class="sev low">Low</span></td>
+      <td>Codef 롯데 연결 재차단 (CF-12803 재발)</td>
+      <td>오늘 연결 성공 확인 완료. 재발 시 <span class="mono">codef_api_log</span>에 transactionId 자동 기록 → Codef 지원 문의 즉시 가능.</td>
+    </tr>
+    <tr>
+      <td><span class="sev low">Low</span></td>
+      <td>취소건 UI 노출로 거래내역 혼잡</td>
+      <td>후속 작업 D (거래내역 "취소건 숨기기" 토글) — 기본 ON으로 두면 일상 뷰 깔끔.</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+</section>
+
+<!-- ⑥ 전제 조건 & 결정 -->
+<div class="final">
+<h2><span class="num">06</span> 실행 전제 조건 체크</h2>
+<div class="checks">
+  <div class="check ok">
+    <div class="st">DONE</div>
+    Codef 롯데 organization 코드 0311 정정
+  </div>
+  <div class="check ok">
+    <div class="st">DONE</div>
+    Codef 롯데 connected_id 등록됨
+  </div>
+  <div class="check ok">
+    <div class="st">DONE</div>
+    카드 14장 / 376건 fetch 확인
+  </div>
+  <div class="check ok">
+    <div class="st">DONE</div>
+    Gowid vs Codef 대조 0.5% 오차 확인
+  </div>
+  <div class="check ok">
+    <div class="st">DONE</div>
+    백그라운드 스케줄러 준비 + 안전장치
+  </div>
+  <div class="check ok">
+    <div class="st">DONE</div>
+    ExpenseOne 매칭 메뉴 backstop
+  </div>
+  <div class="check wait">
+    <div class="st">TODO</div>
+    Step 1 실행 전 Gowid 300건 백업 스크립트
+  </div>
+  <div class="check wait">
+    <div class="st">TODO</div>
+    사용자 최종 승인
+  </div>
+  <div class="check wait">
+    <div class="st">OPTIONAL</div>
+    거래내역 "취소건 숨기기" 토글 (후행 가능)
+  </div>
+</div>
+<div class="note">
+  <strong>권장:</strong> 전환 실행 전 별도 커밋으로 백업 스크립트를 먼저 추가(<span class="mono">scripts/backup_lotte_2026-04.py</span>)하여 롤백 가능성을 확보한 뒤,
+  Step 1~4를 단일 트랜잭션처럼 순차 실행. 실행 중 실패 시 <span class="mono">codef_api_log</span> + 백업 CSV로 복원.
+</div>
+</div>
+
+</body>
+</html>
