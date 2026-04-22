@@ -192,6 +192,14 @@ def get_candidates(
     expense_id: str,
     date_window: int = Query(7, ge=0, le=30),
     cross_entity: bool = Query(False, description="entity 무시 (intercompany 케이스)"),
+    amount_tolerance_pct: float = Query(
+        0.0, ge=0.0, le=10.0,
+        description="금액 허용 오차 %. 해외결제 환율 차이·수수료 대응. 0=정확.",
+    ),
+    ignore_card_digits: bool = Query(
+        False,
+        description="카드 끝자리 ordering 무시 (끝자리 모르는 expense 매칭용)",
+    ),
     conn: PgConnection = Depends(get_db),
 ):
     """단일 expense에 매칭 가능한 거래 후보 조회."""
@@ -241,13 +249,40 @@ def get_candidates(
         entity_filter = "AND t.entity_id = %s"
         entity_param = entity_id
 
+    # 금액 허용 오차 (예: 1% 설정 시 amount*0.99 ~ amount*1.01 사이)
+    tol = max(0.0, min(amount_tolerance_pct, 10.0)) / 100.0
+    amount_lo = amount * (1 - tol)
+    amount_hi = amount * (1 + tol)
+
+    # 카드 끝자리 우선 정렬 가중치 (expense의 card_last4 존재 시 매칭되는 카드를 위로)
+    # card_last4는 숫자만 검증 (SQL injection 방지)
+    card_order_clause = ""
+    use_card_ordering = (
+        exp_type == "CORPORATE_CARD"
+        and card_last4
+        and str(card_last4).isdigit()
+        and not ignore_card_digits
+    )
+    if use_card_ordering:
+        card_order_clause = f"""
+            CASE WHEN t.card_number IS NOT NULL
+                  AND LENGTH(t.card_number) >= 3
+                  AND (
+                    t.card_number = '****{card_last4}'
+                    OR RIGHT(t.card_number, 4) = '{card_last4}'
+                    OR RIGHT(t.card_number, 3) = RIGHT('{card_last4}', 3)
+                  )
+                THEN 0 ELSE 1 END,
+        """
+
     sql = f"""
         SELECT
             t.id, t.entity_id, t.date, t.amount, t.type, t.source_type,
             t.counterparty, t.card_number, t.description,
             ent.name AS entity_name,
             m.expense_id AS already_linked_expense,
-            ABS(t.date - %s::date) AS day_diff
+            ABS(t.date - %s::date) AS day_diff,
+            ABS(t.amount - %s) AS amount_diff
         FROM transactions t
         JOIN entities ent ON ent.id = t.entity_id
         LEFT JOIN transaction_expenseone_match m ON m.transaction_id = t.id
@@ -255,20 +290,25 @@ def get_candidates(
                          AND (%s::date + (%s || ' days')::interval)
           AND {type_filter}
           {entity_filter}
-          AND t.amount = %s
+          AND t.amount BETWEEN %s AND %s
         ORDER BY
             CASE WHEN m.expense_id IS NULL THEN 0 ELSE 1 END,
+            {card_order_clause}
+            ABS(t.amount - %s) ASC,
             ABS(t.date - %s::date) ASC
         LIMIT 25
     """
-    # param 순서: SELECT ABS, BETWEEN start, BETWEEN start window, BETWEEN end, BETWEEN end window,
-    #            [source_types], [entity_id], amount, ORDER BY ABS
-    params_full: list = [ref_date, ref_date, date_window, ref_date, date_window]
+    # param 순서:
+    #   SELECT: day_diff ref_date, amount_diff amount
+    #   WHERE: BETWEEN start ref_date, date_window, BETWEEN end ref_date, date_window,
+    #          [source_types], [entity_id], amount_lo, amount_hi
+    #   ORDER BY: amount ref (for ABS), ref_date
+    params_full: list = [ref_date, amount, ref_date, date_window, ref_date, date_window]
     if source_types:
         params_full.append(list(source_types))
     if entity_param is not None:
         params_full.append(entity_param)
-    params_full.extend([amount, ref_date])
+    params_full.extend([amount_lo, amount_hi, amount, ref_date])
 
     cur.execute(sql, params_full)
     rows = _fetch_dicts(cur)
@@ -287,6 +327,7 @@ def get_candidates(
             "card_number": r.get("card_number"),
             "description": r.get("description"),
             "day_diff": int(r["day_diff"]) if r.get("day_diff") is not None else None,
+            "amount_diff": int(r["amount_diff"]) if r.get("amount_diff") is not None else None,
             "already_linked_expense": str(r["already_linked_expense"]) if r.get("already_linked_expense") else None,
         }
         for r in rows

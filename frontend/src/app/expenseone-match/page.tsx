@@ -82,6 +82,7 @@ interface Candidate {
   card_number: string | null
   description: string | null
   day_diff: number | null
+  amount_diff: number | null
   already_linked_expense: string | null
 }
 
@@ -262,13 +263,16 @@ function CandidatePanel({
   const [cands, setCands] = useState<Candidate[]>([])
   const [loading, setLoading] = useState(false)
   const [busyTxId, setBusyTxId] = useState<number | null>(null)
+  const [amountTolerance, setAmountTolerance] = useState<0 | 1 | 3>(0)
+  const [dateWindow, setDateWindow] = useState<number>(10)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams({
-        date_window: "10",
+        date_window: String(dateWindow),
         cross_entity: String(crossEntity),
+        amount_tolerance_pct: String(amountTolerance),
       })
       const data = await fetchAPI<CandidatesResponse>(
         `/expenseone-match/expenses/${expense.expense_id}/candidates?${params}`,
@@ -279,7 +283,7 @@ function CandidatePanel({
     } finally {
       setLoading(false)
     }
-  }, [expense.expense_id, crossEntity])
+  }, [expense.expense_id, crossEntity, amountTolerance, dateWindow])
 
   useEffect(() => {
     load()
@@ -362,11 +366,46 @@ function CandidatePanel({
         </div>
       )}
 
-      {/* cross-entity toggle */}
-      <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-white/[0.03] text-xs">
-        <span className="text-muted-foreground">
-          기본은 같은 법인 거래만 표시합니다
-        </span>
+      {/* 매칭 검색 조건 — 금액 허용 / 날짜 윈도우 / 법인 무시 */}
+      <div className="flex items-center justify-between gap-3 px-4 py-2 border-b border-white/[0.03] text-xs flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1">
+            <span className="text-muted-foreground">금액</span>
+            {([0, 1, 3] as const).map((pct) => (
+              <button
+                key={pct}
+                type="button"
+                onClick={() => setAmountTolerance(pct)}
+                className={cn(
+                  "px-2 h-6 rounded-md border text-[11px] transition-colors",
+                  amountTolerance === pct
+                    ? "bg-accent/20 border-accent/40 text-accent"
+                    : "border-white/[0.08] text-muted-foreground hover:bg-white/[0.04]",
+                )}
+              >
+                {pct === 0 ? "정확" : `±${pct}%`}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-muted-foreground">날짜</span>
+            {[3, 7, 15, 30].map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setDateWindow(d)}
+                className={cn(
+                  "px-2 h-6 rounded-md border text-[11px] transition-colors",
+                  dateWindow === d
+                    ? "bg-accent/20 border-accent/40 text-accent"
+                    : "border-white/[0.08] text-muted-foreground hover:bg-white/[0.04]",
+                )}
+              >
+                ±{d}d
+              </button>
+            ))}
+          </div>
+        </div>
         <label className="flex items-center gap-1.5 cursor-pointer">
           <input
             type="checkbox"
@@ -374,7 +413,7 @@ function CandidatePanel({
             onChange={(e) => setCrossEntity(e.target.checked)}
             className="accent-accent"
           />
-          <span>법인 무시 (인터컴퍼니)</span>
+          <span>법인 무시</span>
         </label>
       </div>
 
@@ -421,6 +460,11 @@ function CandidatePanel({
                       </div>
                       <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
                         <span className="font-mono text-foreground">{formatKRW(c.amount)}</span>
+                        {c.amount_diff !== null && c.amount_diff !== 0 && (
+                          <span className="text-amber-300/80 font-mono">
+                            {c.amount > expense.amount ? "+" : "−"}{formatKRW(Math.abs(c.amount_diff))}
+                          </span>
+                        )}
                         {c.card_number && <span className="font-mono">{c.card_number}</span>}
                       </div>
                       {blocked && (
