@@ -9,6 +9,7 @@ from psycopg2.extensions import connection as PgConnection
 from backend.database.connection import get_db
 from backend.utils.db import fetch_all
 from backend.services.statement_generator import generate_all_statements, generate_consolidated_statements
+from backend.services.statements.i18n import translate_label, load_name_en_map
 from backend.services.export import export_statement_excel
 
 
@@ -101,7 +102,12 @@ def list_statements(
 
 
 @router.get("/{stmt_id}")
-def get_statement(stmt_id: int, conn: PgConnection = Depends(get_db)):
+def get_statement(
+    stmt_id: int,
+    lang: str = Query("ko", pattern="^(ko|en)$"),
+    conn: PgConnection = Depends(get_db),
+):
+    """재무제표 상세. lang=en이면 라벨을 영문으로 번역 (name_en 활용)."""
     cur = conn.cursor()
 
     cur.execute(
@@ -132,9 +138,17 @@ def get_statement(stmt_id: int, conn: PgConnection = Depends(get_db)):
         [stmt_id],
     )
     line_items = fetch_all(cur)
+
+    if lang == "en":
+        name_en_map = load_name_en_map(cur)
+        for item in line_items:
+            item["label_ko"] = item["label"]
+            item["label"] = translate_label(item["label"], item.get("account_code"), name_en_map)
+
     cur.close()
 
     header["line_items"] = line_items
+    header["lang"] = lang
     return header
 
 
