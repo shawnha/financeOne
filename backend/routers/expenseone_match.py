@@ -63,6 +63,15 @@ def _expense_row(r: dict) -> dict:
             if r.get("match_id")
             else None
         ),
+        "ignored": (
+            {
+                "id": r["ignored_id"],
+                "reason": r.get("ignored_reason"),
+                "ignored_at": r["ignored_at"].isoformat() if r.get("ignored_at") else None,
+            }
+            if r.get("ignored_id")
+            else None
+        ),
     }
 
 
@@ -88,7 +97,7 @@ def unmatched_count(
     entity_id: Optional[int] = Query(None),
     conn: PgConnection = Depends(get_db),
 ):
-    """사이드바 뱃지용 — 매칭 안 된 승인 경비 개수."""
+    """사이드바 뱃지용 — 매칭 안 된 승인 경비 개수. 무시된 건 제외."""
     cur = conn.cursor()
     where = ["e.status = 'APPROVED'"]
     params: list = []
@@ -98,7 +107,10 @@ def unmatched_count(
         FROM expenseone.expenses e
         {_company_to_entity_sql()}
         LEFT JOIN transaction_expenseone_match m ON m.expense_id = e.id
-        WHERE {' AND '.join(where)} AND m.id IS NULL
+        LEFT JOIN financeone.expenseone_ignored ig ON ig.expense_id = e.id
+        WHERE {' AND '.join(where)}
+          AND m.id IS NULL
+          AND ig.id IS NULL
     """
     if entity_id is not None:
         sql += " AND ent.entity_id = %s"
@@ -113,13 +125,14 @@ def unmatched_count(
 @router.get("/expenses")
 def list_expenses(
     entity_id: Optional[int] = Query(None),
-    status: str = Query("unmatched", description="unmatched|matched|all"),
+    status: str = Query("unmatched", description="unmatched|matched|ignored|all"),
     expense_type: Optional[str] = Query(None, description="CORPORATE_CARD|DEPOSIT_REQUEST"),
     month: Optional[str] = Query(None, description="YYYY-MM (transaction_date 기준)"),
     limit: int = Query(200, ge=1, le=500),
     conn: PgConnection = Depends(get_db),
 ):
-    """승인된 ExpenseOne expense 리스트 + 매칭 상태."""
+    """승인된 ExpenseOne expense 리스트 + 매칭 상태. unmatched/matched는
+    무시된 건을 자동 제외, ignored 상태는 무시된 것만 표시."""
     cur = conn.cursor()
     where = ["e.status = 'APPROVED'"]
     params: list = []
@@ -144,9 +157,13 @@ def list_expenses(
 
     having = ""
     if status == "unmatched":
-        having = "AND m.id IS NULL"
+        having = "AND m.id IS NULL AND ig.id IS NULL"
     elif status == "matched":
-        having = "AND m.id IS NOT NULL"
+        having = "AND m.id IS NOT NULL AND ig.id IS NULL"
+    elif status == "ignored":
+        having = "AND ig.id IS NOT NULL"
+    elif status == "all":
+        having = ""
 
     if entity_id is not None:
         where.append("ent.entity_id = %s")
@@ -167,12 +184,16 @@ def list_expenses(
             m.match_method,
             m.is_manual AS match_is_manual,
             m.is_confirmed AS match_is_confirmed,
-            m.ai_reasoning AS match_reasoning
+            m.ai_reasoning AS match_reasoning,
+            ig.id AS ignored_id,
+            ig.reason AS ignored_reason,
+            ig.ignored_at AS ignored_at
         FROM expenseone.expenses e
         LEFT JOIN expenseone.users u ON e.submitted_by_id = u.id
         LEFT JOIN expenseone.companies c ON e.company_id = c.id
         {_company_to_entity_sql()}
         LEFT JOIN transaction_expenseone_match m ON m.expense_id = e.id
+        LEFT JOIN financeone.expenseone_ignored ig ON ig.expense_id = e.id
         WHERE {' AND '.join(where)} {having}
         ORDER BY e.approved_at DESC NULLS LAST, e.id DESC
         LIMIT %s
@@ -314,8 +335,54 @@ def get_candidates(
     rows = _fetch_dicts(cur)
     cur.close()
 
-    candidates = [
-        {
+    def _card_tail_match(tx_card: Optional[str]) -> bool:
+        """카드 끝자리 일치 판정 (4자리 또는 3자리 fallback)."""
+        if not card_last4 or not tx_card or not str(card_last4).isdigit():
+            return False
+        digits_c = "".join(ch for ch in tx_card if ch.isdigit())
+        if len(digits_c) < 3:
+            return False
+        last4 = str(card_last4)
+        if len(digits_c) >= 4 and digits_c[-4:] == last4:
+            return True
+        if digits_c[-3:] == last4[-3:]:
+            return True
+        return False
+
+    def _name_similar(counterparty: Optional[str], description: Optional[str]) -> bool:
+        """expense.title/merchant_name이 거래의 counterparty/description에 부분 포함되는지."""
+        needle = ((merchant or "") + " " + (title or "")).strip().upper()
+        if len(needle) < 3:
+            return False
+        hay = f"{counterparty or ''} {description or ''}".upper()
+        # expense 이름의 각 토큰이 거래 설명에 포함되는지
+        tokens = [t for t in needle.split() if len(t) >= 3]
+        for tok in tokens:
+            if tok in hay:
+                return True
+        return False
+
+    candidates = []
+    for r in rows:
+        card_match = _card_tail_match(r.get("card_number"))
+        name_match = _name_similar(r.get("counterparty"), r.get("description"))
+        day_diff_val = int(r["day_diff"]) if r.get("day_diff") is not None else None
+        amt_diff = int(r["amount_diff"]) if r.get("amount_diff") is not None else None
+
+        # 확신 힌트:
+        #   strong = 카드 끝자리 일치 + 금액 차 0
+        #   likely = 카드 끝자리 일치 + 내용 유사 + 금액 차 있음 → '확인 필요' 추천
+        #   weak   = 나머지
+        if card_match and amt_diff == 0 and (day_diff_val is None or day_diff_val <= 1):
+            hint = "strong"
+        elif card_match and name_match:
+            hint = "likely"
+        elif card_match or (name_match and amt_diff == 0):
+            hint = "likely"
+        else:
+            hint = "weak"
+
+        candidates.append({
             "transaction_id": r["id"],
             "entity_id": r["entity_id"],
             "entity_name": r.get("entity_name"),
@@ -326,12 +393,13 @@ def get_candidates(
             "counterparty": r.get("counterparty"),
             "card_number": r.get("card_number"),
             "description": r.get("description"),
-            "day_diff": int(r["day_diff"]) if r.get("day_diff") is not None else None,
-            "amount_diff": int(r["amount_diff"]) if r.get("amount_diff") is not None else None,
+            "day_diff": day_diff_val,
+            "amount_diff": amt_diff,
+            "card_tail_match": card_match,
+            "name_similar": name_match,
+            "match_hint": hint,
             "already_linked_expense": str(r["already_linked_expense"]) if r.get("already_linked_expense") else None,
-        }
-        for r in rows
-    ]
+        })
     return {
         "expense_summary": {
             "expense_id": expense_id,
@@ -449,6 +517,82 @@ def unlink_match(
         conn.rollback()
         logger.exception("unlink_match failed")
         raise HTTPException(500, "unlink failed")
+    finally:
+        cur.close()
+
+
+class IgnoreBody(BaseModel):
+    reason: Optional[str] = None
+
+
+@router.post("/expenses/{expense_id}/ignore")
+def ignore_expense(
+    expense_id: str,
+    body: IgnoreBody,
+    conn: PgConnection = Depends(get_db),
+):
+    """미매칭 expense를 '무시'로 표시 — 목록/사이드바 카운트에서 제외."""
+    cur = conn.cursor()
+    try:
+        # entity_id 추정 (company → entity 매핑)
+        cur.execute(
+            f"""
+            SELECT e.id, ent.entity_id
+            FROM expenseone.expenses e
+            {_company_to_entity_sql()}
+            WHERE e.id = %s
+            """,
+            [expense_id],
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "expense not found")
+        _, entity_id = row
+
+        cur.execute(
+            """
+            INSERT INTO financeone.expenseone_ignored (expense_id, entity_id, reason)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (expense_id) DO UPDATE
+              SET reason = EXCLUDED.reason,
+                  ignored_at = NOW()
+            RETURNING id
+            """,
+            [expense_id, entity_id, body.reason],
+        )
+        ignored_id = cur.fetchone()[0]
+        conn.commit()
+        return {"ok": True, "ignored_id": ignored_id, "expense_id": expense_id}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception:
+        conn.rollback()
+        logger.exception("ignore_expense failed")
+        raise HTTPException(500, "ignore failed")
+    finally:
+        cur.close()
+
+
+@router.delete("/expenses/{expense_id}/ignore")
+def unignore_expense(
+    expense_id: str,
+    conn: PgConnection = Depends(get_db),
+):
+    """무시 해제 — 일반 목록에 다시 노출."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "DELETE FROM financeone.expenseone_ignored WHERE expense_id = %s RETURNING id",
+            [expense_id],
+        )
+        row = cur.fetchone()
+        conn.commit()
+        return {"ok": True, "deleted": row[0] if row else None}
+    except Exception:
+        conn.rollback()
+        logger.exception("unignore_expense failed")
+        raise HTTPException(500, "unignore failed")
     finally:
         cur.close()
 

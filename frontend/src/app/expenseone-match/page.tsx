@@ -47,6 +47,12 @@ interface ExpenseMatchInfo {
   reasoning: string | null
 }
 
+interface ExpenseIgnoredInfo {
+  id: number
+  reason: string | null
+  ignored_at: string | null
+}
+
 interface Expense {
   expense_id: string
   type: string
@@ -68,6 +74,7 @@ interface Expense {
   submitter_name: string | null
   entity_id: number | null
   match: ExpenseMatchInfo | null
+  ignored: ExpenseIgnoredInfo | null
 }
 
 interface Candidate {
@@ -83,6 +90,9 @@ interface Candidate {
   description: string | null
   day_diff: number | null
   amount_diff: number | null
+  card_tail_match?: boolean
+  name_similar?: boolean
+  match_hint?: "strong" | "likely" | "weak"
   already_linked_expense: string | null
 }
 
@@ -101,7 +111,7 @@ interface CandidatesResponse {
   candidates: Candidate[]
 }
 
-type StatusFilter = "unmatched" | "matched" | "all"
+type StatusFilter = "unmatched" | "matched" | "ignored" | "all"
 type TypeFilter = "all" | "CORPORATE_CARD" | "DEPOSIT_REQUEST"
 
 const ENTITY_NAMES: Record<number, string> = {
@@ -181,20 +191,26 @@ function ExpenseCard({
   exp,
   selected,
   onClick,
+  onIgnore,
+  onUnignore,
 }: {
   exp: Expense
   selected: boolean
   onClick: () => void
+  onIgnore: (expenseId: string) => Promise<void>
+  onUnignore: (expenseId: string) => Promise<void>
 }) {
+  const isIgnored = !!exp.ignored
   return (
-    <button
+    <div
       onClick={onClick}
       className={cn(
-        "w-full text-left rounded-lg border px-3 py-2.5",
+        "w-full text-left rounded-lg border px-3 py-2.5 cursor-pointer",
         "transition-all duration-200",
         selected
           ? "border-accent/50 bg-white/[0.04]"
           : "border-white/[0.05] hover:border-white/[0.1] hover:bg-white/[0.02]",
+        isIgnored && "opacity-60",
       )}
     >
       <div className="flex items-start justify-between gap-2 mb-1">
@@ -203,8 +219,43 @@ function ExpenseCard({
           {exp.is_urgent && (
             <Badge variant="outline" className="text-[10px] border-rose-500/40 text-rose-300">긴급</Badge>
           )}
+          {isIgnored && (
+            <Badge variant="outline" className="text-[10px] border-muted-foreground/30 text-muted-foreground">
+              무시됨
+            </Badge>
+          )}
         </div>
-        {matchStatusBadge(exp.match)}
+        <div className="flex items-center gap-1.5">
+          {matchStatusBadge(exp.match)}
+          {!exp.match && !isIgnored && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                if (window.confirm(`"${exp.title}" 경비를 무시 처리할까요? 언제든 복원할 수 있습니다.`)) {
+                  onIgnore(exp.expense_id)
+                }
+              }}
+              className="text-[10px] px-1.5 py-0.5 rounded border border-white/[0.08] text-muted-foreground hover:text-rose-300 hover:border-rose-500/30"
+              title="무시 (사이드바 카운트에서 제외)"
+            >
+              무시
+            </button>
+          )}
+          {isIgnored && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onUnignore(exp.expense_id)
+              }}
+              className="text-[10px] px-1.5 py-0.5 rounded border border-white/[0.08] text-muted-foreground hover:text-emerald-300 hover:border-emerald-500/30"
+              title="복원"
+            >
+              복원
+            </button>
+          )}
+        </div>
       </div>
       <div className="font-medium text-sm text-foreground truncate">{exp.title || "(제목 없음)"}</div>
       <div className="flex items-center gap-2 mt-1.5 text-xs text-muted-foreground">
@@ -239,7 +290,12 @@ function ExpenseCard({
           </>
         )}
       </div>
-    </button>
+      {exp.ignored?.reason && (
+        <div className="mt-1 text-[10px] text-muted-foreground/60 italic truncate">
+          무시 사유: {exp.ignored.reason}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -442,6 +498,21 @@ function CandidatePanel({
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 text-xs mb-1">
                         <Badge variant="outline" className="text-[10px]">{sourceLabel(c.source_type)}</Badge>
+                        {c.match_hint === "strong" && (
+                          <Badge variant="outline" className="text-[10px] border-emerald-500/40 text-emerald-300" title="카드 끝자리 + 금액 정확 일치">
+                            강력 매칭
+                          </Badge>
+                        )}
+                        {c.match_hint === "likely" && (
+                          <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-300" title="카드 끝자리 또는 내용 유사 — 사용자 확인 권장">
+                            확인 필요
+                          </Badge>
+                        )}
+                        {c.card_tail_match && (
+                          <Badge variant="outline" className="text-[10px] border-blue-500/40 text-blue-300" title="카드 끝자리 일치">
+                            끝자리✓
+                          </Badge>
+                        )}
                         {c.entity_id !== expense.entity_id && c.entity_name && (
                           <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-300">
                             {c.entity_name}
@@ -611,6 +682,36 @@ function ExpenseOneMatchContent() {
     [fetchExpenses],
   )
 
+  const handleIgnore = useCallback(
+    async (expenseId: string) => {
+      try {
+        await fetchAPI(`/expenseone-match/expenses/${expenseId}/ignore`, {
+          method: "POST",
+          body: JSON.stringify({ reason: null }),
+        })
+        toast.success("무시 처리")
+        if (selectedId === expenseId) setSelectedId(null)
+        await fetchExpenses(true)
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "무시 실패")
+      }
+    },
+    [fetchExpenses, selectedId],
+  )
+
+  const handleUnignore = useCallback(
+    async (expenseId: string) => {
+      try {
+        await fetchAPI(`/expenseone-match/expenses/${expenseId}/ignore`, { method: "DELETE" })
+        toast.success("복원")
+        await fetchExpenses(true)
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "복원 실패")
+      }
+    },
+    [fetchExpenses],
+  )
+
   const unmatchedCount = expenses.filter((e) => !e.match).length
   const autoCount = expenses.filter((e) => e.match && !e.match.is_confirmed).length
   const confirmedCount = expenses.filter((e) => e.match?.is_confirmed).length
@@ -679,6 +780,7 @@ function ExpenseOneMatchContent() {
           <SelectContent>
             <SelectItem value="unmatched">미매칭</SelectItem>
             <SelectItem value="matched">매칭 완료</SelectItem>
+            <SelectItem value="ignored">무시됨</SelectItem>
             <SelectItem value="all">전체</SelectItem>
           </SelectContent>
         </Select>
@@ -728,6 +830,8 @@ function ExpenseOneMatchContent() {
                 exp={exp}
                 selected={selectedId === exp.expense_id}
                 onClick={() => setSelectedId(exp.expense_id)}
+                onIgnore={handleIgnore}
+                onUnignore={handleUnignore}
               />
             ))
           )}
