@@ -125,6 +125,9 @@ KGAAP_SEED = [
     # ── 비용 > 판매관리비 ────────────────────────
     {"code": "80200", "name": "직원급여", "name_en": "Salaries",
      "category": "비용", "sub_category": "판매관리비", "is_from_ledger": True},
+    {"code": "80500", "name": "퇴직급여", "name_en": "Retirement benefits",
+     "category": "비용", "sub_category": "판매관리비", "is_from_ledger": False,
+     "note": "실제 원장엔 없었지만 표준 보완"},
     {"code": "81100", "name": "복리후생비",
      "name_en": "Employee benefits",
      "category": "비용", "sub_category": "판매관리비", "is_from_ledger": True},
