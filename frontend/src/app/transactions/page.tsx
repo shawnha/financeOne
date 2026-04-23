@@ -1409,6 +1409,8 @@ export default function TransactionsPage() {
                   ))}
                 </TableBody>
               </table>
+              {/* Bulk Action Bar 공간 확보 — 선택 시 하단 여백 확장 */}
+              {someSelected && <div aria-hidden className="h-28 pointer-events-none" />}
             </>
           )}
 
