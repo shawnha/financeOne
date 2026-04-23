@@ -1409,8 +1409,10 @@ export default function TransactionsPage() {
                   ))}
                 </TableBody>
               </table>
-              {/* Bulk Action Bar 공간 확보 — 선택 시 하단 여백 확장 */}
-              {someSelected && <div aria-hidden className="h-28 pointer-events-none" />}
+              {/* 페이지가 가득 찼을 때만 bulk bar 공간 확보 (미분류처럼 rows 적으면 생략) */}
+              {someSelected && (data?.items?.length ?? 0) >= 20 && (
+                <div aria-hidden className="h-20 pointer-events-none" />
+              )}
             </>
           )}
 
