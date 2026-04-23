@@ -1400,6 +1400,8 @@ function ForecastDetailModal({
   item,
   allItems,
   entityId,
+  year,
+  month,
   formatAmount,
   onEdit,
   open,
@@ -1408,11 +1410,44 @@ function ForecastDetailModal({
   item: ForecastItem
   allItems: ForecastItem[]
   entityId: string
+  year: number
+  month: number
   formatAmount: (v: number) => string
   onEdit: () => void
   open: boolean
   onOpenChange: (v: boolean) => void
 }) {
+  // 매칭된 실제 거래 가져오기 (거래처별 그룹핑)
+  const [matchedTxs, setMatchedTxs] = useState<Array<{
+    id: number
+    date: string
+    amount: number
+    counterparty: string | null
+    description: string | null
+  }>>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!open || !item.internal_account_id) return
+    setLoading(true)
+    fetchAPI<{ items: typeof matchedTxs }>(
+      `/transactions?entity_id=${entityId}&year=${year}&month=${month}&internal_account_id=${item.internal_account_id}&type=${item.type}&per_page=500`
+    )
+      .then((d) => setMatchedTxs(d?.items ?? []))
+      .catch(() => setMatchedTxs([]))
+      .finally(() => setLoading(false))
+  }, [open, item.internal_account_id, item.type, entityId, year, month])
+
+  // 거래처별 그룹핑
+  const byCounterparty = matchedTxs.reduce<Record<string, { total: number; count: number; txs: typeof matchedTxs }>>((acc, tx) => {
+    const key = tx.counterparty?.trim() || tx.description?.slice(0, 20) || "(이름 없음)"
+    if (!acc[key]) acc[key] = { total: 0, count: 0, txs: [] }
+    acc[key].total += tx.amount
+    acc[key].count += 1
+    acc[key].txs.push(tx)
+    return acc
+  }, {})
+  const groupedList = Object.entries(byCounterparty).sort((a, b) => b[1].total - a[1].total)
   // 하위(children) 항목 수집 — virtual parent인 경우
   const children = allItems.filter(
     (i) => i.internal_account_parent_id === item.internal_account_id && i.id !== item.id,
@@ -1534,6 +1569,53 @@ function ForecastDetailModal({
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {/* 실제 거래 거래처별 그룹 */}
+          {item.internal_account_id && (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="text-xs font-semibold text-muted-foreground">
+                  실제 거래 {loading ? "(로딩중...)" : `(${matchedTxs.length}건, ${groupedList.length}개 거래처)`}
+                </div>
+                <Link
+                  href={`/transactions?entity=${entityId}&year=${year}&month=${month}&internal_account_id=${item.internal_account_id}&type=${item.type}`}
+                  className="text-[10px] text-blue-400 hover:underline"
+                >
+                  전체 보기 &rarr;
+                </Link>
+              </div>
+              {!loading && matchedTxs.length > 0 ? (
+                <div className="rounded-lg border border-border overflow-hidden max-h-[260px] overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/[0.15] sticky top-0">
+                      <tr>
+                        <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">거래처</th>
+                        <th className="px-3 py-1.5 text-right font-medium text-muted-foreground">건수</th>
+                        <th className="px-3 py-1.5 text-right font-medium text-muted-foreground">합계</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {groupedList.map(([name, grp]) => (
+                        <tr key={name} className="border-t border-border hover:bg-white/[0.02]">
+                          <td className="px-3 py-1.5 max-w-[240px] truncate" title={name}>
+                            {name}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums text-muted-foreground">
+                            {grp.count}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums">
+                            {formatAmount(grp.total)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : !loading ? (
+                <div className="text-xs text-muted-foreground py-2">매칭된 실제 거래가 없습니다</div>
+              ) : null}
             </div>
           )}
 
@@ -2827,6 +2909,8 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
           item={detailModalItem}
           allItems={data.items}
           entityId={entityId!}
+          year={y}
+          month={m}
           formatAmount={(v: number) => formatByEntity(v, entityId)}
           onEdit={() => { setEditModalItem(detailModalItem); setDetailModalItem(null) }}
           open={!!detailModalItem}
