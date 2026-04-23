@@ -6,6 +6,7 @@ DB 조회 함수 (get_actual_cashflow, get_monthly_summary, get_card_expenses)�
 
 import calendar
 from collections import defaultdict
+from datetime import date
 from decimal import Decimal
 from typing import Optional
 
@@ -446,17 +447,74 @@ def get_card_total_net(
     return result
 
 
+def _split_forecasts_by_today(
+    items: list[dict],
+    today_day: Optional[int],
+) -> dict:
+    """forecast 항목을 today_day 기준으로 과거/미래로 분리.
+
+    past: expected_day < today_day → 이미 지나간 예상 (실제 거래로 대체, 제외)
+    remaining: expected_day >= today_day OR expected_day IS NULL → 남은 기간 예상
+
+    "오늘(today_day)에 예상된 것"은 아직 실제에 없을 수 있으므로 remaining에 포함.
+    expected_day IS NULL은 보수적으로 remaining에 포함.
+    """
+    past_in = Decimal("0"); past_expense = Decimal("0"); past_card = Decimal("0")
+    rem_in = Decimal("0"); rem_expense = Decimal("0"); rem_card = Decimal("0")
+    for item in items:
+        amt = Decimal(str(item["forecast_amount"]))
+        exp_day = item.get("expected_day")
+        is_past = (today_day is not None) and (exp_day is not None) and (int(exp_day) < int(today_day))
+        if item["type"] == "in":
+            if is_past:
+                past_in += amt
+            else:
+                rem_in += amt
+        else:
+            if item.get("payment_method") == "card":
+                if is_past:
+                    past_card += amt
+                else:
+                    rem_card += amt
+            else:
+                if is_past:
+                    past_expense += amt
+                else:
+                    rem_expense += amt
+    return {
+        "past_in": past_in, "past_expense": past_expense, "past_card": past_card,
+        "remaining_in": rem_in, "remaining_expense": rem_expense, "remaining_card": rem_card,
+    }
+
+
 def get_forecast_cashflow(
     conn: PgConnection,
     entity_id: int,
     year: int,
     month: int,
+    as_of: Optional[date] = None,
 ) -> dict:
     """예상 현금흐름 — forecasts + 시차 보정 + 실제 진행 비교.
+
+    as_of: 시계열 합성 기준일 (기본 today). 월 내이면 "실제 as_of까지 + 남은 기간 예상"으로 합성.
 
     Returns: opening, forecast items, forecast_closing, actual progress, card timing, diff.
     """
     cur = conn.cursor()
+
+    # 시계열 합성 기준일
+    as_of = as_of or date.today()
+    month_start = date(year, month, 1)
+    last_day = calendar.monthrange(year, month)[1]
+    month_end = date(year, month, last_day)
+    if as_of < month_start:
+        # 미래 월: 실제 발생분 없음, 전체를 예상으로 취급
+        today_day_in_month: Optional[int] = 0
+    elif as_of > month_end:
+        # 지난 월: 전체 실제로 완료
+        today_day_in_month = last_day
+    else:
+        today_day_in_month = as_of.day
 
     # 1. 기초잔고 (전월 확정 기말)
     opening = get_opening_balance(conn, entity_id, year, month)
@@ -594,7 +652,7 @@ def get_forecast_cashflow(
     # 5-bis. 조정 예상 기말 (미분류 반영)
     adjusted_forecast_closing = forecast_closing + Decimal(str(unmapped_income)) - Decimal(str(unmapped_expense))
 
-    # 6. 실제 진행 기준 기말 (은행 거래 기준)
+    # 6. 실제 진행 기준 기말 (은행 거래 기준) — 월 전체
     cur.execute(
         """
         SELECT
@@ -615,6 +673,47 @@ def get_forecast_cashflow(
     actual_closing = opening + actual_income - actual_expense
 
     diff = actual_closing - adjusted_forecast_closing
+
+    # 6-ter. 시계열 합성 예상 기말 (today까지 실제 + 남은 기간 예상)
+    # 이미 지나간 expected_day의 예상은 실제 발생분으로 대체 — 유령 예상 제거
+    predicted_ending: Decimal
+    if today_day_in_month == last_day or as_of > month_end:
+        # 월 종료: 예상 기말 = 실제 월말 잔고 (100% 실제)
+        predicted_ending = actual_closing
+    elif today_day_in_month == 0 or as_of < month_start:
+        # 월 시작 전: 예상 기말 = 기초 + 전체 예상 + 시차보정
+        predicted_ending = adjusted_forecast_closing
+    else:
+        # 월 진행 중: 어제(today-1)까지 실제 + 오늘 이후(today 포함) 예상
+        # "오늘" 건은 아직 실제 DB에 없을 수 있으므로 예상으로 취급.
+        cutoff_date = date(year, month, today_day_in_month - 1) if today_day_in_month > 1 else None
+        actual_in_to_today = Decimal("0"); actual_out_to_today = Decimal("0")
+        if cutoff_date is not None:
+            cur.execute(
+                """
+                SELECT
+                    COALESCE(SUM(CASE WHEN type='in' THEN amount ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN type='out' THEN amount ELSE 0 END), 0)
+                FROM transactions
+                WHERE entity_id = %s
+                  AND source_type IN ('woori_bank', 'codef_woori_bank', 'codef_ibk_bank', 'mercury_api', 'manual')
+                  AND date >= %s AND date <= %s
+                  AND is_duplicate = false
+                  AND (is_cancel IS NOT TRUE)
+                """,
+                [entity_id, month_start, cutoff_date],
+            )
+            row = cur.fetchone()
+            actual_in_to_today = Decimal(str(row[0]))
+            actual_out_to_today = Decimal(str(row[1]))
+
+        split = _split_forecasts_by_today(items, today_day_in_month)
+        predicted_ending = (
+            opening
+            + actual_in_to_today - actual_out_to_today
+            + split["remaining_in"] - split["remaining_expense"] - split["remaining_card"]
+            + timing_adj
+        )
 
     # 6-bis. 일별 실제 잔고 (그래프용 — 계단식)
     bank_txs = get_bank_transactions(conn, entity_id, year, month)
@@ -719,6 +818,9 @@ def get_forecast_cashflow(
         ],
         "forecast_closing": float(forecast_closing),
         "adjusted_forecast_closing": float(adjusted_forecast_closing),
+        "predicted_ending": float(predicted_ending),
+        "as_of_date": as_of.isoformat(),
+        "today_day_in_month": today_day_in_month,
         "actual_income": float(actual_income),
         "actual_expense": float(actual_expense),
         "actual_closing": float(actual_closing),

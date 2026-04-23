@@ -128,6 +128,9 @@ interface ForecastData {
   card_settings: CardSetting[]
   forecast_closing: number
   adjusted_forecast_closing: number
+  predicted_ending: number
+  as_of_date: string
+  today_day_in_month: number
   actual_income: number
   actual_expense: number
   actual_closing: number
@@ -1391,6 +1394,214 @@ function ForecastModal({
   )
 }
 
+// ── ForecastDetailModal — 하위항목 클릭 시 세부 정보 팝업 ──────────
+
+function ForecastDetailModal({
+  item,
+  allItems,
+  entityId,
+  formatAmount,
+  onEdit,
+  open,
+  onOpenChange,
+}: {
+  item: ForecastItem
+  allItems: ForecastItem[]
+  entityId: string
+  formatAmount: (v: number) => string
+  onEdit: () => void
+  open: boolean
+  onOpenChange: (v: boolean) => void
+}) {
+  // 하위(children) 항목 수집 — virtual parent인 경우
+  const children = allItems.filter(
+    (i) => i.internal_account_parent_id === item.internal_account_id && i.id !== item.id,
+  )
+  const actual = item.actual_from_transactions ?? item.actual_amount ?? 0
+  const diff = actual - item.forecast_amount
+  const pct = item.forecast_amount !== 0 ? Math.round((actual / item.forecast_amount) * 100) : null
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Badge
+              variant="outline"
+              className={cn(
+                "text-[10px] font-semibold px-2 py-0.5",
+                item.type === "in" ? "bg-green-500/12 text-green-400" : "bg-red-500/12 text-red-400",
+              )}
+            >
+              {item.type === "in" ? "입금" : "출금"}
+            </Badge>
+            <span>{item.internal_account_name ?? item.category}</span>
+            {item.parent_account_name && (
+              <span className="text-xs text-muted-foreground font-normal">
+                &larr; {item.parent_account_name}
+              </span>
+            )}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 pt-2">
+          {/* KPI 카드 3개: 예상 / 실제 / 달성률 */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-lg border border-border bg-white/[0.02] px-3 py-2.5">
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">예상</div>
+              <div className="text-sm font-semibold font-mono tabular-nums">
+                {formatAmount(item.forecast_amount)}
+              </div>
+            </div>
+            <div className="rounded-lg border border-border bg-white/[0.02] px-3 py-2.5">
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">실제</div>
+              <div className={cn(
+                "text-sm font-semibold font-mono tabular-nums",
+                actual > 0 ? "text-[hsl(var(--profit))]" : "text-muted-foreground",
+              )}>
+                {formatAmount(actual)}
+              </div>
+            </div>
+            <div className="rounded-lg border border-border bg-white/[0.02] px-3 py-2.5">
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">달성률</div>
+              <div className={cn(
+                "text-sm font-semibold font-mono tabular-nums",
+                pct === null ? "text-muted-foreground" :
+                pct > 110 ? "text-[hsl(var(--loss))]" :
+                pct >= 90 ? "text-[hsl(var(--profit))]" :
+                "text-[hsl(var(--warning))]",
+              )}>
+                {pct !== null ? `${pct}%` : "--"}
+              </div>
+              {diff !== 0 && (
+                <div className={cn(
+                  "text-[10px] mt-0.5 font-mono",
+                  diff > 0 ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]",
+                )}>
+                  {diff > 0 ? "+" : ""}{formatAmount(diff)}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 메타 정보 */}
+          <div className="space-y-1.5 text-sm">
+            {item.expected_day != null && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground text-xs">예상 일자</span>
+                <span className="font-mono">{item.expected_day}일</span>
+              </div>
+            )}
+            <div className="flex justify-between">
+              <span className="text-muted-foreground text-xs">결제 방식</span>
+              <span className="text-xs">{item.payment_method === "card" ? "카드" : "은행"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground text-xs">반복 설정</span>
+              <span className="text-xs">{item.is_recurring ? "고정 (매월)" : "일회성"}</span>
+            </div>
+            {item.internal_account_id && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground text-xs">내부계정 ID</span>
+                <span className="text-xs font-mono">#{item.internal_account_id}</span>
+              </div>
+            )}
+          </div>
+
+          {/* 세부 라인 항목 */}
+          {item.line_items && item.line_items.length > 0 && (
+            <div>
+              <div className="text-xs font-semibold text-muted-foreground mb-1.5">
+                세부 라인 ({item.line_items.length}건)
+              </div>
+              <div className="rounded-lg border border-border overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/[0.15]">
+                    <tr>
+                      <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">이름</th>
+                      <th className="px-3 py-1.5 text-right font-medium text-muted-foreground">금액</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {item.line_items.map((li, idx) => (
+                      <tr key={idx} className="border-t border-border">
+                        <td className="px-3 py-1.5">{li.name}</td>
+                        <td className="px-3 py-1.5 text-right font-mono tabular-nums">
+                          {formatAmount(li.amount)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* 하위 예상 항목 (virtual parent) */}
+          {children.length > 0 && (
+            <div>
+              <div className="text-xs font-semibold text-muted-foreground mb-1.5">
+                하위 항목 ({children.length}건)
+              </div>
+              <div className="rounded-lg border border-border overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/[0.15]">
+                    <tr>
+                      <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">이름</th>
+                      <th className="px-3 py-1.5 text-right font-medium text-muted-foreground">예상</th>
+                      <th className="px-3 py-1.5 text-right font-medium text-muted-foreground">실제</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {children.map((c) => (
+                      <tr key={c.id} className="border-t border-border hover:bg-white/[0.02]">
+                        <td className="px-3 py-1.5">
+                          {c.internal_account_name ?? c.category}
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-mono tabular-nums">
+                          {formatAmount(c.forecast_amount)}
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-mono tabular-nums text-muted-foreground">
+                          {formatAmount(c.actual_from_transactions ?? c.actual_amount ?? 0)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* 메모 */}
+          {item.note && (
+            <div>
+              <div className="text-xs font-semibold text-muted-foreground mb-1.5">메모</div>
+              <div className="rounded-lg border border-border bg-white/[0.02] px-3 py-2 text-xs whitespace-pre-wrap">
+                {item.note}
+              </div>
+            </div>
+          )}
+
+          {/* 액션 */}
+          <div className="flex justify-between gap-2 pt-2 border-t border-border">
+            <Link
+              href={`/transactions?entity=${entityId}${item.internal_account_id ? `&internal_account_id=${item.internal_account_id}` : ""}`}
+              className="text-xs text-blue-400 hover:underline self-center"
+            >
+              관련 거래 보기 &rarr;
+            </Link>
+            <div className="flex gap-2">
+              <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>닫기</Button>
+              <Button size="sm" onClick={onEdit}>수정</Button>
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+
 // ── Component ──────────────────────────────────────────
 
 export function ForecastTab({ entityId }: { entityId: string | null }) {
@@ -1420,6 +1631,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
   const [editingItemId, setEditingItemId] = useState<number | null>(null)
   const [editingAmount, setEditingAmount] = useState("")
   const [editModalItem, setEditModalItem] = useState<ForecastItem | null>(null)
+  const [detailModalItem, setDetailModalItem] = useState<ForecastItem | null>(null)
   const [collapsedIds, setCollapsedIds] = useState<Set<number> | null>(null) // null = not yet initialized
   const [expandedLeaves, setExpandedLeaves] = useState<Set<number>>(new Set()) // line_items 펼친 forecast.id
 
@@ -1726,8 +1938,8 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
   if (!data) return null
   const [y, m] = selectedMonth.split("-").map(Number)
 
-  const diffPct = data.adjusted_forecast_closing !== 0
-    ? ((data.actual_closing - data.adjusted_forecast_closing) / Math.abs(data.adjusted_forecast_closing) * 100)
+  const diffPct = data.predicted_ending !== 0
+    ? ((data.actual_closing - data.predicted_ending) / Math.abs(data.predicted_ending) * 100)
     : 0
   const diffColor = Math.abs(diffPct) <= 5 ? "text-[hsl(var(--profit))]" : Math.abs(diffPct) <= 10 ? "text-[hsl(var(--warning))]" : "text-[hsl(var(--loss))]"
 
@@ -1773,21 +1985,19 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
           colorClass="text-[#71717a]"
         />
         <KPICard
-          label="조정 예상 기말"
-          value={formatByEntity(closingBalances?.adjusted ?? data.adjusted_forecast_closing, entityId)}
-          rawAmount={closingBalances?.adjusted ?? data.adjusted_forecast_closing}
+          label={`예상 기말 (${data.as_of_date?.slice(5) ?? "today"} 합성)`}
+          value={formatByEntity(data.predicted_ending, entityId)}
+          rawAmount={data.predicted_ending}
           entityId={entityId}
           colorClass="text-[hsl(var(--warning))]"
           subtext={(() => {
-            if (!closingBalances) return undefined
-            const diff = closingBalances.adjusted - closingBalances.original
-            if (Math.abs(diff) < 1000) return undefined
+            const diff = data.predicted_ending - data.forecast_closing
+            if (Math.abs(diff) < 1000) return "원래 예상과 동일"
             return `${diff >= 0 ? "+" : ""}${formatByEntity(diff, entityId)} vs 원래`
           })()}
           subtextColor={(() => {
-            if (!closingBalances) return undefined
-            const diff = closingBalances.adjusted - closingBalances.original
-            if (Math.abs(diff) < 1000) return undefined
+            const diff = data.predicted_ending - data.forecast_closing
+            if (Math.abs(diff) < 1000) return "text-muted-foreground"
             return diff >= 0 ? "text-emerald-300" : "text-rose-300"
           })()}
         />
@@ -2031,10 +2241,10 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
 
                   const rowClickHandler = isVirtualParent && item.internal_account_id
                     ? () => toggleCollapse(item.internal_account_id!)
-                    : (canExpandLeaf
+                    : (!isVirtualParent
                         ? (e: React.MouseEvent) => {
                             if ((e.target as HTMLElement).closest("button, a, input")) return
-                            toggleLeafExpand(item.id)
+                            setDetailModalItem(item)
                           }
                         : undefined)
 
@@ -2047,7 +2257,7 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                         isVirtualParent && "bg-white/[0.01] cursor-pointer",
                         canExpandLeaf && "cursor-pointer",
                       )}
-                      title={canExpandLeaf ? (isLeafExpanded ? "클릭하여 접기" : "클릭하여 세부 보기") : undefined}
+                      title={!isVirtualParent ? "클릭하여 세부 보기" : (isCollapsed ? "클릭하여 펼치기" : "클릭하여 접기")}
                       onClick={rowClickHandler}
                     >
                       <td className="px-4 py-2.5">
@@ -2433,21 +2643,26 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
                   </td>
                   {showComparison && <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-muted-foreground">--</td>}
                   <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-[hsl(var(--warning))]">
-                    {formatByEntity(data.adjusted_forecast_closing, entityId)}
+                    {formatByEntity(data.predicted_ending, entityId)}
                   </td>
                   {showComparison && <td className="px-4 py-2.5 text-right font-mono tabular-nums text-xs text-muted-foreground">--</td>}
                   <td></td>
                 </tr>
               )}
 
-              {/* Closing row */}
+              {/* Closing row — 시계열 합성 기반 예상 기말 */}
               <tr className="border-t-2 border-t-amber-500/15 bg-amber-500/[0.03]">
                 <td className="px-4 py-3"></td>
-                <td className="px-4 py-3 font-bold">기말 잔고</td>
+                <td className="px-4 py-3 font-bold">
+                  기말 잔고
+                  <span className="ml-2 text-[10px] font-normal text-muted-foreground">
+                    ({data.as_of_date} 기준 · 실제+남은예상)
+                  </span>
+                </td>
                 <td className="px-4 py-3 text-right font-mono tabular-nums text-xs">--</td>
                 {showComparison && <td className="px-4 py-3 text-right font-mono tabular-nums text-xs">--</td>}
                 <td className="px-4 py-3 text-right font-mono tabular-nums text-xs text-[hsl(var(--warning))]">
-                  {formatByEntity(data.adjusted_forecast_closing, entityId)}
+                  {formatByEntity(data.predicted_ending, entityId)}
                 </td>
                 {showComparison && (
                   <td className="px-4 py-3 text-right font-mono tabular-nums text-xs text-[hsl(var(--profit))]">
@@ -2603,6 +2818,19 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
           editItem={editModalItem}
           open={!!editModalItem}
           onOpenChange={(v) => { if (!v) setEditModalItem(null) }}
+        />
+      )}
+
+      {/* Detail Modal — 하위항목 클릭 시 세부 보기 */}
+      {detailModalItem && (
+        <ForecastDetailModal
+          item={detailModalItem}
+          allItems={data.items}
+          entityId={entityId!}
+          formatAmount={(v: number) => formatByEntity(v, entityId)}
+          onEdit={() => { setEditModalItem(detailModalItem); setDetailModalItem(null) }}
+          open={!!detailModalItem}
+          onOpenChange={(v) => { if (!v) setDetailModalItem(null) }}
         />
       )}
     </div>
