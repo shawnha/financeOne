@@ -226,8 +226,39 @@ def group_card_expenses(transactions: list[dict]) -> list[dict]:
 # ── DB query functions ───────────────────────────────────────────────────────
 
 
-def get_opening_balance(conn: PgConnection, entity_id: int, year: int, month: int) -> Decimal:
-    """해당 월 기초잔고 조회 — balance_snapshots에서 해당 월 이전 최신 스냅샷."""
+def get_opening_balance(
+    conn: PgConnection,
+    entity_id: int,
+    year: int,
+    month: int,
+    _allow_predicted_fallback: bool = True,
+) -> Decimal:
+    """해당 월 기초잔고 조회.
+
+    정책:
+    - 전월이 이미 종료된 경우 (today > prev_month_end): balance_snapshots 기반 "확정" 값
+    - 전월이 아직 진행 중인 경우 (today <= prev_month_end): 전월 predicted_ending (시계열 합성)
+      → 월말까지 기다리지 않고도 다음 월 예상을 합리적으로 계산.
+      → 4/30이 지나면 자동으로 snapshot 기반으로 전환.
+
+    _allow_predicted_fallback=False: 재귀 방지용. 내부 호출(prev-month forecast 계산 시)에서 사용.
+    """
+    today = date.today()
+    prev_year = year if month > 1 else year - 1
+    prev_month = month - 1 if month > 1 else 12
+    prev_last_day = calendar.monthrange(prev_year, prev_month)[1]
+    prev_month_end = date(prev_year, prev_month, prev_last_day)
+
+    # 전월 진행 중 + 재귀 허용 → 전월 predicted_ending 시도
+    if _allow_predicted_fallback and today <= prev_month_end:
+        try:
+            prev_result = get_forecast_cashflow(conn, entity_id, prev_year, prev_month, as_of=today)
+            return Decimal(str(prev_result["predicted_ending"]))
+        except Exception:
+            # predicted 계산 실패 시 snapshot으로 fallback (silent)
+            pass
+
+    # 전월 종료 OR fallback: balance_snapshots 기반
     cur = conn.cursor()
     cur.execute(
         """
@@ -554,8 +585,17 @@ def get_forecast_cashflow(
     else:
         today_day_in_month = as_of.day
 
-    # 1. 기초잔고 (전월 확정 기말)
+    # 1. 기초잔고 — 전월 진행 중이면 predicted_ending fallback,
+    #    아니면 balance_snapshots. 내부 호출 시 재귀 방지를 위해 _allow_predicted_fallback
+    #    은 호출자가 명시하지 않으면 True가 기본값이므로, 여기서도 표준 동작 사용.
     opening = get_opening_balance(conn, entity_id, year, month)
+
+    # opening 값의 출처 표시 — UI 라벨용 ("확정" vs "예상")
+    _prev_year = year if month > 1 else year - 1
+    _prev_month = month - 1 if month > 1 else 12
+    _prev_last = calendar.monthrange(_prev_year, _prev_month)[1]
+    _prev_end = date(_prev_year, _prev_month, _prev_last)
+    opening_source = "predicted" if date.today() <= _prev_end else "confirmed"
 
     # 2. Forecast 항목 조회 (expected_day, payment_method 포함)
     cur.execute(
@@ -909,6 +949,7 @@ def get_forecast_cashflow(
         "predicted_ending": float(predicted_ending),
         "as_of_date": as_of.isoformat(),
         "today_day_in_month": today_day_in_month,
+        "opening_source": opening_source,
         "actual_income": float(actual_income),
         "actual_expense": float(actual_expense),
         "actual_closing": float(actual_closing),

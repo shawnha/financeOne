@@ -131,6 +131,7 @@ interface ForecastData {
   predicted_ending: number
   as_of_date: string
   today_day_in_month: number
+  opening_source: "confirmed" | "predicted"
   actual_income: number
   actual_expense: number
   actual_closing: number
@@ -2058,7 +2059,14 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
 
       {/* KPI — 5개 동등 column으로 분리 (폭 부족으로 숫자 truncate 방지) */}
       <div className="grid grid-cols-5 gap-3 max-xl:grid-cols-3 max-md:grid-cols-2">
-        <KPICard label={`기초 (${m - 1 || 12}월 확정)`} value={formatByEntity(data.opening_balance, entityId)} rawAmount={data.opening_balance} entityId={entityId} />
+        <KPICard
+          label={`기초 (${m - 1 || 12}월 ${data.opening_source === "predicted" ? "예상" : "확정"})`}
+          value={formatByEntity(data.opening_balance, entityId)}
+          rawAmount={data.opening_balance}
+          entityId={entityId}
+          subtext={data.opening_source === "predicted" ? "월말 확정 시 자동 갱신" : undefined}
+          subtextColor={data.opening_source === "predicted" ? "text-muted-foreground" : undefined}
+        />
         <KPICard
           label="원래 예상 기말"
           value={formatByEntity(closingBalances?.original ?? data.forecast_closing, entityId)}
