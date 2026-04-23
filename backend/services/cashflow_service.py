@@ -459,7 +459,11 @@ def _split_forecasts_by_today(
     - expected_day >= today_day → remaining (미래 — 전액 예상)
     - expected_day IS NULL → remaining에 "미실현분(=max(0, forecast-actual))"만 포함
       이유: NULL-day 구독/정기 지출은 월 중 이미 결제됐을 수 있음.
-      이미 발생한 만큼은 actual_to_yesterday에 포함되므로 중복 제거.
+
+    카드 vs 은행 판별:
+    - forecast.payment_method='bank'이지만 실제 거래가 주로 카드이면
+      실질적으로 카드 지출. bank 예상 기말에는 영향 없고 timing_adj로 처리됨.
+      → remaining_expense 대신 remaining_card로 분류하거나 제외.
     """
     past_in = Decimal("0"); past_expense = Decimal("0"); past_card = Decimal("0")
     rem_in = Decimal("0"); rem_expense = Decimal("0"); rem_card = Decimal("0")
@@ -468,14 +472,24 @@ def _split_forecasts_by_today(
         exp_day = item.get("expected_day")
         is_past = (today_day is not None) and (exp_day is not None) and (int(exp_day) < int(today_day))
 
-        # NULL expected_day: actual로 이미 발생한 만큼 차감
+        # 계정별 실제 결제 분포 (bank vs card)
+        acct_id = item.get("internal_account_id")
+        bank_actual = Decimal("0"); card_actual = Decimal("0")
+        if acct_id and actual_by_account is not None:
+            info = actual_by_account.get((acct_id, item["type"]), {})
+            bank_actual = Decimal(str(info.get("bank", 0) or 0))
+            card_actual = Decimal(str(info.get("card", 0) or 0))
+        total_actual = bank_actual + card_actual
+
+        # NULL-day: 미실현분만 remaining으로 처리
         effective_amt = forecast_amt
-        if exp_day is None and actual_by_account is not None:
-            acct_id = item.get("internal_account_id")
-            if acct_id:
-                actual_key = (acct_id, item["type"])
-                actual_total = Decimal(str(actual_by_account.get(actual_key, {}).get("total", 0) or 0))
-                effective_amt = max(Decimal("0"), forecast_amt - actual_total)
+        if exp_day is None and acct_id:
+            effective_amt = max(Decimal("0"), forecast_amt - total_actual)
+
+        # 실제 결제 방식이 카드 주류(>50%)인데 forecast는 bank로 잡힌 경우 → 카드로 재분류
+        is_actual_card_dominant = (total_actual > 0) and (card_actual > bank_actual)
+        item_pm = item.get("payment_method", "bank")
+        effective_pm = "card" if (is_actual_card_dominant and item_pm != "card") else item_pm
 
         if item["type"] == "in":
             if is_past:
@@ -483,7 +497,7 @@ def _split_forecasts_by_today(
             else:
                 rem_in += effective_amt
         else:
-            if item.get("payment_method") == "card":
+            if effective_pm == "card":
                 if is_past:
                     past_card += forecast_amt
                 else:
@@ -548,10 +562,17 @@ def get_forecast_cashflow(
     )
     items = fetch_all(cur)
 
-    # 2-bis. 내부계정별 실제 거래 합계
+    # 2-bis. 내부계정별 실제 거래 합계 (bank vs card 분리)
     cur.execute(
         """
-        SELECT t.internal_account_id, t.type, SUM(t.amount) AS total, ia.name AS account_name
+        SELECT t.internal_account_id, t.type, ia.name AS account_name,
+               SUM(CASE WHEN t.source_type IN ('woori_bank','codef_woori_bank','codef_ibk_bank','mercury_api','manual')
+                        THEN t.amount ELSE 0 END) AS bank_total,
+               SUM(CASE WHEN t.source_type IN ('lotte_card','woori_card','shinhan_card',
+                                               'codef_lotte_card','codef_woori_card','codef_shinhan_card',
+                                               'expenseone_card','gowid_api')
+                        THEN t.amount ELSE 0 END) AS card_total,
+               SUM(t.amount) AS total
         FROM transactions t
         LEFT JOIN internal_accounts ia ON ia.id = t.internal_account_id
         WHERE t.entity_id = %s
@@ -566,7 +587,12 @@ def get_forecast_cashflow(
     )
     actual_by_account = {}
     for row in cur.fetchall():
-        actual_by_account[(row[0], row[1])] = {"total": float(row[2]), "name": row[3]}
+        actual_by_account[(row[0], row[1])] = {
+            "name": row[2],
+            "bank": float(row[3] or 0),
+            "card": float(row[4] or 0),
+            "total": float(row[5] or 0),
+        }
 
     # 2-bis-b. actual_amount 자동 반영 (forecast → DB 동기화)
     for (acct_id, acct_type), info in actual_by_account.items():
@@ -720,18 +746,29 @@ def get_forecast_cashflow(
             actual_out_to_today = Decimal(str(row[1]))
 
         split = _split_forecasts_by_today(items, today_day_in_month, actual_by_account)
-        # 카드 시차보정(timing_adj)은 전월 카드 대금이 당월 bank에서 결제되는 효과.
-        # 카드 결제일이 이미 지났으면 actual_to_yesterday에 포함 → 중복 방지로 제외.
-        # 모든 카드의 payment_day가 today_day 이전이면 timing_adj 무시.
-        max_card_payment_day = max(
-            (c["payment_day"] for c in cards if c.get("payment_day")), default=0,
-        )
-        include_timing = today_day_in_month < max_card_payment_day
+
+        # 카드 관련 bank 영향:
+        # - 당월 카드 사용(rem_card) → 차월 청구 → 이번 달 bank 영향 없음 (제외)
+        # - 전월 카드 청구 → 이번 달 bank에서 결제. payment_day가 이미 지났으면
+        #   actual_to_yesterday에 포함(중복 방지), 아직 안 지났으면 remaining으로 추가.
+        unpaid_prev_card = Decimal("0")
+        if cards:
+            # 각 카드의 전월 사용분 중 아직 결제 안 된(payment_day > today) 것만 합산
+            for card in cards:
+                payment_day = card.get("payment_day") or 0
+                if payment_day > today_day_in_month:
+                    src = card["source_type"]
+                    prev_card_for_source = get_card_total_net(conn, entity_id, prev_year, prev_month, source_type=src)
+                    unpaid_prev_card += prev_card_for_source
+        else:
+            # 카드 설정 없을 때 fallback: max payment_day 기준
+            unpaid_prev_card = prev_card_net  # 보수적
+
         predicted_ending = (
             opening
             + actual_in_to_today - actual_out_to_today
-            + split["remaining_in"] - split["remaining_expense"] - split["remaining_card"]
-            + (timing_adj if include_timing else Decimal("0"))
+            + split["remaining_in"] - split["remaining_expense"]
+            - unpaid_prev_card
         )
 
     # 6-bis. 일별 실제 잔고 (그래프용 — 계단식)
