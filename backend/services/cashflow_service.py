@@ -410,9 +410,21 @@ def get_card_total_net(
     month: int,
     source_type: Optional[str] = None,
 ) -> Decimal:
-    """특정 월 카드 순 사용액 (출금 - 환불). source_type 지정 시 해당 카드만."""
+    """특정 월 카드 순 사용액 (출금 - 환불). source_type 지정 시 해당 카드 family 매칭.
+
+    card_settings.source_type은 'lotte_card' 같은 bare 값이지만 실제 거래는
+    'codef_lotte_card' (Codef API 동기화) 또는 'lotte_card' (Excel 업로드) 등
+    복수 source_type으로 기록됨. 따라서 bare name과 codef_* 변형 모두 매칭.
+    """
     cur = conn.cursor()
     if source_type:
+        # family matching: bare + codef_ prefixed
+        source_variants = [source_type]
+        if not source_type.startswith("codef_"):
+            source_variants.append(f"codef_{source_type}")
+        else:
+            # codef_lotte_card → also include lotte_card
+            source_variants.append(source_type.replace("codef_", "", 1))
         cur.execute(
             """
             SELECT
@@ -420,12 +432,12 @@ def get_card_total_net(
                 COALESCE(SUM(CASE WHEN type = 'in' THEN amount ELSE 0 END), 0)
             FROM transactions
             WHERE entity_id = %s
-              AND source_type = %s
+              AND source_type = ANY(%s)
               AND date >= %s AND date < %s
               AND is_duplicate = false
               AND (is_cancel IS NOT TRUE)
             """,
-            [entity_id, source_type, *build_date_range(year, month)],
+            [entity_id, source_variants, *build_date_range(year, month)],
         )
     else:
         cur.execute(
