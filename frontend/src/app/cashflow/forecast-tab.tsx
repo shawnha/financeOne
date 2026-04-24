@@ -1585,7 +1585,7 @@ function ForecastDetailModal({
                 <table className="w-full text-xs">
                   <thead className="bg-muted/[0.15]">
                     <tr>
-                      <th className="px-3 py-1.5 text-left font-medium text-muted-foreground w-12"></th>
+                      <th className="pl-3 pr-1 py-1.5 text-left font-medium text-muted-foreground w-[56px]"></th>
                       <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">이름</th>
                       <th className="px-3 py-1.5 text-right font-medium text-muted-foreground">금액</th>
                     </tr>
@@ -1595,9 +1595,9 @@ function ForecastDetailModal({
                       const isRec = li.is_recurring ?? true
                       return (
                         <tr key={idx} className="border-t border-border">
-                          <td className="px-3 py-1.5">
+                          <td className="pl-3 pr-1 py-1.5">
                             <span className={cn(
-                              "text-[9px] font-semibold px-1.5 py-0.5 rounded",
+                              "inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap leading-none",
                               isRec
                                 ? "bg-emerald-500/15 text-emerald-400"
                                 : "bg-white/[0.04] text-muted-foreground",
