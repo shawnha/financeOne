@@ -602,6 +602,7 @@ def get_forecast_cashflow(
         """
         SELECT f.id, f.category, f.subcategory, f.type, f.forecast_amount, f.actual_amount,
                f.is_recurring, f.note, f.internal_account_id, f.expected_day, f.payment_method,
+               f.line_items,
                ia.name AS internal_account_name, ia.parent_id AS internal_account_parent_id,
                parent_ia.name AS parent_account_name
         FROM forecasts f
@@ -978,6 +979,7 @@ def get_forecast_cashflow(
                 "parent_account_name": i.get("parent_account_name"),
                 "expected_day": i.get("expected_day"),
                 "payment_method": i.get("payment_method", "bank"),
+                "line_items": i.get("line_items"),
                 "actual_from_transactions": actual_by_account.get(
                     (i.get("internal_account_id"), i["type"]), {}
                 ).get("total", 0.0) if i.get("internal_account_id") else None,

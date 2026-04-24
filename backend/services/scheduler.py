@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from psycopg2.extensions import connection as PgConnection
 
@@ -260,12 +261,25 @@ def start_scheduler() -> None:
         logger.info("scheduler disabled via SCHEDULER_ENABLED")
         return
 
-    interval_min = int(os.environ.get("SCHEDULER_INTERVAL_MIN", "30"))
+    # SCHEDULER_CRON_HOURS 우선 (예: "9,18" = KST 9시·18시). 없으면 INTERVAL_MIN fallback.
+    cron_hours = os.environ.get("SCHEDULER_CRON_HOURS", "").strip()
+    interval_min = int(os.environ.get("SCHEDULER_INTERVAL_MIN", "90"))
 
     _scheduler = AsyncIOScheduler()
+    if cron_hours:
+        # cron 모드 (KST 기준 고정 시간)
+        hours_csv = ",".join(
+            str(int(h.strip())) for h in cron_hours.split(",") if h.strip().isdigit()
+        )
+        trigger = CronTrigger(hour=hours_csv, minute=0, timezone="Asia/Seoul")
+        trigger_desc = f"cron KST {hours_csv}:00"
+    else:
+        trigger = IntervalTrigger(minutes=interval_min)
+        trigger_desc = f"interval {interval_min}min"
+
     _scheduler.add_job(
         codef_sync_job,
-        trigger=IntervalTrigger(minutes=interval_min),
+        trigger=trigger,
         id="codef_sync",
         name="Codef 카드/은행 자동 sync",
         max_instances=1,
@@ -273,7 +287,7 @@ def start_scheduler() -> None:
         misfire_grace_time=300,
     )
     _scheduler.start()
-    logger.info("scheduler started (interval=%d min)", interval_min)
+    logger.info("scheduler started (%s)", trigger_desc)
 
 
 def shutdown_scheduler() -> None:
@@ -286,9 +300,12 @@ def shutdown_scheduler() -> None:
 
 def get_status() -> dict:
     """UI 노출용 현재 상태."""
+    cron_hours = os.environ.get("SCHEDULER_CRON_HOURS", "").strip()
     info = {
         "running": _scheduler is not None and _scheduler.running,
-        "interval_min": int(os.environ.get("SCHEDULER_INTERVAL_MIN", "30")),
+        "mode": "cron" if cron_hours else "interval",
+        "cron_hours": cron_hours or None,
+        "interval_min": int(os.environ.get("SCHEDULER_INTERVAL_MIN", "90")),
         "enabled": os.environ.get("SCHEDULER_ENABLED", "1").lower() not in ("0", "false", "no"),
         "last_run": _last_run.copy() if _last_run else None,
     }
