@@ -42,6 +42,7 @@ interface ForecastLineItem {
   name: string
   amount: number
   note?: string | null
+  is_recurring?: boolean  // 기본 true — 비반복만 명시적 체크 해제
 }
 
 interface ForecastItem {
@@ -1290,7 +1291,7 @@ function ForecastModal({
               </label>
               <button
                 type="button"
-                onClick={() => setLineItems((prev) => [...prev, { name: "", amount: 0 }])}
+                onClick={() => setLineItems((prev) => [...prev, { name: "", amount: 0, is_recurring: true }])}
                 className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
               >
                 + 세부 추가
@@ -1298,47 +1299,67 @@ function ForecastModal({
             </div>
             {lineItems.length > 0 && (
               <div className="space-y-1.5 rounded-md border border-white/[0.05] bg-white/[0.02] p-2">
-                {lineItems.map((li, idx) => (
-                  <div key={idx} className="flex items-center gap-1.5">
-                    <Input
-                      placeholder="이름 (예: A법률사무소)"
-                      value={li.name}
-                      onChange={(e) => {
-                        const v = e.target.value
-                        setLineItems((prev) =>
-                          prev.map((p, i) => (i === idx ? { ...p, name: v } : p)),
-                        )
-                      }}
-                      className="h-8 text-xs flex-1"
-                    />
-                    <Input
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="0"
-                      value={li.amount ? Number(li.amount).toLocaleString() : ""}
-                      onChange={(e) => {
-                        const raw = e.target.value.replace(/[^\d]/g, "")
-                        const num = raw ? Number(raw) : 0
-                        setLineItems((prev) =>
-                          prev.map((p, i) => (i === idx ? { ...p, amount: num } : p)),
-                        )
-                      }}
-                      className="h-8 text-xs font-mono w-28 text-right"
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setLineItems((prev) => prev.filter((_, i) => i !== idx))
-                      }
-                      className="text-muted-foreground hover:text-rose-400 text-sm px-1"
-                      title="세부 삭제"
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
+                {lineItems.map((li, idx) => {
+                  const isRec = li.is_recurring ?? true
+                  return (
+                    <div key={idx} className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setLineItems((prev) =>
+                            prev.map((p, i) => (i === idx ? { ...p, is_recurring: !(p.is_recurring ?? true) } : p)),
+                          )
+                        }
+                        className={cn(
+                          "h-7 w-7 rounded text-[10px] font-semibold transition-colors shrink-0",
+                          isRec
+                            ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30"
+                            : "bg-white/[0.04] text-muted-foreground border border-white/[0.08] hover:bg-white/[0.08]",
+                        )}
+                        title={isRec ? "반복 항목 (전월 가져오기 대상)" : "일회성 항목 (이번 달만)"}
+                      >
+                        {isRec ? "반복" : "일회"}
+                      </button>
+                      <Input
+                        placeholder="이름 (예: A법률사무소)"
+                        value={li.name}
+                        onChange={(e) => {
+                          const v = e.target.value
+                          setLineItems((prev) =>
+                            prev.map((p, i) => (i === idx ? { ...p, name: v } : p)),
+                          )
+                        }}
+                        className="h-8 text-xs flex-1"
+                      />
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="0"
+                        value={li.amount ? Number(li.amount).toLocaleString() : ""}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/[^\d]/g, "")
+                          const num = raw ? Number(raw) : 0
+                          setLineItems((prev) =>
+                            prev.map((p, i) => (i === idx ? { ...p, amount: num } : p)),
+                          )
+                        }}
+                        className="h-8 text-xs font-mono w-28 text-right"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setLineItems((prev) => prev.filter((_, i) => i !== idx))
+                        }
+                        className="text-muted-foreground hover:text-rose-400 text-sm px-1"
+                        title="세부 삭제"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  )
+                })}
                 <p className="text-[10px] text-muted-foreground/70 pt-1">
-                  이름·금액이 둘 다 있는 행만 저장됩니다. 합계가 금액 필드에 반영됩니다.
+                  좌측 뱃지로 반복 여부 토글 (전월 가져오기 대상 지정). 이름·금액 둘 다 있는 행만 저장.
                 </p>
               </div>
             )}
@@ -1549,24 +1570,48 @@ function ForecastDetailModal({
             <div>
               <div className="text-xs font-semibold text-muted-foreground mb-1.5">
                 세부 라인 ({item.line_items.length}건)
+                {(() => {
+                  const rec = item.line_items.filter((li) => (li.is_recurring ?? true)).length
+                  const once = item.line_items.length - rec
+                  if (once === 0) return null
+                  return (
+                    <span className="ml-2 text-[10px] text-muted-foreground">
+                      반복 {rec} · 일회 {once}
+                    </span>
+                  )
+                })()}
               </div>
               <div className="rounded-lg border border-border overflow-hidden">
                 <table className="w-full text-xs">
                   <thead className="bg-muted/[0.15]">
                     <tr>
+                      <th className="px-3 py-1.5 text-left font-medium text-muted-foreground w-12"></th>
                       <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">이름</th>
                       <th className="px-3 py-1.5 text-right font-medium text-muted-foreground">금액</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {item.line_items.map((li, idx) => (
-                      <tr key={idx} className="border-t border-border">
-                        <td className="px-3 py-1.5">{li.name}</td>
-                        <td className="px-3 py-1.5 text-right font-mono tabular-nums">
-                          {formatAmount(li.amount)}
-                        </td>
-                      </tr>
-                    ))}
+                    {item.line_items.map((li, idx) => {
+                      const isRec = li.is_recurring ?? true
+                      return (
+                        <tr key={idx} className="border-t border-border">
+                          <td className="px-3 py-1.5">
+                            <span className={cn(
+                              "text-[9px] font-semibold px-1.5 py-0.5 rounded",
+                              isRec
+                                ? "bg-emerald-500/15 text-emerald-400"
+                                : "bg-white/[0.04] text-muted-foreground",
+                            )}>
+                              {isRec ? "반복" : "일회"}
+                            </span>
+                          </td>
+                          <td className="px-3 py-1.5">{li.name}</td>
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums">
+                            {formatAmount(li.amount)}
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>

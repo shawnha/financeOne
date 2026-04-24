@@ -19,6 +19,7 @@ class ForecastLineItem(BaseModel):
     name: str
     amount: float
     note: Optional[str] = None
+    is_recurring: bool = True  # 기본 반복 — 비반복만 명시적 해제
 
 
 class ForecastCreate(BaseModel):
@@ -336,18 +337,36 @@ def copy_recurring_forecasts(
 
     cur = conn.cursor()
     try:
+        # line_items 필터 SQL — is_recurring=true 또는 필드 없음(backward compat)만 유지.
+        # 필터 결과 배열이 비면 NULL. 결과 있으면 해당 합계가 forecast_amount.
+        li_filter_sql = """
+            (SELECT jsonb_agg(li)
+             FROM jsonb_array_elements(f.line_items) li
+             WHERE COALESCE((li->>'is_recurring')::bool, true) = true)
+        """
+        li_sum_sql = """
+            (SELECT COALESCE(SUM((li->>'amount')::numeric), 0)
+             FROM jsonb_array_elements(f.line_items) li
+             WHERE COALESCE((li->>'is_recurring')::bool, true) = true)
+        """
+
         if amount_source == "actual":
             # transactions 테이블에서 실제 거래 합계를 가져와 forecast_amount로 사용
             cur.execute(
-                """
+                f"""
                 INSERT INTO forecasts
                     (entity_id, year, month, category, subcategory, type,
                      forecast_amount, is_recurring, internal_account_id, note,
-                     expected_day, payment_method)
+                     expected_day, payment_method, line_items)
                 SELECT f.entity_id, %s, %s, f.category, f.subcategory, f.type,
-                       COALESCE(t.actual_total, f.forecast_amount),
+                       CASE
+                         WHEN f.line_items IS NOT NULL AND jsonb_array_length(f.line_items) > 0
+                           THEN {li_sum_sql}
+                         ELSE COALESCE(t.actual_total, f.forecast_amount)
+                       END,
                        f.is_recurring, f.internal_account_id, f.note,
-                       f.expected_day, f.payment_method
+                       f.expected_day, f.payment_method,
+                       {li_filter_sql}
                 FROM forecasts f
                 LEFT JOIN (
                     SELECT internal_account_id, type, SUM(amount) AS actual_total
@@ -369,16 +388,22 @@ def copy_recurring_forecasts(
             )
         else:
             cur.execute(
-                """
+                f"""
                 INSERT INTO forecasts
                     (entity_id, year, month, category, subcategory, type,
                      forecast_amount, is_recurring, internal_account_id, note,
-                     expected_day, payment_method)
-                SELECT entity_id, %s, %s, category, subcategory, type,
-                       forecast_amount, is_recurring, internal_account_id, note,
-                       expected_day, payment_method
-                FROM forecasts
-                WHERE entity_id = %s AND year = %s AND month = %s AND is_recurring = true
+                     expected_day, payment_method, line_items)
+                SELECT f.entity_id, %s, %s, f.category, f.subcategory, f.type,
+                       CASE
+                         WHEN f.line_items IS NOT NULL AND jsonb_array_length(f.line_items) > 0
+                           THEN {li_sum_sql}
+                         ELSE f.forecast_amount
+                       END,
+                       f.is_recurring, f.internal_account_id, f.note,
+                       f.expected_day, f.payment_method,
+                       {li_filter_sql}
+                FROM forecasts f
+                WHERE f.entity_id = %s AND f.year = %s AND f.month = %s AND f.is_recurring = true
                 ON CONFLICT DO NOTHING
                 RETURNING id
                 """,
