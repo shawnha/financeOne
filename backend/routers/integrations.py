@@ -614,6 +614,54 @@ def codef_sync_card(
         client.close()
 
 
+class CodefTaxInvoiceSyncRequest(CodefSyncRequest):
+    query_type: str = "3"  # '1'=매출, '2'=매입, '3'=전체
+    our_biz_no: Optional[str] = None  # direction 자동 판별. 미지정 시 모두 'unknown'
+
+    @field_validator("query_type")
+    @classmethod
+    def validate_query_type(cls, v: str) -> str:
+        if v not in ("1", "2", "3"):
+            raise ValueError("query_type must be '1' (sales), '2' (purchase), or '3' (all)")
+        return v
+
+
+@router.post("/codef/sync-tax-invoice")
+def codef_sync_tax_invoice(
+    body: CodefTaxInvoiceSyncRequest,
+    conn: PgConnection = Depends(get_db),
+):
+    """Codef 홈택스 전자세금계산서 통합조회 → invoices 테이블 동기화.
+
+    organization=0001 (국세청 홈택스).
+    connected_id: 사전에 사업자 인증서로 등록된 connected_id (settings 'hometax').
+    our_biz_no 입력 시 매출/매입 자동 판별. 미입력 시 모두 direction='unknown'.
+    """
+    from backend.services.integrations.codef import CodefError, set_last_sync
+    connected_id = _resolve_connected_id(conn, body.entity_id, "hometax", body.connected_id)
+    client = _get_codef_client()
+    try:
+        result = client.sync_tax_invoices(
+            conn, body.entity_id, connected_id,
+            body.start_date, body.end_date,
+            query_type=body.query_type,
+            our_biz_no=body.our_biz_no,
+        )
+        set_last_sync(conn, body.entity_id, "hometax")
+        conn.commit()
+        return result
+    except CodefError as e:
+        conn.rollback()
+        log_id = _log_codef_error(conn, body.entity_id, "hometax", e)
+        raise HTTPException(400, _codef_error_detail(e, log_id))
+    except Exception as e:
+        conn.rollback()
+        logger.exception("Codef tax invoice sync failed")
+        raise HTTPException(500, f"내부 오류: {type(e).__name__}")
+    finally:
+        client.close()
+
+
 class CodefCompareCardRequest(BaseModel):
     entity_id: int
     card_type: str

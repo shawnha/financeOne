@@ -585,7 +585,76 @@ def test_org_codes_covers_all_supported_orgs():
     assert "lotte_card" in ORG_CODES
     assert "woori_card" in ORG_CODES
     assert "shinhan_card" in ORG_CODES
+    assert "hometax" in ORG_CODES  # 국세청 (P2 세금계산서 sync)
+    assert ORG_CODES["hometax"] == "0001"
     # 기관 코드는 4자리 숫자 문자열
     for code in ORG_CODES.values():
         assert len(code) == 4
         assert code.isdigit()
+
+
+# ── 홈택스 세금계산서 정규화 ─────────────────────────
+
+
+class TestNormalizeTaxInvoiceRow:
+    """Codef 홈택스 전자세금계산서 응답 → invoices 컬럼 매핑."""
+
+    def test_sales_when_our_biz_is_seller(self):
+        from backend.services.integrations.codef import _normalize_tax_invoice_row
+        row = {
+            "resIssueDate": "20260415",
+            "resApprovalNo": "DOC123",
+            "resInvoicerRegNum": "999-88-77777",  # 우리 = 공급자
+            "resInvoicerName": "한아원코리아",
+            "resTrusteeRegNum": "555-44-33333",
+            "resTrusteeName": "고객A",
+            "resSupplyAmount": "100000",
+            "resTaxAmount": "10000",
+            "resTotalAmount": "110000",
+            "resItemName": "컨설팅",
+        }
+        result = _normalize_tax_invoice_row(row, our_biz_no="999-88-77777")
+        assert result is not None
+        assert result["direction"] == "sales"
+        assert result["counterparty"] == "고객A"
+        assert result["counterparty_biz_no"] == "5554433333"
+        assert result["amount"] == 100000.0
+        assert result["vat"] == 10000.0
+        assert result["total"] == 110000.0
+        assert result["document_no"] == "DOC123"
+
+    def test_purchase_when_our_biz_is_buyer(self):
+        from backend.services.integrations.codef import _normalize_tax_invoice_row
+        row = {
+            "resIssueDate": "20260420",
+            "resInvoicerRegNum": "111-22-33333",  # 공급자 = 외부
+            "resInvoicerName": "공급사B",
+            "resTrusteeRegNum": "999-88-77777",  # 우리 = 공급받는자
+            "resSupplyAmount": "60000",
+            "resTaxAmount": "6000",
+        }
+        result = _normalize_tax_invoice_row(row, our_biz_no="999-88-77777")
+        assert result["direction"] == "purchase"
+        assert result["counterparty"] == "공급사B"
+        assert result["total"] == 66000.0  # amount + vat 자동
+
+    def test_unknown_when_no_match(self):
+        from backend.services.integrations.codef import _normalize_tax_invoice_row
+        row = {
+            "resIssueDate": "20260420",
+            "resInvoicerRegNum": "111-11-11111",
+            "resTrusteeRegNum": "222-22-22222",
+            "resSupplyAmount": "50000",
+        }
+        result = _normalize_tax_invoice_row(row, our_biz_no="999-99-99999")
+        assert result["direction"] == "unknown"
+
+    def test_returns_none_without_issue_date(self):
+        from backend.services.integrations.codef import _normalize_tax_invoice_row
+        row = {"resInvoicerRegNum": "x", "resSupplyAmount": "100"}
+        assert _normalize_tax_invoice_row(row, our_biz_no="x") is None
+
+    def test_returns_none_when_amount_zero(self):
+        from backend.services.integrations.codef import _normalize_tax_invoice_row
+        row = {"resIssueDate": "20260415", "resSupplyAmount": "0", "resTotalAmount": "0"}
+        assert _normalize_tax_invoice_row(row) is None

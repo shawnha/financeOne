@@ -55,6 +55,7 @@ ORG_CODES = {
     "woori_card": "0309",     # 이전 0315는 무효. 0309가 진짜 우리카드
     "kb_card": "0301",        # ← 0311 (롯데) 에서 정정
     "hana_card": "0313",
+    "hometax": "0001",        # 국세청 홈택스 (전자세금계산서 통합 조회)
 }
 
 # UI 표시명
@@ -78,6 +79,8 @@ CARD_ORGS = {
     "lotte_card", "bc_card", "samsung_card", "shinhan_card",
     "hyundai_card", "nh_card", "woori_card", "kb_card", "hana_card",
 }
+# 공공기관 (홈택스 등) — 세금계산서/사업자/세금신고 결과 등
+PUBLIC_ORGS = {"hometax"}
 
 # NPKI cert OU 키워드 → 한글 은행/기관명
 _BANK_OU_KEYWORDS = {
@@ -798,6 +801,139 @@ class CodefClient:
             "environment": self.environment,
         }
 
+    # ── 홈택스 전자세금계산서 ───────────────────────────────────
+
+    def get_tax_invoices(
+        self,
+        connected_id: str,
+        start_date: str,
+        end_date: str,
+        *,
+        query_type: str = "3",  # '1'=매출, '2'=매입, '3'=전체
+    ) -> list[dict]:
+        """국세청 홈택스 전자세금계산서 통합조회.
+
+        path: /v1/kr/public/nt/tax-invoice/integrated-check-list
+        organization: 0001 (국세청)
+
+        Args:
+            connected_id: 홈택스 connected_id (사업자 인증서 등록 후 발급).
+            start_date / end_date: YYYYMMDD.
+            query_type: 1=매출, 2=매입, 3=전체.
+
+        Returns: list[dict] — 각 row 의 표준화 전 raw 응답.
+        """
+        data = self._request(
+            "/v1/kr/public/nt/tax-invoice/integrated-check-list",
+            {
+                "connectedId": connected_id,
+                "organization": ORG_CODES["hometax"],
+                "startDate": start_date,
+                "endDate": end_date,
+                "type": query_type,  # 매출/매입/전체
+                # 영세율여부, 일반/위수탁 등은 기본값 사용
+            },
+        )
+        # Codef 응답: list 직접 또는 dict.resTaxInvoiceList
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            for key in ("resTaxInvoiceList", "resInvoiceList", "data"):
+                if isinstance(data.get(key), list):
+                    return data[key]
+        return []
+
+    def sync_tax_invoices(
+        self,
+        conn: PgConnection,
+        entity_id: int,
+        connected_id: str,
+        start_date: str,
+        end_date: str,
+        *,
+        query_type: str = "3",
+        our_biz_no: Optional[str] = None,
+    ) -> dict:
+        """홈택스 세금계산서 → invoices 테이블 동기화.
+
+        - direction 자동 판별: our_biz_no(우리 사업자번호) 가 공급자=sales,
+          공급받는자=purchase. 미일치 → 'unknown' (사용자 결정 필요).
+        - 중복 감지: (entity_id, document_no, issue_date).
+        - 응답 필드는 _normalize_tax_invoice_row 가 표준화.
+        """
+        raw_list = self.get_tax_invoices(
+            connected_id, start_date, end_date, query_type=query_type,
+        )
+        cur = conn.cursor()
+        inserted = 0
+        duplicates = 0
+        skipped = 0
+        unknown = 0
+        try:
+            for raw in raw_list:
+                try:
+                    norm = _normalize_tax_invoice_row(raw, our_biz_no=our_biz_no)
+                except Exception as e:
+                    logger.warning("tax invoice normalize failed: %s | row=%s", e, raw)
+                    skipped += 1
+                    continue
+                if norm is None:
+                    skipped += 1
+                    continue
+
+                # 중복 감지
+                if norm["document_no"]:
+                    cur.execute(
+                        """
+                        SELECT id FROM invoices
+                        WHERE entity_id = %s AND document_no = %s AND issue_date = %s
+                        LIMIT 1
+                        """,
+                        [entity_id, norm["document_no"], norm["issue_date"]],
+                    )
+                    if cur.fetchone():
+                        duplicates += 1
+                        continue
+
+                if norm["direction"] == "unknown":
+                    unknown += 1
+
+                cur.execute(
+                    """
+                    INSERT INTO invoices (
+                        entity_id, direction, counterparty, counterparty_biz_no,
+                        issue_date, due_date, document_no,
+                        amount, vat, total, currency,
+                        description, status, raw_data
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'KRW', %s, 'open', %s)
+                    """,
+                    [
+                        entity_id, norm["direction"], norm["counterparty"],
+                        norm["counterparty_biz_no"],
+                        norm["issue_date"], norm["due_date"], norm["document_no"],
+                        norm["amount"], norm["vat"], norm["total"],
+                        norm["description"],
+                        json.dumps(raw, ensure_ascii=False),
+                    ],
+                )
+                inserted += 1
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cur.close()
+
+        return {
+            "fetched": len(raw_list),
+            "inserted": inserted,
+            "duplicates": duplicates,
+            "skipped": skipped,
+            "unknown_direction": unknown,
+            "query_type": query_type,
+            "environment": self.environment,
+        }
+
 
 # ── Codef 응답 파싱 ─────────────────────────────────────
 
@@ -984,6 +1120,95 @@ def _normalize_card_row(item: dict) -> Optional[dict]:
         "card_number": card_no,
         "member_name": member,
         "is_cancel": is_cancel,
+    }
+
+
+def _normalize_biz_no(s: Optional[str]) -> str:
+    """사업자번호 정규화 (digits only)."""
+    if not s:
+        return ""
+    return "".join(c for c in str(s) if c.isdigit())
+
+
+def _normalize_tax_invoice_row(item: dict, our_biz_no: Optional[str] = None) -> Optional[dict]:
+    """홈택스 전자세금계산서 row → invoices 테이블 컬럼 매핑.
+
+    Codef 응답 필드 (홈택스 통합조회):
+    - resIssueDate / resWriteDate: 작성일자 (YYYYMMDD)
+    - resApprovalNo / resIssueId: 승인번호
+    - resFranchiseeRegNum / resInvoicerRegNum: 공급자 사업자번호
+    - resInvoicerName / resInvoicerCorpName: 공급자 상호
+    - resTrusteeRegNum / resInvoiceeRegNum: 공급받는자 사업자번호
+    - resTrusteeName / resInvoiceeCorpName: 공급받는자 상호
+    - resSupplyAmount / resAmount: 공급가액
+    - resTaxAmount: 세액
+    - resTotalAmount / resSumAmount: 합계
+    - resType / resTaxInvoiceType: 종류 (사용 안 함, direction 은 our_biz_no 로 결정)
+
+    필드명이 product 마다 다를 수 있어 fallback chain 으로 fetch.
+    """
+    def pick(*keys, default=""):
+        for k in keys:
+            v = item.get(k)
+            if v is not None and str(v).strip() != "":
+                return v
+        return default
+
+    issue_raw = pick("resIssueDate", "resWriteDate", "resCreateDate", "resApproveDate")
+    issue_date = _parse_codef_date(str(issue_raw)) if issue_raw else None
+    if not issue_date:
+        return None  # 발행일 없으면 invoice 만들 수 없음
+
+    document_no = str(pick("resApprovalNo", "resIssueId", "resInvoiceNo", "resTaxInvoiceNo") or "").strip() or None
+
+    # 공급자/공급받는자
+    seller_biz = _normalize_biz_no(str(pick(
+        "resFranchiseeRegNum", "resInvoicerRegNum", "resBusinessIssuerNum",
+        "resSupplierRegNum",
+    )))
+    buyer_biz = _normalize_biz_no(str(pick(
+        "resTrusteeRegNum", "resInvoiceeRegNum", "resBusinessRecipientNum",
+        "resReceiverRegNum",
+    )))
+    seller_name = str(pick("resInvoicerName", "resInvoicerCorpName", "resSupplierName") or "").strip()
+    buyer_name = str(pick("resTrusteeName", "resInvoiceeCorpName", "resReceiverName") or "").strip()
+
+    amount = _parse_amount(pick("resSupplyAmount", "resAmount", "resSupply", "resSupplyValue", default="0"))
+    vat = _parse_amount(pick("resTaxAmount", "resVAT", default="0"))
+    total = _parse_amount(pick("resTotalAmount", "resSumAmount", "resTotal", default="0"))
+    if total == Decimal("0"):
+        total = amount + vat
+    if amount == Decimal("0") and total == Decimal("0"):
+        return None  # 금액 0 — 의미 없는 row
+
+    # direction 자동 판별
+    our_clean = _normalize_biz_no(our_biz_no)
+    if our_clean and seller_biz == our_clean:
+        direction = "sales"
+        counterparty = buyer_name or "(거래처 미상)"
+        counterparty_biz = buyer_biz or None
+    elif our_clean and buyer_biz == our_clean:
+        direction = "purchase"
+        counterparty = seller_name or "(거래처 미상)"
+        counterparty_biz = seller_biz or None
+    else:
+        direction = "unknown"
+        counterparty = (seller_name or buyer_name or "(거래처 미상)")
+        counterparty_biz = seller_biz or buyer_biz or None
+
+    description = str(pick("resItemName", "resItemList", "resRemark", "resNote") or "").strip()[:500] or None
+
+    return {
+        "direction": direction,
+        "counterparty": counterparty[:200],
+        "counterparty_biz_no": counterparty_biz,
+        "issue_date": issue_date,
+        "due_date": None,  # 홈택스 응답엔 보통 없음
+        "document_no": document_no,
+        "amount": float(amount),
+        "vat": float(vat),
+        "total": float(total),
+        "description": description,
     }
 
 
