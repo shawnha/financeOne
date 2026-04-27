@@ -16,6 +16,7 @@ from backend.services.cashflow_service import (
     group_card_expenses,
     calc_card_timing_adjustment,
     calc_forecast_closing,
+    predicted_ending_mode,
 )
 
 
@@ -266,6 +267,75 @@ class TestCardCancelInGroupedExpenses:
         assert lotte["total_expense"] == Decimal("100000")
         assert lotte["total_refund"] == Decimal("25000")
         assert lotte["net"] == Decimal("75000")
+
+
+# ── Test 7: predicted_ending_mode — P0-2 month-end 분기 ─────────────────────
+
+
+class TestPredictedEndingMode:
+    """P0-2 회귀 테스트: 오늘이 월의 last_day 일 때 progressive 모드여야 함.
+
+    버그: today_day == last_day 조건이 'completed' 분기로 매핑되어
+    expected_day == last_day 인 forecast 항목이 import 되기 전에는 누락 →
+    예상 기말이 실제로 점프(=actual_closing) 하면서 오늘 expected 거래가 빠짐.
+    수정: 'as_of > month_end' 만 'completed', 그 외엔 progressive 또는 future.
+    """
+
+    def test_past_month_completed(self):
+        """as_of 가 조회 월말 이후 → completed (100% 실제)."""
+        mode = predicted_ending_mode(
+            as_of=datetime.date(2026, 5, 5),
+            month_start=datetime.date(2026, 4, 1),
+            month_end=datetime.date(2026, 4, 30),
+        )
+        assert mode == "completed"
+
+    def test_today_is_last_day_of_current_month_progressive(self):
+        """오늘이 조회 월의 진짜 last_day → progressive (last-day forecast 보존)."""
+        mode = predicted_ending_mode(
+            as_of=datetime.date(2026, 4, 30),
+            month_start=datetime.date(2026, 4, 1),
+            month_end=datetime.date(2026, 4, 30),
+        )
+        # P0-2 핵심: 'completed' 가 아니어야 함 — last-day expected 거래 누락 방지
+        assert mode == "progressive"
+
+    def test_today_within_month_progressive(self):
+        """월 중간 → progressive."""
+        mode = predicted_ending_mode(
+            as_of=datetime.date(2026, 4, 15),
+            month_start=datetime.date(2026, 4, 1),
+            month_end=datetime.date(2026, 4, 30),
+        )
+        assert mode == "progressive"
+
+    def test_first_day_of_month_progressive(self):
+        """월 첫날 → progressive (first day 예상 보존)."""
+        mode = predicted_ending_mode(
+            as_of=datetime.date(2026, 4, 1),
+            month_start=datetime.date(2026, 4, 1),
+            month_end=datetime.date(2026, 4, 30),
+        )
+        assert mode == "progressive"
+
+    def test_future_month(self):
+        """as_of 가 조회 월 시작 이전 → future (100% 예상)."""
+        mode = predicted_ending_mode(
+            as_of=datetime.date(2026, 3, 15),
+            month_start=datetime.date(2026, 4, 1),
+            month_end=datetime.date(2026, 4, 30),
+        )
+        assert mode == "future"
+
+    def test_february_short_month_last_day(self):
+        """2월 28/29일에도 last_day == today 가 progressive 가 되어야 함."""
+        # 2026 = 평년, Feb last_day = 28
+        mode = predicted_ending_mode(
+            as_of=datetime.date(2026, 2, 28),
+            month_start=datetime.date(2026, 2, 1),
+            month_end=datetime.date(2026, 2, 28),
+        )
+        assert mode == "progressive"
 
 
 # ── Test 4: account_breakdown in card expenses ───────────────────────────────

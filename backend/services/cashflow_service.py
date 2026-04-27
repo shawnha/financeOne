@@ -143,6 +143,28 @@ def calc_forecast_closing(
     )
 
 
+def predicted_ending_mode(
+    as_of: date,
+    month_start: date,
+    month_end: date,
+) -> str:
+    """Predicted-ending 합성 모드 결정 (pure function).
+
+    - "completed":   조회 월이 이미 지나감 → predicted = actual_closing (100% 실제)
+    - "future":      아직 시작 전인 월 → predicted = adjusted_forecast_closing (100% 예상)
+    - "progressive": 월 진행 중 (마지막 날 포함) → 어제까지 실제 + 오늘 이후 예상
+
+    P0-2: 오늘이 마지막 날인 경우 ("today == last_day")는 progressive 로 처리해야
+    expected_day == last_day 인 forecast 가 import 되지 않아도 누락되지 않음.
+    "as_of > month_end" 만 completed (한 칸 지난 월) 로 분류.
+    """
+    if as_of > month_end:
+        return "completed"
+    if as_of < month_start:
+        return "future"
+    return "progressive"
+
+
 def group_card_expenses(transactions: list[dict]) -> list[dict]:
     """카드 거래 리스트 → 소스별 → 회원별 그룹핑 + 내부계정 breakdown.
 
@@ -800,14 +822,15 @@ def get_forecast_cashflow(
     # 6-ter. 시계열 합성 예상 기말 (today까지 실제 + 남은 기간 예상)
     # 이미 지나간 expected_day의 예상은 실제 발생분으로 대체 — 유령 예상 제거
     predicted_ending: Decimal
-    if today_day_in_month == last_day or as_of > month_end:
-        # 월 종료: 예상 기말 = 실제 월말 잔고 (100% 실제)
+    mode = predicted_ending_mode(as_of, month_start, month_end)
+    if mode == "completed":
+        # 지난 월(이미 종료): 예상 기말 = 실제 월말 잔고 (100% 실제)
         predicted_ending = actual_closing
-    elif today_day_in_month == 0 or as_of < month_start:
+    elif mode == "future":
         # 월 시작 전: 예상 기말 = 기초 + 전체 예상 + 시차보정
         predicted_ending = adjusted_forecast_closing
     else:
-        # 월 진행 중: 어제(today-1)까지 실제 + 오늘 이후(today 포함) 예상
+        # 월 진행 중 (오늘이 last_day 인 경우 포함): 어제(today-1)까지 실제 + 오늘 이후(today 포함) 예상
         # "오늘" 건은 아직 실제 DB에 없을 수 있으므로 예상으로 취급.
         cutoff_date = date(year, month, today_day_in_month - 1) if today_day_in_month > 1 else None
         actual_in_to_today = Decimal("0"); actual_out_to_today = Decimal("0")
