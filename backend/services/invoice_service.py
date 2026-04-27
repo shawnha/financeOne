@@ -441,3 +441,126 @@ def cancel_invoice(conn: PgConnection, invoice_id: int, note: Optional[str] = No
         cur.close()
         raise ValueError(f"invoice {invoice_id} not found")
     cur.close()
+
+
+# ── 발생주의 집계 ──────────────────────────────────────────────────
+
+
+def accrual_monthly_summary(
+    conn: PgConnection,
+    *,
+    entity_id: int,
+    months: int = 12,
+) -> dict:
+    """월별 발생주의 매출/매입 (issue_date 기준).
+
+    cancelled invoice 제외. amount(공급가액) + vat 분리 표시.
+
+    Returns: {months: [{month, sales_amount, sales_vat, sales_total,
+                        purchase_amount, purchase_vat, purchase_total, net}]}
+    """
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT to_char(date_trunc('month', issue_date), 'YYYY-MM') AS month,
+               direction,
+               COALESCE(SUM(amount), 0) AS amount,
+               COALESCE(SUM(vat), 0)    AS vat,
+               COALESCE(SUM(total), 0)  AS total,
+               COUNT(*)                  AS cnt
+        FROM invoices
+        WHERE entity_id = %s
+          AND status != 'cancelled'
+          AND issue_date >= (CURRENT_DATE - (%s || ' months')::INTERVAL)
+        GROUP BY date_trunc('month', issue_date), direction
+        ORDER BY month
+        """,
+        [entity_id, months],
+    )
+    rows = cur.fetchall()
+    cur.close()
+
+    by_month: dict[str, dict] = {}
+    for month, direction, amount, vat, total, cnt in rows:
+        bucket = by_month.setdefault(month, {
+            "month": month,
+            "sales_amount": 0.0, "sales_vat": 0.0, "sales_total": 0.0, "sales_count": 0,
+            "purchase_amount": 0.0, "purchase_vat": 0.0, "purchase_total": 0.0, "purchase_count": 0,
+        })
+        if direction == "sales":
+            bucket["sales_amount"] = float(amount)
+            bucket["sales_vat"] = float(vat)
+            bucket["sales_total"] = float(total)
+            bucket["sales_count"] = int(cnt)
+        else:
+            bucket["purchase_amount"] = float(amount)
+            bucket["purchase_vat"] = float(vat)
+            bucket["purchase_total"] = float(total)
+            bucket["purchase_count"] = int(cnt)
+
+    months_list = sorted(by_month.values(), key=lambda b: b["month"])
+    for b in months_list:
+        b["net"] = b["sales_amount"] - b["purchase_amount"]  # 공급가액 기준 순매출
+    return {"months": months_list}
+
+
+def counterparty_balances(
+    conn: PgConnection,
+    *,
+    entity_id: int,
+    direction: Optional[str] = None,
+    only_outstanding: bool = True,
+    limit: int = 100,
+) -> list[dict]:
+    """거래처별 미수금(sales) / 미지급금(purchase) 잔액.
+
+    cancelled 제외. paid invoice 도 포함하면 historical 합계 반환 (only_outstanding=False).
+    """
+    where = ["i.entity_id = %s", "i.status != 'cancelled'"]
+    params: list = [entity_id]
+    if direction:
+        where.append("i.direction = %s")
+        params.append(direction)
+    if only_outstanding:
+        where.append("i.status IN ('open', 'partial')")
+
+    where_sql = " AND ".join(where)
+    cur = conn.cursor()
+    cur.execute(
+        f"""
+        SELECT i.counterparty,
+               i.direction,
+               COUNT(*) AS invoice_count,
+               COALESCE(SUM(i.total), 0) AS total_billed,
+               COALESCE(SUM(
+                   COALESCE((SELECT SUM(p.amount) FROM invoice_payments p
+                             WHERE p.invoice_id = i.id), 0)
+               ), 0) AS total_paid,
+               COALESCE(SUM(i.total), 0) - COALESCE(SUM(
+                   COALESCE((SELECT SUM(p.amount) FROM invoice_payments p
+                             WHERE p.invoice_id = i.id), 0)
+               ), 0) AS outstanding,
+               MIN(i.due_date) AS earliest_due
+        FROM invoices i
+        WHERE {where_sql}
+        GROUP BY i.counterparty, i.direction
+        HAVING ({"" if not only_outstanding else "(COALESCE(SUM(i.total),0) - COALESCE(SUM(COALESCE((SELECT SUM(p.amount) FROM invoice_payments p WHERE p.invoice_id = i.id), 0)), 0)) > 0 AND"} TRUE)
+        ORDER BY outstanding DESC
+        LIMIT %s
+        """,
+        params + [limit],
+    )
+    rows = cur.fetchall()
+    cur.close()
+    return [
+        {
+            "counterparty": r[0],
+            "direction": r[1],
+            "invoice_count": int(r[2]),
+            "total_billed": float(r[3]),
+            "total_paid": float(r[4]),
+            "outstanding": float(r[5]),
+            "earliest_due": r[6].isoformat() if r[6] else None,
+        }
+        for r in rows
+    ]

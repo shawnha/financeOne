@@ -176,6 +176,69 @@ class TestCancelInvoice:
 # ── auto_match_candidates ─────────────────────────────────────────────
 
 
+class TestAccrualSummary:
+    def test_monthly_split_by_direction(self, conn, fixture_entity):
+        svc.create_invoice(
+            conn, entity_id=fixture_entity, direction="sales",
+            counterparty="A", issue_date=date(2026, 4, 1),
+            amount=Decimal("100000"), vat=Decimal("10000"),
+        )
+        svc.create_invoice(
+            conn, entity_id=fixture_entity, direction="purchase",
+            counterparty="B", issue_date=date(2026, 4, 5),
+            amount=Decimal("60000"), vat=Decimal("6000"),
+        )
+        result = svc.accrual_monthly_summary(conn, entity_id=fixture_entity, months=24)
+        # 우리 fixture 의 4월 row 검증 (다른 데이터도 섞일 수 있어 부분 검사)
+        apr = next((m for m in result["months"] if m["month"] == "2026-04"), None)
+        assert apr is not None
+        assert apr["sales_amount"] >= 100000.0
+        assert apr["sales_vat"] >= 10000.0
+        assert apr["purchase_amount"] >= 60000.0
+
+    def test_cancelled_excluded(self, conn, fixture_entity):
+        inv_id = svc.create_invoice(
+            conn, entity_id=fixture_entity, direction="sales",
+            counterparty="X", issue_date=date(2025, 12, 1),
+            amount=Decimal("999999"),  # 식별용 큰 금액
+        )
+        svc.cancel_invoice(conn, inv_id, note="테스트")
+        result = svc.accrual_monthly_summary(conn, entity_id=fixture_entity, months=24)
+        dec = next((m for m in result["months"] if m["month"] == "2025-12"), None)
+        if dec:
+            # 999999 가 sales 합계에 포함되지 않아야
+            assert dec["sales_amount"] < 999999.0
+
+
+class TestCounterpartyBalances:
+    def test_outstanding_only(self, conn, fixture_entity):
+        svc.create_invoice(
+            conn, entity_id=fixture_entity, direction="sales",
+            counterparty="OutTestCorp_A", issue_date=date(2026, 4, 1),
+            amount=Decimal("100000"),
+        )
+        balances = svc.counterparty_balances(
+            conn, entity_id=fixture_entity, direction="sales", only_outstanding=True,
+        )
+        ours = [b for b in balances if b["counterparty"] == "OutTestCorp_A"]
+        assert len(ours) == 1
+        assert ours[0]["outstanding"] == 100000.0
+
+    def test_paid_excluded_when_outstanding_only(self, conn, fixture_entity, fixture_tx):
+        # 100k tx 있음 (fixture). invoice 100k 매칭 → paid → outstanding=False 시 빠짐.
+        inv_id = svc.create_invoice(
+            conn, entity_id=fixture_entity, direction="sales",
+            counterparty="PaidTestCorp_B", issue_date=date(2026, 4, 1),
+            amount=Decimal("100000"),
+        )
+        svc.match_invoice_payment(conn, invoice_id=inv_id, transaction_id=fixture_tx)
+        balances = svc.counterparty_balances(
+            conn, entity_id=fixture_entity, direction="sales", only_outstanding=True,
+        )
+        ours = [b for b in balances if b["counterparty"] == "PaidTestCorp_B"]
+        assert len(ours) == 0  # paid → outstanding 0 → 제외
+
+
 class TestAutoMatchCandidates:
     def test_amount_match_high_score(self, conn, fixture_entity):
         # tx + invoice 둘 다 동일 counterparty + 금액 + 일자

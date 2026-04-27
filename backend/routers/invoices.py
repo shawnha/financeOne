@@ -24,8 +24,10 @@ from pydantic import BaseModel, Field
 
 from backend.database.connection import get_db
 from backend.services.invoice_service import (
+    accrual_monthly_summary,
     auto_match_candidates,
     cancel_invoice,
+    counterparty_balances,
     create_invoice,
     get_invoice,
     list_invoices,
@@ -147,6 +149,41 @@ def get_invoices(
         return {"items": items, "count": len(items)}
     except Exception:
         logger.exception("list_invoices failed")
+        raise HTTPException(500, "내부 오류")
+
+
+@router.get("/invoices/accrual-summary")
+def get_accrual_summary(
+    entity_id: int = Query(...),
+    months: int = Query(12, ge=1, le=36),
+    conn: PgConnection = Depends(get_db),
+):
+    """월별 발생주의 매출/매입 (issue_date 기준, cancelled 제외)."""
+    try:
+        return accrual_monthly_summary(conn, entity_id=entity_id, months=months)
+    except Exception:
+        logger.exception("accrual_monthly_summary failed")
+        raise HTTPException(500, "내부 오류")
+
+
+@router.get("/invoices/counterparty-balances")
+def get_counterparty_balances(
+    entity_id: int = Query(...),
+    direction: Optional[str] = Query(None, pattern="^(sales|purchase)$"),
+    only_outstanding: bool = Query(True),
+    limit: int = Query(100, ge=1, le=500),
+    conn: PgConnection = Depends(get_db),
+):
+    """거래처별 미수금/미지급금 잔액."""
+    try:
+        return {
+            "items": counterparty_balances(
+                conn, entity_id=entity_id,
+                direction=direction, only_outstanding=only_outstanding, limit=limit,
+            ),
+        }
+    except Exception:
+        logger.exception("counterparty_balances failed")
         raise HTTPException(500, "내부 오류")
 
 
