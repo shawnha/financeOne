@@ -136,7 +136,9 @@ interface ForecastData {
   actual_income: number
   actual_expense: number
   actual_closing: number
-  diff: number
+  diff: number  // actual_closing - adjusted_forecast_closing (variance bridge baseline)
+  diff_vs_predicted: number  // P1-3: actual_closing - predicted_ending
+  diff_pct_vs_predicted: number  // P1-3: (actual - predicted) / |predicted| * 100
   actual_daily_points: Array<{
     day: number
     balance: number
@@ -2066,10 +2068,16 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
   if (!data) return null
   const [y, m] = selectedMonth.split("-").map(Number)
 
-  const diffPct = data.predicted_ending !== 0
-    ? ((data.actual_closing - data.predicted_ending) / Math.abs(data.predicted_ending) * 100)
-    : 0
+  // P1-3: KPI 카드/메인 정합도는 backend diff_*_vs_predicted 사용 — frontend/backend 분모 통일.
+  // "예상 vs 실제" 박스는 adjusted_forecast_closing 기준 (data.diff) — 박스 컨텍스트와 일치.
+  const diffPct = data.diff_pct_vs_predicted
+  const diffAmount = data.diff_vs_predicted
   const diffColor = Math.abs(diffPct) <= 5 ? "text-[hsl(var(--profit))]" : Math.abs(diffPct) <= 10 ? "text-[hsl(var(--warning))]" : "text-[hsl(var(--loss))]"
+  // 예상 vs 실제 박스 전용: adjusted_forecast_closing 기준 percentage
+  const adjustedDiffPct = data.adjusted_forecast_closing !== 0
+    ? (data.diff / Math.abs(data.adjusted_forecast_closing)) * 100
+    : 0
+  const adjustedDiffColor = Math.abs(adjustedDiffPct) <= 5 ? "text-[hsl(var(--profit))]" : Math.abs(adjustedDiffPct) <= 10 ? "text-[hsl(var(--warning))]" : "text-[hsl(var(--loss))]"
 
   return (
     <div className="space-y-6">
@@ -2141,8 +2149,8 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
           value={formatByEntity(data.actual_closing, entityId)}
           rawAmount={data.actual_closing}
           entityId={entityId}
-          subtext={`차이: ${data.diff >= 0 ? "+" : ""}${formatByEntity(data.diff, entityId)}`}
-          subtextColor={data.diff >= 0 ? "text-emerald-300" : "text-rose-300"}
+          subtext={`차이: ${diffAmount >= 0 ? "+" : ""}${formatByEntity(diffAmount, entityId)}`}
+          subtextColor={diffAmount >= 0 ? "text-emerald-300" : "text-rose-300"}
           colorClass="text-[hsl(var(--profit))]"
         />
         <KPICard
@@ -2900,12 +2908,12 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
             <span className="text-xs font-semibold text-[hsl(var(--warning))]">예상 vs 실제</span>
             <span className="flex-1" />
             <span className="text-xs text-muted-foreground">차이</span>
-            <span className={cn("text-sm font-mono tabular-nums font-semibold", diffColor)}>
+            <span className={cn("text-sm font-mono tabular-nums font-semibold", adjustedDiffColor)}>
               {data.diff >= 0 ? "+" : ""}{formatByEntity(data.diff, entityId)}
             </span>
             {data.adjusted_forecast_closing !== 0 && (
-              <span className={cn("text-[11px] font-mono tabular-nums", diffColor)}>
-                ({(100 - Math.abs(diffPct)).toFixed(1)}%)
+              <span className={cn("text-[11px] font-mono tabular-nums", adjustedDiffColor)}>
+                ({(100 - Math.abs(adjustedDiffPct)).toFixed(1)}%)
               </span>
             )}
             {vsActualOpen ? <ChevronDown className="h-4 w-4 text-[hsl(var(--warning))]/60" /> : <ChevronRight className="h-4 w-4 text-[hsl(var(--warning))]/60" />}
@@ -2922,15 +2930,15 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
               </div>
               <div className="border-t border-border pt-2 flex justify-between font-medium">
                 <span>차이</span>
-                <span className={cn("font-mono tabular-nums", diffColor)}>
+                <span className={cn("font-mono tabular-nums", adjustedDiffColor)}>
                   {data.diff >= 0 ? "+" : ""}{formatByEntity(data.diff, entityId)}
                 </span>
               </div>
               {data.adjusted_forecast_closing !== 0 && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">정확도</span>
-                  <span className={cn("font-mono tabular-nums", diffColor)}>
-                    {(100 - Math.abs(diffPct)).toFixed(1)}%
+                  <span className={cn("font-mono tabular-nums", adjustedDiffColor)}>
+                    {(100 - Math.abs(adjustedDiffPct)).toFixed(1)}%
                   </span>
                 </div>
               )}

@@ -1051,7 +1051,13 @@ def get_forecast_cashflow(
         "actual_income": float(actual_income),
         "actual_expense": float(actual_expense),
         "actual_closing": float(actual_closing),
-        "diff": float(diff),
+        "diff": float(diff),  # actual_closing - adjusted_forecast_closing (variance bridge baseline)
+        # P1-3: predicted_ending 기준 차이 — KPI 카드/정합도 표시는 이 값으로 통일.
+        "diff_vs_predicted": float(actual_closing - predicted_ending),
+        "diff_pct_vs_predicted": (
+            float((actual_closing - predicted_ending) / abs(predicted_ending) * 100)
+            if predicted_ending != 0 else 0.0
+        ),
         "actual_daily_points": actual_daily_points,
         "last_actual_day": last_actual_day,
         "over_budget": over_budget,
