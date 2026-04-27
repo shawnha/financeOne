@@ -9,6 +9,22 @@ from psycopg2.extensions import connection as PgConnection
 
 
 DEFAULT_CASH_ACCOUNT_CODE = "10100"
+ACCOUNTS_PAYABLE_CODE = "26200"  # 미지급비용 — 카드 사용 시 발생주의 부채
+
+# 카드 source_type → 카드 사용 분개는 (차)비용/(대)미지급비용
+CARD_SOURCE_TYPES = {
+    "lotte_card", "woori_card", "shinhan_card",
+    "codef_lotte_card", "codef_woori_card", "codef_shinhan_card",
+    "expenseone_card", "gowid_api",
+}
+
+# 은행 거래 중 카드대금 결제로 식별되는 counterparty 패턴.
+# 매칭되면 (차)미지급비용/(대)보통예금 으로 분개 (기존: (차)카드대금 비용/(대)현금).
+CARD_PAYMENT_COUNTERPARTY_PATTERNS = (
+    "롯데카드", "우리카드", "신한카드", "삼성카드", "현대카드",
+    "kb국민카드", "국민카드", "하나카드", "비씨카드", "bc카드",
+    "농협카드", "nh카드", "카드결제",
+)
 
 
 def get_cash_account_code(conn) -> str:
@@ -35,6 +51,26 @@ def _get_cash_account_id(cur) -> int:
     if not row:
         raise RuntimeError(f"Cash account {DEFAULT_CASH_ACCOUNT_CODE} not found in standard_accounts")
     return row[0]
+
+
+def _get_accounts_payable_id(cur) -> int:
+    """미지급비용(26200) standard_account ID."""
+    cur.execute(
+        "SELECT id FROM standard_accounts WHERE code = %s",
+        [ACCOUNTS_PAYABLE_CODE],
+    )
+    row = cur.fetchone()
+    if not row:
+        raise RuntimeError(f"Accounts payable account {ACCOUNTS_PAYABLE_CODE} not found")
+    return row[0]
+
+
+def _is_card_payment(counterparty: str | None) -> bool:
+    """은행 거래의 counterparty 가 카드대금 결제 패턴인지."""
+    if not counterparty:
+        return False
+    name = counterparty.lower().replace(" ", "")
+    return any(pat.lower().replace(" ", "") in name for pat in CARD_PAYMENT_COUNTERPARTY_PATTERNS)
 
 
 def _quantize(amount) -> Decimal:
@@ -128,7 +164,7 @@ def create_journal_from_transaction(
     cur.execute(
         """
         SELECT t.id, t.entity_id, t.date, t.amount, t.type, t.description,
-               t.counterparty, t.standard_account_id, t.is_confirmed
+               t.counterparty, t.standard_account_id, t.is_confirmed, t.source_type
         FROM transactions t
         WHERE t.id = %s
           AND (t.is_cancel IS NOT TRUE)
@@ -140,7 +176,8 @@ def create_journal_from_transaction(
         cur.close()
         raise ValueError(f"Transaction {transaction_id} not found")
 
-    tx_id, entity_id, tx_date, amount, tx_type, desc, counterparty, std_account_id, is_confirmed = row
+    (tx_id, entity_id, tx_date, amount, tx_type, desc, counterparty,
+     std_account_id, is_confirmed, source_type) = row
 
     if not is_confirmed:
         cur.close()
@@ -163,7 +200,38 @@ def create_journal_from_transaction(
     amount = _quantize(amount)
     je_desc = f"{counterparty or ''} - {desc}".strip(" -")
 
-    if tx_type == "out":
+    # P3-1: 발생주의 분개 분기.
+    # 1) 카드 사용 (out)        : (차) 비용/std        / (대) 미지급비용 26200
+    # 2) 카드 환불/취소 (in)    : (차) 미지급비용 26200 / (대) 비용/std (역분개)
+    # 3) 은행→카드사 결제 (out): (차) 미지급비용 26200 / (대) 현금
+    # 4) 그 외                  : 기존 (차)std/(대)현금 또는 (차)현금/(대)std
+    is_card_source = source_type in CARD_SOURCE_TYPES
+    is_bank_card_payment = (
+        not is_card_source
+        and tx_type == "out"
+        and _is_card_payment(counterparty)
+    )
+
+    if is_card_source:
+        ap_id = _get_accounts_payable_id(cur)
+        if tx_type == "out":
+            lines = [
+                {"standard_account_id": std_account_id, "debit_amount": amount, "credit_amount": Decimal("0")},
+                {"standard_account_id": ap_id,         "debit_amount": Decimal("0"), "credit_amount": amount},
+            ]
+        else:  # in: 카드 환불 = 미지급비용 감소 + 비용 reverse
+            lines = [
+                {"standard_account_id": ap_id,         "debit_amount": amount, "credit_amount": Decimal("0")},
+                {"standard_account_id": std_account_id, "debit_amount": Decimal("0"), "credit_amount": amount},
+            ]
+    elif is_bank_card_payment:
+        # 카드대금 출금: (차) 미지급비용 / (대) 현금
+        ap_id = _get_accounts_payable_id(cur)
+        lines = [
+            {"standard_account_id": ap_id,           "debit_amount": amount, "credit_amount": Decimal("0")},
+            {"standard_account_id": cash_account_id, "debit_amount": Decimal("0"), "credit_amount": amount},
+        ]
+    elif tx_type == "out":
         lines = [
             {"standard_account_id": std_account_id, "debit_amount": amount, "credit_amount": Decimal("0")},
             {"standard_account_id": cash_account_id, "debit_amount": Decimal("0"), "credit_amount": amount},
