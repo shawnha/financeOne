@@ -20,6 +20,8 @@ import {
   XCircle,
   Upload,
   AlertTriangle,
+  Cloud,
+  Building2,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -122,6 +124,21 @@ function InvoicesInner() {
   const [matchInvoice, setMatchInvoice] = useState<Invoice | null>(null)
   const [autoMatchOpen, setAutoMatchOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [codefSyncOpen, setCodefSyncOpen] = useState(false)
+  const [bizNoOpen, setBizNoOpen] = useState(false)
+  const [entityBizNo, setEntityBizNo] = useState<string | null>(null)
+
+  // entity.business_number 조회 (codef sync direction 자동 판별용)
+  useEffect(() => {
+    if (!entityId) return
+    void (async () => {
+      try {
+        const res = await fetchAPI<Array<{ id: number; business_number: string | null }>>("/entities")
+        const found = res.find(e => e.id === entityId)
+        setEntityBizNo(found?.business_number || null)
+      } catch {/* silent */}
+    })()
+  }, [entityId])
 
   const reload = useCallback(async () => {
     if (!entityId) return
@@ -176,6 +193,14 @@ function InvoicesInner() {
           <span className="text-xs text-muted-foreground ml-2">발생주의 / 매출·매입 인식</span>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setBizNoOpen(true)}
+            title={entityBizNo ? `사업자번호 ${entityBizNo}` : "사업자번호 미등록"}>
+            <Building2 className="h-4 w-4 mr-1" />
+            {entityBizNo ? formatBizNo(entityBizNo) : "사업자번호 등록"}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setCodefSyncOpen(true)}>
+            <Cloud className="h-4 w-4 mr-1" /> Codef 동기화
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
             <Upload className="h-4 w-4 mr-1" /> Excel 가져오기
           </Button>
@@ -358,7 +383,218 @@ function InvoicesInner() {
           onImported={() => { setImportOpen(false); void reload() }}
         />
       )}
+
+      {codefSyncOpen && entityId && (
+        <CodefSyncModal
+          entityId={entityId}
+          ourBizNo={entityBizNo}
+          onClose={() => setCodefSyncOpen(false)}
+          onSynced={() => { setCodefSyncOpen(false); void reload() }}
+        />
+      )}
+
+      {bizNoOpen && entityId && (
+        <BizNoModal
+          entityId={entityId}
+          current={entityBizNo}
+          onClose={() => setBizNoOpen(false)}
+          onSaved={(v) => { setEntityBizNo(v); setBizNoOpen(false) }}
+        />
+      )}
     </div>
+  )
+}
+
+
+function formatBizNo(s: string | null): string {
+  if (!s) return ""
+  const d = s.replace(/\D/g, "")
+  if (d.length === 10) return `${d.slice(0, 3)}-${d.slice(3, 5)}-${d.slice(5)}`
+  return d
+}
+
+
+// ── BizNo Modal ────────────────────────────────────────────────────
+
+
+function BizNoModal({
+  entityId, current, onClose, onSaved,
+}: {
+  entityId: number
+  current: string | null
+  onClose: () => void
+  onSaved: (bizNo: string | null) => void
+}) {
+  const [val, setVal] = useState(current ? formatBizNo(current) : "")
+  const [submitting, setSubmitting] = useState(false)
+
+  async function handleSave() {
+    setSubmitting(true)
+    try {
+      const res = await fetchAPI<{ business_number: string | null }>(`/entities/${entityId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ business_number: val || null }),
+      })
+      toast.success("저장 완료")
+      onSaved(res.business_number)
+    } catch (e) {
+      toast.error(`저장 실패: ${(e as Error).message}`)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <ModalShell title="법인 사업자번호" onClose={onClose}>
+      <div className="space-y-3 text-sm">
+        <p className="text-xs text-muted-foreground">
+          Codef 홈택스 동기화 시 매출/매입 자동 판별에 사용됩니다. 10자리 숫자 (하이픈 자동 제거).
+        </p>
+        <Field label="사업자번호">
+          <Input value={val} onChange={(e) => setVal(e.target.value)}
+            placeholder="123-45-67890" />
+        </Field>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose} disabled={submitting}>취소</Button>
+          <Button onClick={handleSave} disabled={submitting}>
+            {submitting ? "저장 중..." : "저장"}
+          </Button>
+        </div>
+      </div>
+    </ModalShell>
+  )
+}
+
+
+// ── Codef Sync Modal ──────────────────────────────────────────────
+
+
+function CodefSyncModal({
+  entityId, ourBizNo, onClose, onSynced,
+}: {
+  entityId: number
+  ourBizNo: string | null
+  onClose: () => void
+  onSynced: () => void
+}) {
+  const today = new Date()
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
+  const fmtYYYYMMDD = (d: Date) =>
+    `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`
+
+  const [startDate, setStartDate] = useState(fmtYYYYMMDD(monthStart))
+  const [endDate, setEndDate] = useState(fmtYYYYMMDD(today))
+  const [queryType, setQueryType] = useState<"1" | "2" | "3">("3")
+  const [overrideBizNo, setOverrideBizNo] = useState("")
+  const [submitting, setSubmitting] = useState(false)
+  const [result, setResult] = useState<null | {
+    fetched: number; inserted: number; duplicates: number;
+    skipped: number; unknown_direction: number;
+    our_biz_no_used?: string | null
+  }>(null)
+
+  async function handleSync() {
+    if (!/^\d{8}$/.test(startDate) || !/^\d{8}$/.test(endDate)) {
+      toast.error("날짜는 YYYYMMDD 형식이어야 합니다.")
+      return
+    }
+    setSubmitting(true)
+    setResult(null)
+    try {
+      const body: Record<string, unknown> = {
+        entity_id: entityId,
+        start_date: startDate,
+        end_date: endDate,
+        query_type: queryType,
+      }
+      if (overrideBizNo) body.our_biz_no = overrideBizNo
+      const res = await fetchAPI<typeof result>("/integrations/codef/sync-tax-invoice", {
+        method: "POST",
+        body: JSON.stringify(body),
+      })
+      setResult(res)
+      if (res && res.inserted > 0) {
+        toast.success(`${res.inserted}건 등록`)
+        onSynced()
+      } else {
+        toast.info("새로 등록된 세금계산서 없음")
+      }
+    } catch (e) {
+      toast.error(`동기화 실패: ${(e as Error).message}`)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const effectiveBizNo = overrideBizNo || ourBizNo
+
+  return (
+    <ModalShell title="홈택스 세금계산서 동기화 (Codef)" onClose={onClose}>
+      <div className="space-y-3 text-sm">
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-md p-3 text-xs">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-400 mt-0.5 shrink-0" />
+            <div>
+              사전에 Codef 콘솔에서 사업자 인증서 + 홈택스 ID/PW 로 connected_id 등록 필요.
+              사업자번호로 매출/매입 자동 판별. 매칭 안 되는 행은 'unknown' 으로 등록되니 수동 결정 필요.
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="시작일 (YYYYMMDD) *">
+            <Input value={startDate} onChange={(e) => setStartDate(e.target.value)}
+              placeholder="20260401" maxLength={8} />
+          </Field>
+          <Field label="종료일 (YYYYMMDD) *">
+            <Input value={endDate} onChange={(e) => setEndDate(e.target.value)}
+              placeholder="20260428" maxLength={8} />
+          </Field>
+        </div>
+
+        <Field label="조회 유형">
+          <SegmentedSelect
+            value={queryType}
+            onChange={setQueryType}
+            options={[
+              { value: "3", label: "전체" },
+              { value: "1", label: "매출" },
+              { value: "2", label: "매입" },
+            ]}
+          />
+        </Field>
+
+        <Field label={ourBizNo ? `사업자번호 (등록됨: ${formatBizNo(ourBizNo)})` : "사업자번호 (이번만 사용)"}>
+          <Input value={overrideBizNo} onChange={(e) => setOverrideBizNo(e.target.value)}
+            placeholder={ourBizNo ? "비워두면 등록값 사용" : "123-45-67890"} />
+        </Field>
+        {!effectiveBizNo && (
+          <p className="text-xs text-amber-400">
+            사업자번호 없이 동기화하면 모든 invoice 가 direction='unknown' 으로 들어갑니다.
+          </p>
+        )}
+
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="outline" onClick={onClose} disabled={submitting}>닫기</Button>
+          <Button onClick={handleSync} disabled={submitting}>
+            {submitting ? "동기화 중..." : "동기화 실행"}
+          </Button>
+        </div>
+
+        {result && (
+          <div className="border rounded-md mt-3 px-3 py-2 text-xs space-y-1">
+            <div>가져옴: <span className="font-mono">{result.fetched}</span></div>
+            <div className="text-emerald-400">신규 등록: <span className="font-mono">{result.inserted}</span></div>
+            <div className="text-muted-foreground">중복: <span className="font-mono">{result.duplicates}</span></div>
+            <div className="text-muted-foreground">건너뜀: <span className="font-mono">{result.skipped}</span></div>
+            <div className="text-amber-400">unknown direction: <span className="font-mono">{result.unknown_direction}</span></div>
+            {result.our_biz_no_used && (
+              <div className="text-muted-foreground">기준 사업자번호: <span className="font-mono">{formatBizNo(result.our_biz_no_used)}</span></div>
+            )}
+          </div>
+        )}
+      </div>
+    </ModalShell>
   )
 }
 

@@ -635,20 +635,33 @@ def codef_sync_tax_invoice(
 
     organization=0001 (국세청 홈택스).
     connected_id: 사전에 사업자 인증서로 등록된 connected_id (settings 'hometax').
-    our_biz_no 입력 시 매출/매입 자동 판별. 미입력 시 모두 direction='unknown'.
+    our_biz_no: body 에 명시 안 하면 entities.business_number 자동 조회.
+    매칭 안 되는 행은 direction='unknown' 으로 invoices 에 들어감.
     """
     from backend.services.integrations.codef import CodefError, set_last_sync
     connected_id = _resolve_connected_id(conn, body.entity_id, "hometax", body.connected_id)
+
+    # our_biz_no fallback → entities.business_number
+    our_biz_no = body.our_biz_no
+    if not our_biz_no:
+        cur = conn.cursor()
+        cur.execute("SELECT business_number FROM entities WHERE id = %s", [body.entity_id])
+        row = cur.fetchone()
+        cur.close()
+        if row and row[0]:
+            our_biz_no = row[0]
+
     client = _get_codef_client()
     try:
         result = client.sync_tax_invoices(
             conn, body.entity_id, connected_id,
             body.start_date, body.end_date,
             query_type=body.query_type,
-            our_biz_no=body.our_biz_no,
+            our_biz_no=our_biz_no,
         )
         set_last_sync(conn, body.entity_id, "hometax")
         conn.commit()
+        result["our_biz_no_used"] = our_biz_no
         return result
     except CodefError as e:
         conn.rollback()
