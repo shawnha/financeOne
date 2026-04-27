@@ -377,6 +377,44 @@ class TestGetForecastCashflowReadOnly:
         raise AssertionError("/api/cashflow/forecast/sync-actuals POST endpoint 미발견")
 
 
+# ── Test 9: forecast_closing baseline raw payment_method — P1-1 ─────────────
+
+
+class TestForecastClosingBaseline:
+    """P1-1 회귀: forecast_closing 합산은 forecasts.payment_method 만 사용해야 함.
+
+    이전: 실제 거래 분포로 effective_pm 재분류 → 작은 카드 거래 1건만으로도
+    forecast_closing baseline 흔들림 (Codex 지적).
+    수정: forecast_closing 분기는 db_pm 만, predicted_ending 합성 단계에서만
+    _split_forecasts_by_today() 가 effective_pm 적용.
+    """
+
+    def test_source_does_not_set_effective_pm_in_forecast_loop(self):
+        """get_forecast_cashflow 내부 Forecast 합산 루프에 effective_pm 변수 부재."""
+        import inspect
+        from backend.services import cashflow_service
+
+        src = inspect.getsource(cashflow_service.get_forecast_cashflow)
+        # 'effective_pm =' 할당 자체가 합산 루프에서 사라졌어야 함
+        # (split_forecasts_by_today 안에는 있어도 OK — 거기는 predicted_ending 용)
+        normalized = " ".join(src.split())
+        assert "effective_pm = " not in normalized, (
+            "get_forecast_cashflow 본문에서 effective_pm 재분류는 forecast_closing 까지 "
+            "영향 — _split_forecasts_by_today() 로만 한정해야 baseline 안정"
+        )
+
+    def test_split_forecasts_by_today_still_uses_effective_pm(self):
+        """predicted_ending 합성용 _split_forecasts_by_today 는 여전히 재분류 적용."""
+        import inspect
+        from backend.services import cashflow_service
+
+        src = inspect.getsource(cashflow_service._split_forecasts_by_today)
+        assert "effective_pm" in src, (
+            "_split_forecasts_by_today 안의 effective_pm 재분류는 유지되어야 함 "
+            "(predicted_ending 합성에서 카드 주류 재분류 처리)"
+        )
+
+
 # ── Test 4: account_breakdown in card expenses ───────────────────────────────
 
 

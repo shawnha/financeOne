@@ -759,12 +759,17 @@ def get_forecast_cashflow(
     unmapped_expense = float(unmapped_row[1])
     unmapped_count = int(unmapped_row[2])
 
-    # 3. Forecast 합산 (effective payment_method 기반 — 실제 카드 주류 계정 재분류)
+    # 3. Forecast 합산 — raw payment_method 만 사용 (P1-1 baseline 안정화).
+    #
+    # 이전엔 effective_pm 재분류(작은 카드 거래 1건만 들어와도 계정 전체가 카드로 재분류) 가
+    # forecast_closing baseline 까지 영향 → 실제 거래 도착마다 baseline 변동 → Codex 지적.
+    # 수정: forecast_closing 은 forecasts.payment_method 그대로 합산 (안정).
+    # 실제 카드 주류 재분류는 predicted_ending 합성 단계의 _split_forecasts_by_today() 가 처리.
     forecast_income = Decimal("0")
     forecast_expense = Decimal("0")
     forecast_card_usage = Decimal("0")
     warnings = []
-    reclassified_count = 0
+    reclassified_count = 0  # 정보 표시 — predicted_ending 에서 재분류되는 항목 수
 
     for item in items:
         amt = Decimal(str(item["forecast_amount"]))
@@ -772,27 +777,25 @@ def get_forecast_cashflow(
             forecast_income += amt
             continue
 
-        # 실제 거래 분포 기반으로 effective payment_method 판단
-        acct_id = item.get("internal_account_id")
         db_pm = item.get("payment_method", "bank")
-        effective_pm = db_pm
-        if acct_id and acct_id is not None:
-            info = actual_by_account.get((acct_id, "out"), {})
-            bank_a = Decimal(str(info.get("bank", 0) or 0))
-            card_a = Decimal(str(info.get("card", 0) or 0))
-            if (bank_a + card_a) > 0 and card_a > bank_a and db_pm != "card":
-                effective_pm = "card"
-                reclassified_count += 1
-
-        if effective_pm == "card":
+        if db_pm == "card":
             forecast_card_usage += amt
         else:
             forecast_expense += amt
 
+        # 정보 표시용: 실제 거래 기준 카드 주류이면 predicted_ending 단계에서 재분류됨 — 카운트만.
+        acct_id = item.get("internal_account_id")
+        if acct_id:
+            info = actual_by_account.get((acct_id, "out"), {})
+            bank_a = Decimal(str(info.get("bank", 0) or 0))
+            card_a = Decimal(str(info.get("card", 0) or 0))
+            if (bank_a + card_a) > 0 and card_a > bank_a and db_pm != "card":
+                reclassified_count += 1
+
     if reclassified_count > 0:
         warnings.append(
-            f"{reclassified_count}개 예상항목이 실제 거래 기준 카드 결제로 재분류되었습니다 "
-            f"(forecast.payment_method='bank'이지만 실제는 카드)."
+            f"{reclassified_count}개 예상항목이 실제 거래 기준 카드 결제로 잡혀 "
+            f"예상 기말 합성에서만 재분류됩니다 (forecast_closing baseline 은 영향 없음)."
         )
 
     # 4. 카드별 시차 보정 (card_settings 기반 — ARCH-1)
