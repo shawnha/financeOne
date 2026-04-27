@@ -32,7 +32,13 @@ SHEET_RE = re.compile(r"(\d+)_(.+?)\((\d+)\)")
 
 
 def parse_ledger(path: str) -> dict:
-    """각 시트에서 {acct_code: {name, debit, credit}} 추출."""
+    """각 시트에서 {acct_code: {name, debit, credit}} 추출.
+
+    회계법인 원장 포맷:
+    - r4~ 개별 분개 행 (적요, 차변, 대변)
+    - 마지막 근처 "[ 월     계 ]" / "[ 누     계 ]" 요약 행 — 스페이스 가변적이므로 정규식 매칭.
+    - "이월" 포함 행은 전기이월 잔액.
+    """
     wb = xlrd.open_workbook(path)
     out: dict[str, dict] = {}
     for idx in range(wb.nsheets):
@@ -46,7 +52,11 @@ def parse_ledger(path: str) -> dict:
         credit = Decimal(0)
         for r in range(4, sh.nrows):
             desc = str(sh.cell_value(r, 1)).strip() if sh.ncols > 1 else ""
-            if desc in ("", "[월 계]", "[누   계]", "[누 계]"):
+            desc_compact = re.sub(r"\s+", "", desc)
+            # "[ 월     계 ]" / "[ 누     계 ]" 형식 (스페이스 가변) 전부 스킵
+            if desc == "":
+                continue
+            if desc_compact in ("[월계]", "[누계]"):
                 continue
             if "이월" in desc:
                 continue
