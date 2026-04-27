@@ -307,12 +307,15 @@ def get_bank_transactions(conn: PgConnection, entity_id: int, year: int, month: 
 
 
 def get_card_transactions(conn: PgConnection, entity_id: int, year: int, month: int) -> list[dict]:
-    """특정 월 카드 사용 내역 조회 (소스→회원→일자순)."""
+    """특정 월 카드 사용 내역 조회 (소스→회원→일자순).
+
+    취소건(type='in', is_cancel=TRUE)도 포함 → group_card_expenses 가 refund/net 분리.
+    """
     cur = conn.cursor()
     cur.execute(
         """
         SELECT t.id, t.date, t.type, t.amount, t.description, t.counterparty,
-               t.source_type, t.member_id,
+               t.source_type, t.member_id, t.is_cancel,
                m.name AS member_name,
                sa.name AS account_name, sa.code AS account_code
         FROM transactions t
@@ -322,7 +325,6 @@ def get_card_transactions(conn: PgConnection, entity_id: int, year: int, month: 
           AND t.source_type IN ('lotte_card', 'woori_card', 'shinhan_card', 'codef_lotte_card', 'codef_woori_card', 'codef_shinhan_card')
           AND t.date >= %s AND t.date < %s
           AND t.is_duplicate = false
-          AND (t.is_cancel IS NOT TRUE)
         ORDER BY t.source_type, t.member_id, t.date, t.id
         """,
         [entity_id, *build_date_range(year, month)],
@@ -441,7 +443,11 @@ def get_card_total_net(
     month: int,
     source_type: Optional[str] = None,
 ) -> Decimal:
-    """특정 월 카드 순 사용액 (출금 - 환불). source_type 지정 시 해당 카드 family 매칭.
+    """특정 월 카드 순 사용액 (정상 출금 - 취소/환불). source_type 지정 시 해당 카드 family 매칭.
+
+    취소건은 parser/Codef에서 type='in' + is_cancel=TRUE 로 별도 row 삽입됨.
+    따라서 cancel row를 WHERE 에서 제외하면 환불이 차감되지 않아 net 과대평가.
+    SUM 식에서 type='in' 전체를 차감 (cancel 포함), type='out' 은 is_cancel=TRUE 만 제외.
 
     card_settings.source_type은 'lotte_card' 같은 bare 값이지만 실제 거래는
     'codef_lotte_card' (Codef API 동기화) 또는 'lotte_card' (Excel 업로드) 등
@@ -458,30 +464,36 @@ def get_card_total_net(
             source_variants.append(source_type.replace("codef_", "", 1))
         cur.execute(
             """
-            SELECT
-                COALESCE(SUM(CASE WHEN type = 'out' THEN amount ELSE 0 END), 0) -
-                COALESCE(SUM(CASE WHEN type = 'in' THEN amount ELSE 0 END), 0)
+            SELECT COALESCE(SUM(
+                CASE
+                    WHEN type = 'out' AND is_cancel IS NOT TRUE THEN amount
+                    WHEN type = 'in' THEN -amount
+                    ELSE 0
+                END
+            ), 0)
             FROM transactions
             WHERE entity_id = %s
               AND source_type = ANY(%s)
               AND date >= %s AND date < %s
               AND is_duplicate = false
-              AND (is_cancel IS NOT TRUE)
             """,
             [entity_id, source_variants, *build_date_range(year, month)],
         )
     else:
         cur.execute(
             """
-            SELECT
-                COALESCE(SUM(CASE WHEN type = 'out' THEN amount ELSE 0 END), 0) -
-                COALESCE(SUM(CASE WHEN type = 'in' THEN amount ELSE 0 END), 0)
+            SELECT COALESCE(SUM(
+                CASE
+                    WHEN type = 'out' AND is_cancel IS NOT TRUE THEN amount
+                    WHEN type = 'in' THEN -amount
+                    ELSE 0
+                END
+            ), 0)
             FROM transactions
             WHERE entity_id = %s
               AND source_type IN ('lotte_card', 'woori_card', 'shinhan_card', 'codef_lotte_card', 'codef_woori_card', 'codef_shinhan_card')
               AND date >= %s AND date < %s
               AND is_duplicate = false
-              AND (is_cancel IS NOT TRUE)
             """,
             [entity_id, *build_date_range(year, month)],
         )

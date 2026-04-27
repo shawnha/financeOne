@@ -158,6 +158,116 @@ class TestGroupCardExpenses:
         assert result == []
 
 
+# ── Test 3-bis: get_card_total_net SQL — 취소건 차감 검증 ───────────────────
+
+
+class _FakeCursor:
+    """Captures the SQL Postgres receives so we can assert query semantics."""
+
+    def __init__(self, return_value):
+        self._return_value = return_value
+        self.queries: list[tuple[str, list]] = []
+
+    def execute(self, sql, params=None):
+        self.queries.append((sql, list(params or [])))
+
+    def fetchone(self):
+        return (self._return_value,)
+
+    def close(self):
+        pass
+
+
+class _FakeConn:
+    def __init__(self, return_value=Decimal("0")):
+        self.cursor_obj = _FakeCursor(return_value)
+
+    def cursor(self):
+        return self.cursor_obj
+
+
+class TestGetCardTotalNetQuery:
+    """P0-1 회귀 테스트: 취소건이 net 계산에서 차감되도록 SQL 보장.
+
+    버그: WHERE (is_cancel IS NOT TRUE) 로 cancel row(type='in', is_cancel=TRUE) 전체 제외 → 환불 무시.
+    수정: SUM 의 CASE 식에서 type='in' 전체를 차감 (cancel 포함).
+    """
+
+    def test_query_does_not_filter_cancel_in_where(self):
+        from backend.services.cashflow_service import get_card_total_net
+
+        conn = _FakeConn(return_value=Decimal("0"))
+        get_card_total_net(conn, entity_id=1, year=2026, month=4)
+
+        sql, _ = conn.cursor_obj.queries[0]
+        assert "is_duplicate = false" in sql
+        # 핵심: WHERE 에 (is_cancel IS NOT TRUE) 가 없어야 한다
+        # — 있으면 type='in', is_cancel=TRUE 인 환불행이 걸러져 net 과대평가
+        where_clause = sql.split("WHERE", 1)[1]
+        assert "is_cancel IS NOT TRUE" not in where_clause, (
+            "WHERE 절에서 is_cancel 필터링하면 cancel row 가 net 차감되지 않음"
+        )
+
+    def test_query_subtracts_in_rows_in_sum(self):
+        from backend.services.cashflow_service import get_card_total_net
+
+        conn = _FakeConn(return_value=Decimal("0"))
+        get_card_total_net(conn, entity_id=1, year=2026, month=4)
+
+        sql, _ = conn.cursor_obj.queries[0]
+        # SUM 식에 type='in' 차감 표현이 있어야 함 (-amount 또는 0-amount 등)
+        normalized = " ".join(sql.split())
+        assert "type = 'in'" in normalized.lower() or "type='in'" in normalized.lower()
+        assert "-amount" in normalized.replace(" ", "") or "0 - " in normalized
+
+    def test_query_excludes_out_when_cancel(self):
+        """방어: type='out' 인데 is_cancel=TRUE 인 비정상 row 는 정상 사용으로 안 잡혀야 함."""
+        from backend.services.cashflow_service import get_card_total_net
+
+        conn = _FakeConn(return_value=Decimal("0"))
+        get_card_total_net(conn, entity_id=1, year=2026, month=4)
+
+        sql, _ = conn.cursor_obj.queries[0]
+        normalized = " ".join(sql.split()).lower()
+        # type='out' 인 amount 합산은 is_cancel IS NOT TRUE 조건이 붙어야
+        assert "type = 'out' and is_cancel is not true" in normalized
+
+    def test_source_type_variant_query_same_semantics(self):
+        """source_type 지정 호출 분기도 동일하게 cancel 미필터 + in 차감."""
+        from backend.services.cashflow_service import get_card_total_net
+
+        conn = _FakeConn(return_value=Decimal("0"))
+        get_card_total_net(conn, entity_id=1, year=2026, month=4, source_type="lotte_card")
+
+        sql, params = conn.cursor_obj.queries[0]
+        where_clause = sql.split("WHERE", 1)[1]
+        assert "is_cancel IS NOT TRUE" not in where_clause
+        normalized = " ".join(sql.split()).lower()
+        assert "type = 'out' and is_cancel is not true" in normalized
+        # family matching: bare + codef_ prefixed
+        variants = params[1]
+        assert "lotte_card" in variants and "codef_lotte_card" in variants
+
+
+class TestCardCancelInGroupedExpenses:
+    """P0-1: get_card_transactions 가 cancel row 를 포함해야 group_card_expenses 가 refund 계산 가능."""
+
+    def test_cancel_rows_flow_through_grouping(self):
+        # cancel row 를 (type='in', is_cancel=True) 로 시뮬레이션
+        txs = [
+            _tx("2026-04-03", "out", 100_000, "Anthropic", source_type="codef_lotte_card",
+                member_name="하선우", member_id=1, tx_id=1),
+            _tx("2026-04-05", "in", 25_000, "환불", source_type="codef_lotte_card",
+                member_name="하선우", member_id=1, tx_id=2),
+        ]
+        # is_cancel 필드는 group 로직에서 직접 참조하지 않지만 type='in' 이면 refund 로 분류됨
+        result = group_card_expenses(txs)
+        lotte = result[0]
+        assert lotte["total_expense"] == Decimal("100000")
+        assert lotte["total_refund"] == Decimal("25000")
+        assert lotte["net"] == Decimal("75000")
+
+
 # ── Test 4: account_breakdown in card expenses ───────────────────────────────
 
 
