@@ -25,6 +25,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database import connection as db_conn_mod
+from backend.utils.timezone import today_kst, now_kst
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,7 @@ def _incremental_date_range(conn: PgConnection, entity_id: int, org: str) -> tup
     finally:
         cur.close()
 
-    today = datetime.now().date()
+    today = today_kst()
     end_date = today.strftime("%Y%m%d")
 
     if row and row[0]:
@@ -184,9 +185,8 @@ def _sync_one_sync(entity_id: int, org: str) -> dict:
                 # P0-3: codef sync 직후 forecast actual_amount 동기화 (current + prev month).
                 # GET /forecast 가 더 이상 자동 sync 하지 않으므로 import 직후에 갱신 필요.
                 try:
-                    from datetime import date as _date
                     from backend.services.cashflow_service import sync_forecast_actuals as _sync_fc
-                    today = _date.today()
+                    today = today_kst()
                     py = today.year if today.month > 1 else today.year - 1
                     pm = today.month - 1 if today.month > 1 else 12
                     _sync_fc(conn, entity_id, today.year, today.month)
@@ -231,7 +231,7 @@ async def codef_sync_job() -> None:
     """전체 entity × org 순회."""
     global _last_run
     _last_run = {
-        "started_at": datetime.now().isoformat(),
+        "started_at": now_kst().isoformat(),
         "finished_at": None,
         "ok_count": 0,
         "error_count": 0,
@@ -243,14 +243,14 @@ async def codef_sync_job() -> None:
             targets = _gather_targets(conn)
     except Exception as e:
         logger.exception("failed to gather targets")
-        _last_run["finished_at"] = datetime.now().isoformat()
+        _last_run["finished_at"] = now_kst().isoformat()
         _last_run["error_count"] = 1
         _last_run["results"] = [{"detail": f"gather_targets failed: {e}"}]
         return
 
     if not targets:
         logger.info("codef_sync_job: no targets")
-        _last_run["finished_at"] = datetime.now().isoformat()
+        _last_run["finished_at"] = now_kst().isoformat()
         return
 
     # 순차 실행 — Codef 동시 호출에 대한 rate limit 안전 여유
@@ -262,7 +262,7 @@ async def codef_sync_job() -> None:
         else:
             _last_run["error_count"] += 1
 
-    _last_run["finished_at"] = datetime.now().isoformat()
+    _last_run["finished_at"] = now_kst().isoformat()
     logger.info("codef_sync_job done ok=%d err=%d",
                 _last_run["ok_count"], _last_run["error_count"])
 

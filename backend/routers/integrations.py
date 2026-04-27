@@ -21,11 +21,12 @@ def _sync_forecast_actuals_after_import(conn: PgConnection, entity_id: int) -> N
 
     GET /forecast 가 더 이상 자동 sync 하지 않으므로 import 직후 명시적 갱신.
     실패해도 import 결과 응답을 막지 않음 (warning log).
+    P1-4: KST(today_kst) 기준 — UTC 서버에서 KST 자정~9시 사이 month rollover 어긋남 방지.
     """
     try:
-        from datetime import date as _date
         from backend.services.cashflow_service import sync_forecast_actuals as _sync_fc
-        today = _date.today()
+        from backend.utils.timezone import today_kst
+        today = today_kst()
         py = today.year if today.month > 1 else today.year - 1
         pm = today.month - 1 if today.month > 1 else 12
         _sync_fc(conn, entity_id, today.year, today.month)

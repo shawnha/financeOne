@@ -415,6 +415,49 @@ class TestForecastClosingBaseline:
         )
 
 
+# ── Test 10: KST timezone helper — P1-4 ────────────────────────────────────
+
+
+class TestTimezoneKST:
+    """P1-4 회귀: 비즈니스 로직 today/now 가 KST 기준이어야 함.
+
+    이전: date.today() / datetime.now() 사용 → 서버 timezone (UTC 등) 의존
+    → KST 자정~9시 사이 month rollover 한 칸 어긋남 발생 가능.
+    수정: backend/utils/timezone.py 의 today_kst() / now_kst() 사용.
+    """
+
+    def test_today_kst_returns_korea_date(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from backend.utils.timezone import today_kst
+
+        result = today_kst()
+        # KST 기준이어야 — UTC 와 비교해서 -1/0/+1 일 안에 들어와야 함
+        utc_today = datetime.now(tz=ZoneInfo("UTC")).date()
+        kst_today_expected = datetime.now(tz=ZoneInfo("Asia/Seoul")).date()
+        assert result == kst_today_expected
+        # UTC 와 다를 수도, 같을 수도 있음 (시각에 따라)
+        assert abs((result - utc_today).days) <= 1
+
+    def test_now_kst_is_aware(self):
+        from backend.utils.timezone import now_kst
+        result = now_kst()
+        assert result.tzinfo is not None, "now_kst() 는 timezone-aware 여야 함"
+        assert str(result.tzinfo) == "Asia/Seoul"
+
+    def test_cashflow_service_uses_today_kst(self):
+        """cashflow_service 가 raw date.today() 직접 호출하지 않아야 함."""
+        from pathlib import Path
+        src = Path(__file__).parent.parent / "services" / "cashflow_service.py"
+        text = src.read_text()
+        # 'date.today()' 직접 호출 부재 (today_kst() 만 사용)
+        assert "date.today()" not in text, (
+            "cashflow_service.py 는 today_kst() 를 사용해야 함 "
+            "(서버 timezone 의존 제거)"
+        )
+        assert "today_kst" in text
+
+
 # ── Test 4: account_breakdown in card expenses ───────────────────────────────
 
 

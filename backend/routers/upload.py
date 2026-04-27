@@ -284,10 +284,11 @@ async def upload_transactions(
         cur.close()
 
         # P0-3: forecast.actual_amount 동기화 (current + prev month). 실패해도 응답 막지 않음.
+        # P1-4: KST 기준 today.
         try:
-            from datetime import date as _date
             from backend.services.cashflow_service import sync_forecast_actuals as _sync_fc
-            today = _date.today()
+            from backend.utils.timezone import today_kst
+            today = today_kst()
             py = today.year if today.month > 1 else today.year - 1
             pm = today.month - 1 if today.month > 1 else 12
             _sync_fc(conn, entity_id, today.year, today.month)

@@ -13,6 +13,7 @@ from typing import Optional
 from psycopg2.extensions import connection as PgConnection
 
 from backend.utils.db import build_date_range, fetch_all
+from backend.utils.timezone import today_kst
 
 
 # ── source_type 분류 ─────────────────────────────────
@@ -265,7 +266,7 @@ def get_opening_balance(
 
     _allow_predicted_fallback=False: 재귀 방지용. 내부 호출(prev-month forecast 계산 시)에서 사용.
     """
-    today = date.today()
+    today = today_kst()
     prev_year = year if month > 1 else year - 1
     prev_month = month - 1 if month > 1 else 12
     prev_last_day = calendar.monthrange(prev_year, prev_month)[1]
@@ -656,7 +657,7 @@ def get_forecast_cashflow(
     cur = conn.cursor()
 
     # 시계열 합성 기준일
-    as_of = as_of or date.today()
+    as_of = as_of or today_kst()
     month_start = date(year, month, 1)
     last_day = calendar.monthrange(year, month)[1]
     month_end = date(year, month, last_day)
@@ -679,7 +680,7 @@ def get_forecast_cashflow(
     _prev_month = month - 1 if month > 1 else 12
     _prev_last = calendar.monthrange(_prev_year, _prev_month)[1]
     _prev_end = date(_prev_year, _prev_month, _prev_last)
-    opening_source = "predicted" if date.today() <= _prev_end else "confirmed"
+    opening_source = "predicted" if today_kst() <= _prev_end else "confirmed"
 
     # 2. Forecast 항목 조회 (expected_day, payment_method 포함)
     cur.execute(
