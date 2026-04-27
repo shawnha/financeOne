@@ -1,0 +1,296 @@
+"""Invoices API — 발생주의 레이어 (P2).
+
+- POST   /api/invoices              — invoice 생성
+- GET    /api/invoices               — 리스트 (filter: direction/status/counterparty/date)
+- GET    /api/invoices/{id}          — 단건 + 매칭 합계
+- PATCH  /api/invoices/{id}          — 수정 (cancelled invoice 는 거부)
+- POST   /api/invoices/{id}/cancel   — invoice 취소 (매칭 자동 해제)
+- DELETE /api/invoices/{id}          — 삭제 (cascade 매칭 행)
+- POST   /api/invoices/{id}/payments — invoice ↔ transaction 매칭
+- DELETE /api/invoice-payments/{id}  — 매칭 해제
+- GET    /api/invoices/auto-match    — 자동 매칭 후보 조회 (실행은 안 함)
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import date
+from decimal import Decimal
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from psycopg2.extensions import connection as PgConnection
+from pydantic import BaseModel, Field
+
+from backend.database.connection import get_db
+from backend.services.invoice_service import (
+    auto_match_candidates,
+    cancel_invoice,
+    create_invoice,
+    get_invoice,
+    list_invoices,
+    match_invoice_payment,
+    unmatch_invoice_payment,
+    update_invoice_status,
+)
+
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/api", tags=["invoices"])
+
+
+# ── Schemas ────────────────────────────────────────────────────────────
+
+
+class InvoiceCreate(BaseModel):
+    entity_id: int
+    direction: str = Field(..., pattern="^(sales|purchase)$")
+    counterparty: str
+    issue_date: date
+    amount: Decimal
+    vat: Decimal = Decimal("0")
+    total: Optional[Decimal] = None
+    due_date: Optional[date] = None
+    document_no: Optional[str] = None
+    description: Optional[str] = None
+    counterparty_biz_no: Optional[str] = None
+    currency: str = "KRW"
+    internal_account_id: Optional[int] = None
+    standard_account_id: Optional[int] = None
+    note: Optional[str] = None
+
+
+class InvoiceUpdate(BaseModel):
+    counterparty: Optional[str] = None
+    issue_date: Optional[date] = None
+    due_date: Optional[date] = None
+    document_no: Optional[str] = None
+    description: Optional[str] = None
+    amount: Optional[Decimal] = None
+    vat: Optional[Decimal] = None
+    total: Optional[Decimal] = None
+    counterparty_biz_no: Optional[str] = None
+    internal_account_id: Optional[int] = None
+    standard_account_id: Optional[int] = None
+    note: Optional[str] = None
+
+
+class PaymentCreate(BaseModel):
+    transaction_id: int
+    amount: Optional[Decimal] = None
+    matched_by: str = Field(default="manual", pattern="^(manual|auto|rule)$")
+    note: Optional[str] = None
+
+
+class CancelRequest(BaseModel):
+    note: Optional[str] = None
+
+
+# ── Endpoints ──────────────────────────────────────────────────────────
+
+
+@router.post("/invoices", status_code=201)
+def post_invoice(body: InvoiceCreate, conn: PgConnection = Depends(get_db)):
+    try:
+        invoice_id = create_invoice(
+            conn,
+            entity_id=body.entity_id,
+            direction=body.direction,
+            counterparty=body.counterparty,
+            issue_date=body.issue_date,
+            amount=body.amount,
+            vat=body.vat,
+            total=body.total,
+            due_date=body.due_date,
+            document_no=body.document_no,
+            description=body.description,
+            counterparty_biz_no=body.counterparty_biz_no,
+            currency=body.currency,
+            internal_account_id=body.internal_account_id,
+            standard_account_id=body.standard_account_id,
+            note=body.note,
+        )
+        conn.commit()
+        return get_invoice(conn, invoice_id)
+    except ValueError as e:
+        conn.rollback()
+        raise HTTPException(400, str(e))
+    except Exception:
+        conn.rollback()
+        logger.exception("create_invoice failed")
+        raise HTTPException(500, "내부 오류")
+
+
+@router.get("/invoices")
+def get_invoices(
+    entity_id: int = Query(...),
+    direction: Optional[str] = Query(None, pattern="^(sales|purchase)$"),
+    status: Optional[str] = Query(None, pattern="^(open|partial|paid|cancelled)$"),
+    counterparty: Optional[str] = Query(None),
+    issue_date_from: Optional[date] = Query(None),
+    issue_date_to: Optional[date] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    conn: PgConnection = Depends(get_db),
+):
+    try:
+        items = list_invoices(
+            conn,
+            entity_id=entity_id,
+            direction=direction,
+            status=status,
+            counterparty=counterparty,
+            issue_date_from=issue_date_from,
+            issue_date_to=issue_date_to,
+            limit=limit,
+            offset=offset,
+        )
+        return {"items": items, "count": len(items)}
+    except Exception:
+        logger.exception("list_invoices failed")
+        raise HTTPException(500, "내부 오류")
+
+
+@router.get("/invoices/auto-match")
+def get_auto_match_candidates(
+    entity_id: int = Query(...),
+    days_window: int = Query(7, ge=0, le=60),
+    limit: int = Query(50, ge=1, le=200),
+    conn: PgConnection = Depends(get_db),
+):
+    try:
+        return {
+            "candidates": auto_match_candidates(
+                conn, entity_id=entity_id, days_window=days_window, limit=limit,
+            )
+        }
+    except Exception:
+        logger.exception("auto_match_candidates failed")
+        raise HTTPException(500, "내부 오류")
+
+
+@router.get("/invoices/{invoice_id}")
+def get_invoice_endpoint(invoice_id: int, conn: PgConnection = Depends(get_db)):
+    inv = get_invoice(conn, invoice_id)
+    if not inv:
+        raise HTTPException(404, f"invoice {invoice_id} not found")
+    return inv
+
+
+@router.patch("/invoices/{invoice_id}")
+def patch_invoice(invoice_id: int, body: InvoiceUpdate, conn: PgConnection = Depends(get_db)):
+    inv = get_invoice(conn, invoice_id)
+    if not inv:
+        raise HTTPException(404, "invoice not found")
+    if inv["status"] == "cancelled":
+        raise HTTPException(400, "cancelled invoice cannot be modified")
+
+    fields = body.model_dump(exclude_none=True)
+    if not fields:
+        return inv
+
+    # total 일관성 검증
+    new_amount = fields.get("amount", inv["amount"])
+    new_vat = fields.get("vat", inv["vat"])
+    new_total = fields.get("total")
+    if new_total is None and ("amount" in fields or "vat" in fields):
+        new_total = Decimal(str(new_amount)) + Decimal(str(new_vat))
+        fields["total"] = new_total
+    if new_total is not None:
+        if Decimal(str(new_total)) != Decimal(str(new_amount)) + Decimal(str(new_vat)):
+            raise HTTPException(400, "total != amount + vat")
+
+    # PATCH 동적 SQL
+    set_parts = []
+    params: list = []
+    for k, v in fields.items():
+        if isinstance(v, Decimal):
+            v = float(v)
+        set_parts.append(f"{k} = %s")
+        params.append(v)
+    set_parts.append("updated_at = NOW()")
+    params.append(invoice_id)
+
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            f"UPDATE invoices SET {', '.join(set_parts)} WHERE id = %s",
+            params,
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception("patch_invoice failed")
+        raise HTTPException(500, "내부 오류")
+    finally:
+        cur.close()
+    return get_invoice(conn, invoice_id)
+
+
+@router.post("/invoices/{invoice_id}/cancel")
+def post_cancel_invoice(invoice_id: int, body: CancelRequest, conn: PgConnection = Depends(get_db)):
+    try:
+        cancel_invoice(conn, invoice_id, note=body.note)
+        conn.commit()
+        return get_invoice(conn, invoice_id)
+    except ValueError as e:
+        conn.rollback()
+        raise HTTPException(404, str(e))
+    except Exception:
+        conn.rollback()
+        logger.exception("cancel_invoice failed")
+        raise HTTPException(500, "내부 오류")
+
+
+@router.delete("/invoices/{invoice_id}", status_code=204)
+def delete_invoice(invoice_id: int, conn: PgConnection = Depends(get_db)):
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM invoices WHERE id = %s", [invoice_id])
+        if cur.rowcount == 0:
+            raise HTTPException(404, "invoice not found")
+        conn.commit()
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception:
+        conn.rollback()
+        logger.exception("delete_invoice failed")
+        raise HTTPException(500, "내부 오류")
+    finally:
+        cur.close()
+
+
+@router.post("/invoices/{invoice_id}/payments", status_code=201)
+def post_payment(invoice_id: int, body: PaymentCreate, conn: PgConnection = Depends(get_db)):
+    try:
+        payment_id = match_invoice_payment(
+            conn,
+            invoice_id=invoice_id,
+            transaction_id=body.transaction_id,
+            amount=body.amount,
+            matched_by=body.matched_by,
+            note=body.note,
+        )
+        conn.commit()
+        return {"payment_id": payment_id, "invoice": get_invoice(conn, invoice_id)}
+    except ValueError as e:
+        conn.rollback()
+        raise HTTPException(400, str(e))
+    except Exception:
+        conn.rollback()
+        logger.exception("match_invoice_payment failed")
+        raise HTTPException(500, "내부 오류")
+
+
+@router.delete("/invoice-payments/{payment_id}", status_code=204)
+def delete_payment(payment_id: int, conn: PgConnection = Depends(get_db)):
+    try:
+        unmatch_invoice_payment(conn, payment_id)
+        conn.commit()
+    except ValueError as e:
+        conn.rollback()
+        raise HTTPException(404, str(e))
+    except Exception:
+        conn.rollback()
+        logger.exception("unmatch_invoice_payment failed")
+        raise HTTPException(500, "내부 오류")
