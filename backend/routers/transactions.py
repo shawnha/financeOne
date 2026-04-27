@@ -74,8 +74,11 @@ def list_transactions(
         where.append("t.standard_account_id = %s")
         params.append(standard_account_id)
     if internal_account_id is not None:
-        where.append("t.internal_account_id = %s")
-        params.append(internal_account_id)
+        # 상위 항목 선택 시 하위 항목 거래도 포함
+        where.append("""(t.internal_account_id = %s OR t.internal_account_id IN (
+            SELECT id FROM internal_accounts WHERE parent_id = %s
+        ))""")
+        params.extend([internal_account_id, internal_account_id])
     if tx_type in ("in", "out"):
         where.append("t.type = %s")
         params.append(tx_type)
