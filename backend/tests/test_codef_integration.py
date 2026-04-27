@@ -658,3 +658,22 @@ class TestNormalizeTaxInvoiceRow:
         from backend.services.integrations.codef import _normalize_tax_invoice_row
         row = {"resIssueDate": "20260415", "resSupplyAmount": "0", "resTotalAmount": "0"}
         assert _normalize_tax_invoice_row(row) is None
+
+
+def test_public_orgs_includes_hometax():
+    """scheduler 분기에서 PUBLIC_ORGS 처리에 hometax 가 들어있어야 함."""
+    from backend.services.integrations.codef import PUBLIC_ORGS, BANK_ORGS, CARD_ORGS
+    assert "hometax" in PUBLIC_ORGS
+    # 다른 그룹과 겹치지 않아야 (분기 모호성 방지)
+    assert PUBLIC_ORGS.isdisjoint(BANK_ORGS)
+    assert PUBLIC_ORGS.isdisjoint(CARD_ORGS)
+
+
+def test_scheduler_sync_one_sync_handles_hometax():
+    """scheduler._sync_one_sync 가 hometax org 분기를 가지고 있어야."""
+    import inspect
+    from backend.services import scheduler
+    src = inspect.getsource(scheduler._sync_one_sync)
+    assert "PUBLIC_ORGS" in src
+    assert "sync_tax_invoices" in src
+    assert "business_number" in src  # entity 자동 조회

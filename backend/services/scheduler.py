@@ -146,7 +146,7 @@ async def _sync_one(entity_id: int, org: str) -> dict:
 
 def _sync_one_sync(entity_id: int, org: str) -> dict:
     from backend.services.integrations.codef import (
-        CodefClient, CodefError, BANK_ORGS, CARD_ORGS,
+        CodefClient, CodefError, BANK_ORGS, CARD_ORGS, PUBLIC_ORGS,
         get_connected_id, set_last_sync,
     )
     from backend.routers.integrations import _log_codef_error  # helper reuse
@@ -175,6 +175,17 @@ def _sync_one_sync(entity_id: int, org: str) -> dict:
                     result = client.sync_card_approvals(
                         conn, entity_id, connected_id, start, end, org,
                     )
+                elif org in PUBLIC_ORGS and org == "hometax":
+                    # 홈택스 전자세금계산서 통합조회. our_biz_no 는 entities.business_number 자동 조회.
+                    cur = conn.cursor()
+                    cur.execute("SELECT business_number FROM entities WHERE id = %s", [entity_id])
+                    biz_row = cur.fetchone()
+                    cur.close()
+                    our_biz_no = biz_row[0] if biz_row and biz_row[0] else None
+                    result = client.sync_tax_invoices(
+                        conn, entity_id, connected_id, start, end,
+                        query_type="3", our_biz_no=our_biz_no,
+                    )
                 else:
                     return {"entity_id": entity_id, "org": org, "ok": False,
                             "detail": f"unknown org: {org}"}
@@ -201,10 +212,11 @@ def _sync_one_sync(entity_id: int, org: str) -> dict:
                     "entity_id": entity_id, "org": org, "ok": True,
                     "range": f"{start}~{end}",
                     "detail": {
-                        "synced": result.get("synced"),
+                        "synced": result.get("synced") or result.get("inserted"),
                         "duplicates": result.get("duplicates"),
                         "cancels": result.get("cancels"),
-                        "total_fetched": result.get("total_fetched"),
+                        "total_fetched": result.get("total_fetched") or result.get("fetched"),
+                        "unknown_direction": result.get("unknown_direction"),
                     },
                 }
             except CodefError as e:
