@@ -605,9 +605,12 @@ function ExpenseOneMatchContent() {
       try {
         const params = new URLSearchParams({
           status: statusFilter,
-          entity_id: entityId,
           limit: "300",
         })
+        // "consolidated"는 전체 법인 조회 — entity_id 생략
+        if (entityId !== "consolidated") {
+          params.set("entity_id", entityId)
+        }
         if (typeFilter !== "all") params.set("expense_type", typeFilter)
         if (selectedMonth) params.set("month", selectedMonth)
         const data = await fetchAPI<{ expenses: Expense[]; total: number }>(

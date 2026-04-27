@@ -590,6 +590,56 @@ def _split_forecasts_by_today(
     }
 
 
+def sync_forecast_actuals(
+    conn: PgConnection,
+    entity_id: int,
+    year: int,
+    month: int,
+) -> dict:
+    """forecasts.actual_amount 를 transactions 합계로 동기화.
+
+    P0-3: 이 작업은 read-only GET 경로에서 수행되지 않음 (race 방지).
+    호출 시점: (1) Codef sync / Excel upload 직후, (2) POST /forecast/sync-actuals
+    수동 endpoint, (3) 스케줄러 주기 동기화.
+
+    내부계정 매핑된 거래만 대상 — 미매핑 거래는 unmapped 합계로 별도 표시.
+
+    Returns: {"updated": <int>, "checked": <int>}
+    """
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT t.internal_account_id, t.type, SUM(t.amount) AS total
+        FROM transactions t
+        WHERE t.entity_id = %s
+          AND t.date >= make_date(%s, %s, 1)
+          AND t.date < make_date(%s, %s, 1) + INTERVAL '1 month'
+          AND t.is_duplicate = false
+          AND (t.is_cancel IS NOT TRUE)
+          AND t.internal_account_id IS NOT NULL
+        GROUP BY t.internal_account_id, t.type
+        """,
+        [entity_id, year, month, year, month],
+    )
+    rows = cur.fetchall()
+    updated = 0
+    for acct_id, acct_type, total in rows:
+        cur.execute(
+            """
+            UPDATE forecasts
+            SET actual_amount = %s, updated_at = NOW()
+            WHERE entity_id = %s AND year = %s AND month = %s
+              AND internal_account_id = %s AND type = %s
+              AND (actual_amount IS DISTINCT FROM %s)
+            """,
+            [float(total), entity_id, year, month, acct_id, acct_type, float(total)],
+        )
+        updated += cur.rowcount
+    conn.commit()
+    cur.close()
+    return {"checked": len(rows), "updated": updated}
+
+
 def get_forecast_cashflow(
     conn: PgConnection,
     entity_id: int,
@@ -681,19 +731,10 @@ def get_forecast_cashflow(
             "total": float(row[5] or 0),
         }
 
-    # 2-bis-b. actual_amount 자동 반영 (forecast → DB 동기화)
-    for (acct_id, acct_type), info in actual_by_account.items():
-        cur.execute(
-            """
-            UPDATE forecasts
-            SET actual_amount = %s, updated_at = NOW()
-            WHERE entity_id = %s AND year = %s AND month = %s
-              AND internal_account_id = %s AND type = %s
-              AND (actual_amount IS DISTINCT FROM %s)
-            """,
-            [info["total"], entity_id, year, month, acct_id, acct_type, info["total"]],
-        )
-    conn.commit()
+    # 2-bis-b. (P0-3) actual_amount DB 동기화는 read-only GET 에서 수행하지 않음.
+    # GET 경로에서 UPDATE+commit 시 사용자가 PATCH 로 수동 설정한 actual_amount 가
+    # 페이지 로드만으로 덮어써지는 race 발생. sync_forecast_actuals() 를 데이터
+    # import 경로(codef sync, excel upload)와 별도 POST endpoint 에서 호출.
 
     # 2-ter. 미매핑 거래 합계 (internal_account_id IS NULL, 은행 거래만)
     cur.execute(

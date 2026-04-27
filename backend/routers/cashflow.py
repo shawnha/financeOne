@@ -20,6 +20,7 @@ from backend.services.cashflow_service import (
     get_forecast_cashflow,
     get_variance_bridge,
     generate_daily_schedule,
+    sync_forecast_actuals,
 )
 
 router = APIRouter(prefix="/api/cashflow", tags=["cashflow"])
@@ -172,11 +173,30 @@ def get_forecast(
     month: int = Query(...),
     conn: PgConnection = Depends(get_db),
 ):
-    """예상 현금흐름 — forecasts + 시차 보정 + 실제 진행 비교."""
+    """예상 현금흐름 — forecasts + 시차 보정 + 실제 진행 비교 (read-only)."""
     try:
         return get_forecast_cashflow(conn, entity_id, year, month)
     except Exception as e:
         logger.error("Cashflow forecast error: %s", e)
+        raise HTTPException(500, detail=str(e))
+
+
+@router.post("/forecast/sync-actuals")
+def post_sync_forecast_actuals(
+    entity_id: int = Query(...),
+    year: int = Query(...),
+    month: int = Query(...),
+    conn: PgConnection = Depends(get_db),
+):
+    """forecasts.actual_amount 를 transactions 합계로 동기화 (P0-3).
+
+    이전에는 GET /forecast 가 호출될 때마다 자동 동기화 → 사용자 수동 PATCH 와
+    race 발생. 이제 명시적 호출 (이 endpoint, codef/upload 후처리, 스케줄러) 만으로 갱신.
+    """
+    try:
+        return sync_forecast_actuals(conn, entity_id, year, month)
+    except Exception as e:
+        logger.error("Sync forecast actuals error: %s", e)
         raise HTTPException(500, detail=str(e))
 
 
