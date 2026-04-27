@@ -18,7 +18,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from psycopg2.extensions import connection as PgConnection
 from pydantic import BaseModel, Field
 
@@ -331,3 +331,104 @@ def delete_payment(payment_id: int, conn: PgConnection = Depends(get_db)):
         conn.rollback()
         logger.exception("unmatch_invoice_payment failed")
         raise HTTPException(500, "내부 오류")
+
+
+# ── Excel import ──────────────────────────────────────────────────
+
+
+@router.post("/invoices/import")
+async def import_invoices_excel(
+    entity_id: int = Form(...),
+    our_biz_no: Optional[str] = Form(None),
+    dry_run: bool = Form(True),
+    skip_unknown_direction: bool = Form(True),
+    file: UploadFile = File(...),
+    conn: PgConnection = Depends(get_db),
+):
+    """세금계산서 Excel 일괄 업로드.
+
+    - dry_run=True (기본): 파싱만 하고 INSERT 안 함 — 미리보기.
+    - dry_run=False: 중복(document_no 일치) 제외하고 INSERT.
+    - skip_unknown_direction=True: direction='unknown' 행 (our_biz_no 와 매칭 안 되는
+      행) skip. False 면 unknown 그대로 INSERT (사용자가 수동 결정 필요).
+
+    Returns:
+        {parsed, inserted, duplicates, skipped, errors, stats, column_map}
+    """
+    from backend.services.parsers.invoice_excel import parse_invoice_excel
+    import json as _json
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(400, "빈 파일")
+
+    try:
+        result = parse_invoice_excel(file_bytes, file.filename or "invoice.xlsx", our_biz_no=our_biz_no)
+    except Exception as e:
+        logger.exception("invoice excel parse failed")
+        raise HTTPException(400, f"파싱 실패: {type(e).__name__}: {e}")
+
+    parsed = result["parsed"]
+    errors = result["errors"]
+    inserted = 0
+    duplicates = 0
+    skipped = 0
+
+    if not dry_run:
+        cur = conn.cursor()
+        try:
+            for inv in parsed:
+                if inv["direction"] == "unknown" and skip_unknown_direction:
+                    skipped += 1
+                    continue
+                # 중복 감지 (entity_id + document_no + issue_date)
+                if inv.get("document_no"):
+                    cur.execute(
+                        """
+                        SELECT id FROM invoices
+                        WHERE entity_id = %s AND document_no = %s AND issue_date = %s
+                        LIMIT 1
+                        """,
+                        [entity_id, inv["document_no"], inv["issue_date"]],
+                    )
+                    if cur.fetchone():
+                        duplicates += 1
+                        continue
+                cur.execute(
+                    """
+                    INSERT INTO invoices (
+                        entity_id, direction, counterparty, counterparty_biz_no,
+                        issue_date, due_date, document_no,
+                        amount, vat, total, currency,
+                        description, status, raw_data
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'KRW', %s, 'open', %s)
+                    """,
+                    [
+                        entity_id, inv["direction"], inv["counterparty"], inv["counterparty_biz_no"],
+                        inv["issue_date"], inv["due_date"], inv["document_no"],
+                        inv["amount"], inv["vat"], inv["total"],
+                        inv["description"],
+                        _json.dumps(inv["raw"], ensure_ascii=False),
+                    ],
+                )
+                inserted += 1
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            logger.exception("invoice excel insert failed")
+            raise HTTPException(500, "INSERT 실패")
+        finally:
+            cur.close()
+
+    return {
+        "dry_run": dry_run,
+        "parsed": parsed if dry_run else [],  # dry_run 미리보기에서만 전체 행 반환
+        "preview": parsed[:10] if not dry_run else [],
+        "inserted": inserted,
+        "duplicates": duplicates,
+        "skipped": skipped,
+        "errors": errors,
+        "stats": result["stats"],
+        "column_map": result["column_map"],
+        "header_row": result["header_row"],
+    }

@@ -239,6 +239,77 @@ class TestCounterpartyBalances:
         assert len(ours) == 0  # paid → outstanding 0 → 제외
 
 
+class TestExcelParser:
+    """invoice_excel.py 헤더 매핑 / 데이터 파싱 / direction 판별 검증."""
+
+    def test_header_to_field(self):
+        from backend.services.parsers.invoice_excel import header_to_field
+        assert header_to_field("작성일자") == "issue_date"
+        assert header_to_field("공급가액") == "amount"
+        assert header_to_field("세액") == "vat"
+        assert header_to_field("합계금액") == "total"
+        assert header_to_field("공급자등록번호") == "seller_biz_no"
+        assert header_to_field("공급받는자등록번호") == "buyer_biz_no"
+        assert header_to_field("공급자상호") == "seller_name"
+        assert header_to_field("공급받는자명") == "buyer_name"
+        assert header_to_field("승인번호") == "document_no"
+        assert header_to_field("랜덤헤더") is None
+
+    def test_parse_excel_synthetic_xlsx(self, tmp_path):
+        """openpyxl 로 합성 xlsx 만들어 파서 회귀."""
+        import openpyxl
+        from backend.services.parsers.invoice_excel import parse_invoice_excel
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["작성일자", "승인번호", "공급자등록번호", "공급자상호",
+                   "공급받는자등록번호", "공급받는자상호",
+                   "공급가액", "세액", "합계금액", "품목"])
+        ws.append(["2026-04-15", "DOC001", "111-22-33333", "TestCorp",
+                   "999-88-77777", "한아원코리아",
+                   100000, 10000, 110000, "컨설팅"])
+        ws.append(["2026-04-20", "DOC002", "999-88-77777", "한아원코리아",
+                   "555-44-33333", "고객A",
+                   500000, 50000, 550000, "서비스 매출"])
+        path = tmp_path / "test.xlsx"
+        wb.save(path)
+        with open(path, "rb") as f:
+            data = f.read()
+
+        # our_biz_no = "999-88-77777" → row1=purchase, row2=sales
+        result = parse_invoice_excel(data, "test.xlsx", our_biz_no="999-88-77777")
+        assert result["stats"]["valid"] == 2
+        assert result["stats"]["unknown_direction"] == 0
+        directions = {r["direction"] for r in result["parsed"]}
+        assert directions == {"sales", "purchase"}
+
+        sale = next(r for r in result["parsed"] if r["direction"] == "sales")
+        assert sale["counterparty"] == "고객A"
+        assert sale["amount"] == 500000.0
+        assert sale["vat"] == 50000.0
+        assert sale["total"] == 550000.0
+
+    def test_unknown_direction_when_no_biz_match(self, tmp_path):
+        import openpyxl
+        from backend.services.parsers.invoice_excel import parse_invoice_excel
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["작성일자", "공급자등록번호", "공급받는자등록번호",
+                   "공급자상호", "공급받는자상호", "공급가액", "세액"])
+        ws.append(["2026-04-15", "111-11-11111", "222-22-22222",
+                   "Other A", "Other B", 100000, 10000])
+        path = tmp_path / "u.xlsx"
+        wb.save(path)
+        with open(path, "rb") as f:
+            data = f.read()
+
+        result = parse_invoice_excel(data, "u.xlsx", our_biz_no="999-99-99999")
+        assert result["stats"]["valid"] == 1
+        assert result["stats"]["unknown_direction"] == 1
+        assert result["parsed"][0]["direction"] == "unknown"
+
+
 class TestAutoMatchCandidates:
     def test_amount_match_high_score(self, conn, fixture_entity):
         # tx + invoice 둘 다 동일 counterparty + 금액 + 일자

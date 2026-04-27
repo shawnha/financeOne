@@ -18,6 +18,8 @@ import {
   Wand2,
   Trash2,
   XCircle,
+  Upload,
+  AlertTriangle,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -119,6 +121,7 @@ function InvoicesInner() {
   const [createOpen, setCreateOpen] = useState(false)
   const [matchInvoice, setMatchInvoice] = useState<Invoice | null>(null)
   const [autoMatchOpen, setAutoMatchOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
 
   const reload = useCallback(async () => {
     if (!entityId) return
@@ -173,6 +176,9 @@ function InvoicesInner() {
           <span className="text-xs text-muted-foreground ml-2">발생주의 / 매출·매입 인식</span>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+            <Upload className="h-4 w-4 mr-1" /> Excel 가져오기
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setAutoMatchOpen(true)}>
             <Wand2 className="h-4 w-4 mr-1" /> 자동 매칭 후보
           </Button>
@@ -344,7 +350,202 @@ function InvoicesInner() {
           onApplied={() => { setAutoMatchOpen(false); void reload() }}
         />
       )}
+
+      {importOpen && entityId && (
+        <ImportModal
+          entityId={entityId}
+          onClose={() => setImportOpen(false)}
+          onImported={() => { setImportOpen(false); void reload() }}
+        />
+      )}
     </div>
+  )
+}
+
+
+// ── Import Modal ────────────────────────────────────────────────────
+
+
+interface ImportPreview {
+  parsed: Array<{
+    direction: string
+    counterparty: string
+    issue_date: string
+    document_no: string | null
+    amount: number
+    vat: number
+    total: number
+    row_number: number
+  }>
+  inserted: number
+  duplicates: number
+  skipped: number
+  errors: Array<{ row: number; message: string }>
+  stats: { total: number; valid: number; errors: number; unknown_direction: number }
+  column_map: Record<string, string>
+  header_row: number
+}
+
+function ImportModal({
+  entityId, onClose, onImported,
+}: {
+  entityId: number
+  onClose: () => void
+  onImported: () => void
+}) {
+  const [file, setFile] = useState<File | null>(null)
+  const [ourBizNo, setOurBizNo] = useState("")
+  const [skipUnknown, setSkipUnknown] = useState(true)
+  const [preview, setPreview] = useState<ImportPreview | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  async function runImport(dryRun: boolean) {
+    if (!file) {
+      toast.error("Excel 파일을 선택해주세요.")
+      return
+    }
+    setSubmitting(true)
+    try {
+      const fd = new FormData()
+      fd.append("entity_id", String(entityId))
+      fd.append("file", file)
+      fd.append("dry_run", String(dryRun))
+      fd.append("skip_unknown_direction", String(skipUnknown))
+      if (ourBizNo) fd.append("our_biz_no", ourBizNo)
+
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"
+      const res = await fetch(`${apiBase}/api/invoices/import`, {
+        method: "POST",
+        body: fd,
+      })
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(text || `HTTP ${res.status}`)
+      }
+      const data = await res.json() as ImportPreview
+      setPreview(data)
+      if (dryRun) {
+        toast.success(`미리보기: ${data.stats.valid}건 정상, ${data.stats.errors}건 오류`)
+      } else {
+        toast.success(`등록 완료: ${data.inserted}건 신규, ${data.duplicates}건 중복, ${data.skipped}건 건너뜀`)
+        if (data.inserted > 0) onImported()
+      }
+    } catch (e) {
+      toast.error(`업로드 실패: ${(e as Error).message}`)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <ModalShell title="세금계산서 Excel 가져오기" onClose={onClose} wide>
+      <div className="space-y-3 text-sm">
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-md p-3 text-xs">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-400 mt-0.5 shrink-0" />
+            <div>
+              홈택스 / 회계법인 발행 표준 Excel 양식 자동 매핑 (작성일자, 공급가액, 세액, 합계금액, 사업자번호 등).
+              사업자번호 입력 시 매출/매입 자동 판별. 미입력 시 모두 'unknown' 으로 들어가니 직접 결정 필요.
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Excel 파일 *">
+            <Input type="file" accept=".xls,.xlsx"
+              onChange={(e) => setFile(e.target.files?.[0] || null)} />
+          </Field>
+          <Field label="우리 사업자번호 (direction 자동 판별)">
+            <Input value={ourBizNo} onChange={(e) => setOurBizNo(e.target.value)}
+              placeholder="123-45-67890" />
+          </Field>
+        </div>
+
+        <label className="flex items-center gap-2 text-xs cursor-pointer">
+          <input type="checkbox" checked={skipUnknown}
+            onChange={(e) => setSkipUnknown(e.target.checked)} />
+          direction 판별 안 되는 행 건너뛰기 (사업자번호 매칭 실패 시)
+        </label>
+
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => void runImport(true)}
+            disabled={submitting || !file}>
+            미리보기 (dry-run)
+          </Button>
+          <Button onClick={() => void runImport(false)}
+            disabled={submitting || !file}>
+            {submitting ? "처리 중..." : "등록 실행"}
+          </Button>
+        </div>
+
+        {preview && (
+          <div className="border rounded-md mt-3">
+            <div className="px-3 py-2 border-b bg-secondary/30 text-xs flex gap-4">
+              <span>전체 {preview.stats.total}</span>
+              <span className="text-emerald-400">정상 {preview.stats.valid}</span>
+              <span className="text-rose-400">오류 {preview.stats.errors}</span>
+              <span className="text-amber-400">unknown {preview.stats.unknown_direction}</span>
+              {preview.inserted > 0 && (
+                <span className="text-emerald-400 ml-auto">신규 등록 {preview.inserted}건</span>
+              )}
+              {preview.duplicates > 0 && (
+                <span className="text-muted-foreground">중복 {preview.duplicates}건</span>
+              )}
+              {preview.skipped > 0 && (
+                <span className="text-muted-foreground">건너뜀 {preview.skipped}건</span>
+              )}
+            </div>
+            {preview.parsed.length > 0 && (
+              <div className="max-h-64 overflow-y-auto text-xs">
+                <table className="w-full">
+                  <thead className="text-muted-foreground border-b sticky top-0 bg-card">
+                    <tr>
+                      <th className="text-left px-2 py-1">행</th>
+                      <th className="text-left px-2 py-1">유형</th>
+                      <th className="text-left px-2 py-1">날짜</th>
+                      <th className="text-left px-2 py-1">거래처</th>
+                      <th className="text-left px-2 py-1">문서번호</th>
+                      <th className="text-right px-2 py-1">합계</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.parsed.slice(0, 50).map((p, i) => (
+                      <tr key={i} className="border-b">
+                        <td className="px-2 py-1 font-mono">{p.row_number}</td>
+                        <td className="px-2 py-1">
+                          <span className={cn(
+                            "px-1.5 rounded text-[10px]",
+                            p.direction === "sales" ? "bg-emerald-500/15 text-emerald-400"
+                              : p.direction === "purchase" ? "bg-rose-500/15 text-rose-400"
+                              : "bg-amber-500/15 text-amber-400",
+                          )}>
+                            {p.direction === "sales" ? "매출" : p.direction === "purchase" ? "매입" : "?"}
+                          </span>
+                        </td>
+                        <td className="px-2 py-1 font-mono">{p.issue_date}</td>
+                        <td className="px-2 py-1 max-w-[160px] truncate">{p.counterparty}</td>
+                        <td className="px-2 py-1">{p.document_no || "-"}</td>
+                        <td className="px-2 py-1 text-right font-mono tabular-nums">{fmtKRW(p.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {preview.errors.length > 0 && (
+              <div className="border-t px-3 py-2 text-xs">
+                <div className="text-rose-400 mb-1">오류 ({preview.errors.length}건)</div>
+                <ul className="space-y-0.5 max-h-32 overflow-y-auto">
+                  {preview.errors.slice(0, 20).map((er, i) => (
+                    <li key={i} className="text-muted-foreground">행 {er.row}: {er.message}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </ModalShell>
   )
 }
 
