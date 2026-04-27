@@ -144,6 +144,17 @@ def calc_forecast_closing(
     )
 
 
+def clamp_day_to_month(day: int, year: int, month: int) -> int:
+    """day(1-31) 를 (year, month) 의 last_day 로 clamp (예: 4월 31일 → 30일).
+
+    P1-5: payment_day / expected_day 가 31인 항목을 4월/6월/9월/11월(30일까지) 또는
+    2월(28~29일)에서 동일하게 마지막 날로 처리. predicted_ending 합성 분기와
+    generate_daily_schedule 가 같은 helper 사용 → 일관성 보장.
+    """
+    last_day = calendar.monthrange(year, month)[1]
+    return min(max(1, int(day)), last_day)
+
+
 def predicted_ending_mode(
     as_of: date,
     month_start: date,
@@ -906,10 +917,16 @@ def get_forecast_cashflow(
         #   actual_to_yesterday에 포함(중복 방지), 아직 안 지났으면 remaining으로 추가.
         unpaid_prev_card = Decimal("0")
         if cards:
-            # 각 카드의 전월 사용분 중 아직 결제 안 된(payment_day > today) 것만 합산
+            # 각 카드의 전월 사용분 중 아직 결제 안 된(clamped payment_day > today) 것만 합산.
+            # P1-5: payment_day=31 카드를 4월(30일까지) 같이 짧은 달에 처리할 때 clamp 미적용 시
+            # today=30 인 경우 31>30=True 로 잘못 합산 → today 결제 거래와 중복 위험.
+            # generate_daily_schedule 와 동일하게 clamp_day_to_month() 사용.
             for card in cards:
-                payment_day = card.get("payment_day") or 0
-                if payment_day > today_day_in_month:
+                raw_pd = card.get("payment_day") or 0
+                if raw_pd <= 0:
+                    continue
+                clamped_pd = clamp_day_to_month(raw_pd, year, month)
+                if clamped_pd > today_day_in_month:
                     src = card["source_type"]
                     prev_card_for_source = get_card_total_net(conn, entity_id, prev_year, prev_month, source_type=src)
                     unpaid_prev_card += prev_card_for_source
@@ -1340,22 +1357,22 @@ def generate_daily_schedule(
     # 날짜별 이벤트 매핑
     day_events: dict[int, list[dict]] = defaultdict(list)
 
-    # 1. expected_day 지정 bank 항목
+    # 1. expected_day 지정 bank 항목 — P1-5 clamp_day_to_month 사용
     for item in items:
         if item.get("payment_method", "bank") == "bank" and item.get("expected_day"):
-            day = min(item["expected_day"], days_in_month)
+            day = clamp_day_to_month(item["expected_day"], year, month)
             day_events[day].append({
                 "name": item["category"],
                 "amount": item["forecast_amount"],
                 "type": item["type"],
             })
 
-    # 2. 카드 결제일 (card_settings 기반)
+    # 2. 카드 결제일 (card_settings 기반) — P1-5 clamp_day_to_month 사용
     for card in cards:
         prev_card = get_card_total_net(
             conn, entity_id, prev_year, prev_month, source_type=card["source_type"],
         )
-        day = min(card["payment_day"], days_in_month)
+        day = clamp_day_to_month(card["payment_day"], year, month)
         if prev_card > 0:
             day_events[day].append({
                 "name": f"{card['card_name']} 결제",

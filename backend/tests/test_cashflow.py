@@ -458,6 +458,62 @@ class TestTimezoneKST:
         assert "today_kst" in text
 
 
+# ── Test 11: clamp_day_to_month — P1-5 ────────────────────────────────────
+
+
+class TestClampDayToMonth:
+    """P1-5 회귀: payment_day / expected_day clamp 일관화.
+
+    이전: predicted_ending 분기는 raw payment_day 비교 → 4월 30일에
+    payment_day=31 카드는 31>30=True 로 unpaid 합산 (today 결제와 중복).
+    수정: clamp_day_to_month() helper 로 last_day clamp 후 비교 →
+    generate_daily_schedule 와 일관.
+    """
+
+    def test_clamp_31_to_april_30(self):
+        from backend.services.cashflow_service import clamp_day_to_month
+        assert clamp_day_to_month(31, 2026, 4) == 30  # 4월은 30일까지
+
+    def test_clamp_31_to_february_28(self):
+        from backend.services.cashflow_service import clamp_day_to_month
+        assert clamp_day_to_month(31, 2026, 2) == 28  # 2026 평년
+
+    def test_clamp_31_to_february_29_leap(self):
+        from backend.services.cashflow_service import clamp_day_to_month
+        assert clamp_day_to_month(31, 2024, 2) == 29  # 2024 윤년
+
+    def test_clamp_31_to_january_31(self):
+        from backend.services.cashflow_service import clamp_day_to_month
+        assert clamp_day_to_month(31, 2026, 1) == 31  # 1월은 31일까지 그대로
+
+    def test_clamp_below_1_to_1(self):
+        from backend.services.cashflow_service import clamp_day_to_month
+        assert clamp_day_to_month(0, 2026, 4) == 1
+        assert clamp_day_to_month(-5, 2026, 4) == 1
+
+    def test_predicted_ending_uses_clamped_payment_day(self):
+        """predicted_ending 분기가 clamp 적용 비교 사용."""
+        import inspect
+        from backend.services import cashflow_service
+
+        src = inspect.getsource(cashflow_service.get_forecast_cashflow)
+        # unpaid_prev_card 합산 분기에 clamp_day_to_month 호출 존재 확인
+        assert "clamp_day_to_month" in src, (
+            "get_forecast_cashflow 의 unpaid_prev_card 분기에 clamp_day_to_month 사용 필요"
+        )
+
+    def test_generate_daily_schedule_uses_clamp(self):
+        """generate_daily_schedule 도 clamp helper 사용 (raw min() 직접 호출 제거)."""
+        import inspect
+        from backend.services import cashflow_service
+
+        src = inspect.getsource(cashflow_service.generate_daily_schedule)
+        assert "clamp_day_to_month" in src
+        # raw `min(item["expected_day"], days_in_month)` 패턴 부재
+        normalized = " ".join(src.split())
+        assert 'min(item["expected_day"], days_in_month)' not in normalized
+
+
 # ── Test 4: account_breakdown in card expenses ───────────────────────────────
 
 
