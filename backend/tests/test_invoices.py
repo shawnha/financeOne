@@ -239,6 +239,123 @@ class TestCounterpartyBalances:
         assert len(ours) == 0  # paid → outstanding 0 → 제외
 
 
+class TestAccrualJournalEntry:
+    """P3-2: invoices 발행/매칭/취소 시 journal_entries 자동 생성/reverse 검증."""
+
+    @pytest.fixture
+    def std_id_sales(self, conn):
+        # 상품매출 (40100) 또는 서비스매출 (41200) 중 41200 사용.
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM standard_accounts WHERE code = '41200'")
+        row = cur.fetchone()
+        cur.close()
+        assert row, "서비스매출(41200) standard_account 미존재 — seed 누락"
+        return row[0]
+
+    @pytest.fixture
+    def std_id_purchase(self, conn):
+        # 사무용품비 (82900) — 매입 시 비용계정 예시.
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM standard_accounts WHERE code = '82900'")
+        row = cur.fetchone()
+        cur.close()
+        assert row
+        return row[0]
+
+    def _je_lines(self, conn, je_id):
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT sa.code, jel.debit_amount, jel.credit_amount
+            FROM journal_entry_lines jel
+            JOIN standard_accounts sa ON jel.standard_account_id = sa.id
+            WHERE jel.journal_entry_id = %s
+            ORDER BY jel.id
+        """, [je_id])
+        rows = cur.fetchall()
+        cur.close()
+        return [(r[0], Decimal(str(r[1] or 0)), Decimal(str(r[2] or 0))) for r in rows]
+
+    def test_sales_invoice_creates_journal(self, conn, fixture_entity, std_id_sales):
+        inv_id = svc.create_invoice(
+            conn, entity_id=fixture_entity, direction="sales",
+            counterparty="고객A", issue_date=date(2026, 4, 1),
+            amount=Decimal("100000"), vat=Decimal("10000"),
+            standard_account_id=std_id_sales,
+        )
+        cur = conn.cursor()
+        cur.execute("SELECT journal_entry_id FROM invoices WHERE id = %s", [inv_id])
+        je_id = cur.fetchone()[0]
+        cur.close()
+        assert je_id is not None
+        lines = self._je_lines(conn, je_id)
+        # (차) 외상매출금 110,000 / (대) 매출 100,000 / (대) 부가세예수금 10,000
+        codes = sorted(l[0] for l in lines)
+        assert "10800" in codes  # 외상매출금
+        assert "41200" in codes  # 매출
+        assert "25500" in codes  # 부가세예수금
+        ar_line = next(l for l in lines if l[0] == "10800")
+        assert ar_line[1] == Decimal("110000.00")  # 차변
+        sales_line = next(l for l in lines if l[0] == "41200")
+        assert sales_line[2] == Decimal("100000.00")  # 대변
+        vat_line = next(l for l in lines if l[0] == "25500")
+        assert vat_line[2] == Decimal("10000.00")  # 대변
+
+    def test_purchase_invoice_creates_journal(self, conn, fixture_entity, std_id_purchase):
+        inv_id = svc.create_invoice(
+            conn, entity_id=fixture_entity, direction="purchase",
+            counterparty="공급사B", issue_date=date(2026, 4, 5),
+            amount=Decimal("50000"), vat=Decimal("5000"),
+            standard_account_id=std_id_purchase,
+        )
+        cur = conn.cursor()
+        cur.execute("SELECT journal_entry_id FROM invoices WHERE id = %s", [inv_id])
+        je_id = cur.fetchone()[0]
+        cur.close()
+        assert je_id is not None
+        lines = self._je_lines(conn, je_id)
+        # (차) 비용 50,000 + 부가세대급금 5,000 / (대) 외상매입금 55,000
+        codes = sorted(l[0] for l in lines)
+        assert "82900" in codes
+        assert "13500" in codes  # 부가세대급금
+        assert "25100" in codes  # 외상매입금
+        exp_line = next(l for l in lines if l[0] == "82900")
+        assert exp_line[1] == Decimal("50000.00")
+        ap_line = next(l for l in lines if l[0] == "25100")
+        assert ap_line[2] == Decimal("55000.00")
+
+    def test_cancel_invoice_reverses_journal(self, conn, fixture_entity, std_id_sales):
+        inv_id = svc.create_invoice(
+            conn, entity_id=fixture_entity, direction="sales",
+            counterparty="X", issue_date=date(2026, 4, 1),
+            amount=Decimal("100000"), standard_account_id=std_id_sales,
+        )
+        cur = conn.cursor()
+        cur.execute("SELECT journal_entry_id FROM invoices WHERE id = %s", [inv_id])
+        je_id = cur.fetchone()[0]
+        assert je_id is not None
+        svc.cancel_invoice(conn, inv_id)
+        cur.execute("SELECT journal_entry_id FROM invoices WHERE id = %s", [inv_id])
+        new_je_id = cur.fetchone()[0]
+        cur.execute("SELECT id FROM journal_entries WHERE id = %s", [je_id])
+        je_still_exists = cur.fetchone() is not None
+        cur.close()
+        assert new_je_id is None  # 분개 링크 끊김
+        assert not je_still_exists  # 분개 자체도 삭제됨
+
+    def test_invoice_without_std_account_skips_journal(self, conn, fixture_entity):
+        """standard_account_id 없으면 invoice 만 생성되고 분개 skip (warning)."""
+        inv_id = svc.create_invoice(
+            conn, entity_id=fixture_entity, direction="sales",
+            counterparty="NoStdAccount", issue_date=date(2026, 4, 1),
+            amount=Decimal("50000"),
+        )
+        cur = conn.cursor()
+        cur.execute("SELECT journal_entry_id FROM invoices WHERE id = %s", [inv_id])
+        je_id = cur.fetchone()[0]
+        cur.close()
+        assert je_id is None  # std_account_id 없어서 분개 안 만들어짐
+
+
 class TestExcelParser:
     """invoice_excel.py 헤더 매핑 / 데이터 파싱 / direction 판별 검증."""
 

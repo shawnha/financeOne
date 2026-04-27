@@ -28,8 +28,23 @@ from psycopg2.extensions import connection as PgConnection
 from backend.utils.db import fetch_all
 
 
+# K-GAAP 표준계정 코드 (standard_accounts.code)
+ACCOUNTS_RECEIVABLE_CODE = "10800"  # 외상매출금 (자산)
+ACCOUNTS_PAYABLE_TRADE_CODE = "25100"  # 외상매입금 (부채)
+VAT_PAYABLE_CODE = "25500"  # 부가세예수금 (부채, 매출 시 발생)
+VAT_RECEIVABLE_CODE = "13500"  # 부가세대급금 (자산, 매입 시 발생)
+
+
 def _quantize(amount) -> Decimal:
     return Decimal(str(amount)).quantize(Decimal("0.01"))
+
+
+def _lookup_account_id(cur, code: str) -> int:
+    cur.execute("SELECT id FROM standard_accounts WHERE code = %s", [code])
+    row = cur.fetchone()
+    if not row:
+        raise RuntimeError(f"standard_account {code} not found")
+    return row[0]
 
 
 def create_invoice(
@@ -83,7 +98,102 @@ def create_invoice(
     )
     invoice_id = cur.fetchone()[0]
     cur.close()
+
+    # P3-2: invoices.standard_account_id 가 있으면 자동 분개.
+    # 매출 / 매입 모두 동일 패턴 (방향 반대):
+    #   sales:    (차) 외상매출금 total / (대) 매출 amount + 부가세예수금 vat
+    #   purchase: (차) 비용 amount + 부가세대급금 vat / (대) 외상매입금 total
+    if standard_account_id is not None:
+        try:
+            je_id = _create_invoice_journal(
+                conn, invoice_id=invoice_id, entity_id=entity_id,
+                direction=direction, issue_date=issue_date,
+                amount=amount_q, vat=vat_q, total=total_q,
+                std_account_id=standard_account_id,
+                description=f"{counterparty} - {description or ''}".strip(" -"),
+            )
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE invoices SET journal_entry_id = %s WHERE id = %s",
+                [je_id, invoice_id],
+            )
+            cur.close()
+        except Exception as je_err:
+            # 분개 생성 실패해도 invoice 자체는 보존 — 사용자가 수동 분개 가능.
+            import logging
+            logging.getLogger(__name__).warning(
+                "invoice %s journal entry creation failed: %s", invoice_id, je_err,
+            )
     return invoice_id
+
+
+def _create_invoice_journal(
+    conn: PgConnection,
+    *,
+    invoice_id: int,
+    entity_id: int,
+    direction: str,
+    issue_date: date,
+    amount: Decimal,
+    vat: Decimal,
+    total: Decimal,
+    std_account_id: int,
+    description: str = "",
+) -> int:
+    """invoice 발행 시점 발생주의 분개 생성. 호출자가 commit 책임.
+
+    sales:
+      (차) 외상매출금 = total
+      (대) 매출(std)  = amount
+      (대) 부가세예수금 = vat (vat>0 일 때만)
+    purchase:
+      (차) 비용(std)   = amount
+      (차) 부가세대급금 = vat (vat>0 일 때만)
+      (대) 외상매입금  = total
+    """
+    from backend.services.bookkeeping_engine import create_journal_entry
+
+    cur = conn.cursor()
+    if direction == "sales":
+        ar_id = _lookup_account_id(cur, ACCOUNTS_RECEIVABLE_CODE)
+        lines = [
+            {"standard_account_id": ar_id, "debit_amount": total, "credit_amount": Decimal("0")},
+            {"standard_account_id": std_account_id, "debit_amount": Decimal("0"), "credit_amount": amount},
+        ]
+        if vat > 0:
+            vat_payable_id = _lookup_account_id(cur, VAT_PAYABLE_CODE)
+            lines.append({
+                "standard_account_id": vat_payable_id,
+                "debit_amount": Decimal("0"), "credit_amount": vat,
+            })
+    elif direction == "purchase":
+        ap_id = _lookup_account_id(cur, ACCOUNTS_PAYABLE_TRADE_CODE)
+        lines = [
+            {"standard_account_id": std_account_id, "debit_amount": amount, "credit_amount": Decimal("0")},
+        ]
+        if vat > 0:
+            vat_recv_id = _lookup_account_id(cur, VAT_RECEIVABLE_CODE)
+            lines.append({
+                "standard_account_id": vat_recv_id,
+                "debit_amount": vat, "credit_amount": Decimal("0"),
+            })
+        lines.append({
+            "standard_account_id": ap_id,
+            "debit_amount": Decimal("0"), "credit_amount": total,
+        })
+    else:
+        cur.close()
+        raise ValueError(f"invalid direction: {direction}")
+    cur.close()
+
+    return create_journal_entry(
+        conn=conn,
+        entity_id=entity_id,
+        lines=lines,
+        entry_date=issue_date,
+        description=description,
+        # transaction_id 는 None — invoice 분개라서 transactions 와 무관.
+    )
 
 
 def get_invoice(conn: PgConnection, invoice_id: int) -> Optional[dict]:
@@ -314,20 +424,77 @@ def match_invoice_payment(
         [invoice_id, transaction_id, float(match_amount), matched_by, note],
     )
     payment_id = cur.fetchone()[0]
+
+    # P3-2: 매칭 분개 자동 생성.
+    #   sales 결제 수령:  (차) 현금          / (대) 외상매출금
+    #   purchase 결제 지급:(차) 외상매입금    / (대) 현금
+    # 단, 해당 transaction 에 이미 분개가 있으면 그대로 두고 (cash 분개) 추가하지 않음.
+    # 이렇게 하면 transactions 의 기존 분개와 invoice 매칭 분개가 둘 다 잡혀
+    # 외상매출금/외상매입금 잔액이 정확히 회수됨.
+    cur.execute("SELECT id FROM journal_entries WHERE transaction_id = %s LIMIT 1", [transaction_id])
+    has_tx_je = cur.fetchone() is not None
+
+    payment_je_id = None
+    if not has_tx_je:
+        try:
+            from backend.services.bookkeeping_engine import (
+                create_journal_entry, _get_cash_account_id,
+            )
+            cash_id = _get_cash_account_id(cur)
+            if direction == "sales":
+                ar_id = _lookup_account_id(cur, ACCOUNTS_RECEIVABLE_CODE)
+                lines = [
+                    {"standard_account_id": cash_id, "debit_amount": match_amount, "credit_amount": Decimal("0")},
+                    {"standard_account_id": ar_id, "debit_amount": Decimal("0"), "credit_amount": match_amount},
+                ]
+            else:  # purchase
+                ap_id = _lookup_account_id(cur, ACCOUNTS_PAYABLE_TRADE_CODE)
+                lines = [
+                    {"standard_account_id": ap_id, "debit_amount": match_amount, "credit_amount": Decimal("0")},
+                    {"standard_account_id": cash_id, "debit_amount": Decimal("0"), "credit_amount": match_amount},
+                ]
+            cur.execute(
+                "SELECT date FROM transactions WHERE id = %s", [transaction_id],
+            )
+            tx_date_row = cur.fetchone()
+            tx_date = tx_date_row[0] if tx_date_row else None
+
+            payment_je_id = create_journal_entry(
+                conn=conn, entity_id=inv_entity, lines=lines,
+                entry_date=tx_date,
+                description=f"invoice {invoice_id} payment match (tx {transaction_id})",
+                transaction_id=transaction_id,
+            )
+            cur.execute(
+                "UPDATE invoice_payments SET journal_entry_id = %s WHERE id = %s",
+                [payment_je_id, payment_id],
+            )
+        except Exception as je_err:
+            import logging
+            logging.getLogger(__name__).warning(
+                "invoice_payment %s journal entry creation failed: %s", payment_id, je_err,
+            )
+
     cur.close()
     update_invoice_status(conn, invoice_id)
     return payment_id
 
 
 def unmatch_invoice_payment(conn: PgConnection, payment_id: int) -> None:
-    """매칭 해제 + invoice status 재계산."""
+    """매칭 해제 + 분개 reverse + invoice status 재계산."""
     cur = conn.cursor()
-    cur.execute("SELECT invoice_id FROM invoice_payments WHERE id = %s", [payment_id])
+    cur.execute(
+        "SELECT invoice_id, journal_entry_id FROM invoice_payments WHERE id = %s",
+        [payment_id],
+    )
     row = cur.fetchone()
     if not row:
         cur.close()
         raise ValueError(f"invoice_payment {payment_id} not found")
-    invoice_id = row[0]
+    invoice_id, je_id = row
+    if je_id:
+        cur.execute("DELETE FROM journal_entry_lines WHERE journal_entry_id = %s", [je_id])
+        cur.execute("DELETE FROM journal_entries WHERE id = %s", [je_id])
     cur.execute("DELETE FROM invoice_payments WHERE id = %s", [payment_id])
     cur.close()
     update_invoice_status(conn, invoice_id)
@@ -424,22 +591,42 @@ def auto_match_candidates(
 
 
 def cancel_invoice(conn: PgConnection, invoice_id: int, note: Optional[str] = None) -> None:
-    """invoice 취소 — 매칭된 payment 모두 해제 후 status='cancelled'."""
+    """invoice 취소 — 매칭된 payment 모두 해제 + 분개 reverse 후 status='cancelled'."""
     cur = conn.cursor()
+    # P3-2: 분개 reverse (journal_entries 삭제 — 결산 후 reversing 분개 vs 단순 삭제 정책은
+    # 단순 삭제로 진행. 결산 잠금된 분개는 별도 정책 필요하나 현재 잠금 미구현).
+    cur.execute("SELECT journal_entry_id FROM invoices WHERE id = %s", [invoice_id])
+    row = cur.fetchone()
+    if not row:
+        cur.close()
+        raise ValueError(f"invoice {invoice_id} not found")
+    je_id = row[0]
+    if je_id:
+        cur.execute("DELETE FROM journal_entry_lines WHERE journal_entry_id = %s", [je_id])
+        cur.execute("DELETE FROM journal_entries WHERE id = %s", [je_id])
+
+    # 매칭 payments 분개도 함께 정리
+    cur.execute(
+        "SELECT journal_entry_id FROM invoice_payments WHERE invoice_id = %s AND journal_entry_id IS NOT NULL",
+        [invoice_id],
+    )
+    payment_je_ids = [r[0] for r in cur.fetchall()]
+    for pje in payment_je_ids:
+        cur.execute("DELETE FROM journal_entry_lines WHERE journal_entry_id = %s", [pje])
+        cur.execute("DELETE FROM journal_entries WHERE id = %s", [pje])
+
     cur.execute("DELETE FROM invoice_payments WHERE invoice_id = %s", [invoice_id])
     cur.execute(
         """
         UPDATE invoices
         SET status = 'cancelled',
+            journal_entry_id = NULL,
             note = COALESCE(note, '') || CASE WHEN %s IS NOT NULL THEN E'\n[cancel] ' || %s ELSE '' END,
             updated_at = NOW()
         WHERE id = %s
         """,
         [note, note, invoice_id],
     )
-    if cur.rowcount == 0:
-        cur.close()
-        raise ValueError(f"invoice {invoice_id} not found")
     cur.close()
 
 
