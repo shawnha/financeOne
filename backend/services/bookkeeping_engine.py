@@ -8,7 +8,8 @@ from decimal import Decimal, ROUND_HALF_UP
 from psycopg2.extensions import connection as PgConnection
 
 
-DEFAULT_CASH_ACCOUNT_CODE = "10100"
+DEFAULT_CASH_ACCOUNT_CODE = "10100"  # 현금 — manual / 외화현금 등
+DEFAULT_BANK_ACCOUNT_CODE = "10300"  # 보통예금 — 모든 은행 거래 기본 매핑
 ACCOUNTS_PAYABLE_CODE = "26200"  # 미지급비용 — 카드 사용 시 발생주의 부채
 
 # 카드 source_type → 카드 사용 분개는 (차)비용/(대)미지급비용
@@ -16,6 +17,14 @@ CARD_SOURCE_TYPES = {
     "lotte_card", "woori_card", "shinhan_card",
     "codef_lotte_card", "codef_woori_card", "codef_shinhan_card",
     "expenseone_card", "gowid_api",
+}
+
+# 은행 source_type → cash 분개를 보통예금(10300) 으로.
+# manual / 외화 등은 기본 현금(10100) 사용.
+BANK_SOURCE_TYPES = {
+    "woori_bank", "ibk_bank",
+    "codef_woori_bank", "codef_ibk_bank", "codef_shinhan_bank",
+    "mercury_api",  # HOI USD 도 일단 10300 (외화 보통예금 별도 시 추후 분리)
 }
 
 # 은행 거래 중 카드대금 결제로 식별되는 counterparty 패턴.
@@ -41,15 +50,20 @@ def get_cash_account_code(conn) -> str:
     return DEFAULT_CASH_ACCOUNT_CODE
 
 
-def _get_cash_account_id(cur) -> int:
-    """현금및현금성자산 계정 ID 조회."""
-    cur.execute(
-        "SELECT id FROM standard_accounts WHERE code = %s",
-        [DEFAULT_CASH_ACCOUNT_CODE],
-    )
+def _get_cash_account_id(cur, source_type: str | None = None) -> int:
+    """source_type 별 cash 분개 대상 계정 ID 조회.
+
+    P3-4: 회계법인 가결산 PDF 비교 시 보통예금(10300) 잔액이 0 으로 나오는 문제 해결.
+    - 은행 source (woori_bank/codef_*/mercury_api 등) → 10300 보통예금.
+    - 그 외 (manual / 카드 환불 등) → 10100 현금 (default).
+    """
+    code = DEFAULT_CASH_ACCOUNT_CODE
+    if source_type and source_type in BANK_SOURCE_TYPES:
+        code = DEFAULT_BANK_ACCOUNT_CODE
+    cur.execute("SELECT id FROM standard_accounts WHERE code = %s", [code])
     row = cur.fetchone()
     if not row:
-        raise RuntimeError(f"Cash account {DEFAULT_CASH_ACCOUNT_CODE} not found in standard_accounts")
+        raise RuntimeError(f"Cash account {code} not found in standard_accounts")
     return row[0]
 
 
@@ -196,7 +210,8 @@ def create_journal_from_transaction(
         cur.close()
         raise ValueError(f"Journal entry already exists for transaction {transaction_id}")
 
-    cash_account_id = _get_cash_account_id(cur)
+    # P3-4: source_type 별 cash 분개 — 은행 거래는 보통예금(10300), 그 외 현금(10100).
+    cash_account_id = _get_cash_account_id(cur, source_type=source_type)
     amount = _quantize(amount)
     je_desc = f"{counterparty or ''} - {desc}".strip(" -")
 

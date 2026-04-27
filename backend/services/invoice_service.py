@@ -440,7 +440,11 @@ def match_invoice_payment(
             from backend.services.bookkeeping_engine import (
                 create_journal_entry, _get_cash_account_id,
             )
-            cash_id = _get_cash_account_id(cur)
+            # P3-4: invoice 매칭 시점 cash 분개도 transaction 의 source_type 기반.
+            cur.execute("SELECT source_type FROM transactions WHERE id = %s", [transaction_id])
+            src_row = cur.fetchone()
+            tx_source_type = src_row[0] if src_row else None
+            cash_id = _get_cash_account_id(cur, source_type=tx_source_type)
             if direction == "sales":
                 ar_id = _lookup_account_id(cur, ACCOUNTS_RECEIVABLE_CODE)
                 lines = [
