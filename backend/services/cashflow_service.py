@@ -163,7 +163,7 @@ def predicted_ending_mode(
     """Predicted-ending 합성 모드 결정 (pure function).
 
     - "completed":   조회 월이 이미 지나감 → predicted = actual_closing (100% 실제)
-    - "future":      아직 시작 전인 월 → predicted = adjusted_forecast_closing (100% 예상)
+    - "future":      아직 시작 전인 월 → predicted = forecast_closing (100% 예상)
     - "progressive": 월 진행 중 (마지막 날 포함) → 어제까지 실제 + 오늘 이후 예상
 
     P0-2: 오늘이 마지막 날인 경우 ("today == last_day")는 progressive 로 처리해야
@@ -850,8 +850,8 @@ def get_forecast_cashflow(
         card_timing_adjustment=timing_adj,
     )
 
-    # 5-bis. 조정 예상 기말 (미분류 반영)
-    adjusted_forecast_closing = forecast_closing + Decimal(str(unmapped_income)) - Decimal(str(unmapped_expense))
+    # P1-2: adjusted_forecast_closing 제거 — unmapped 차이는 variance bridge 의
+    # b5_unmapped 버킷에서 별도 표현. forecast_closing 단일 baseline 으로 통일.
 
     # 6. 실제 진행 기준 기말 (은행 거래 기준) — 월 전체
     cur.execute(
@@ -873,7 +873,8 @@ def get_forecast_cashflow(
     actual_expense = Decimal(str(row[1]))
     actual_closing = opening + actual_income - actual_expense
 
-    diff = actual_closing - adjusted_forecast_closing
+    # P1-2: diff baseline 을 predicted_ending 으로 통일 (이전엔 adjusted_forecast_closing).
+    # predicted_ending 은 시계열 합성한 가장 정확한 예측. 아래 6-ter 에서 계산됨.
 
     # 6-ter. 시계열 합성 예상 기말 (today까지 실제 + 남은 기간 예상)
     # 이미 지나간 expected_day의 예상은 실제 발생분으로 대체 — 유령 예상 제거
@@ -883,8 +884,8 @@ def get_forecast_cashflow(
         # 지난 월(이미 종료): 예상 기말 = 실제 월말 잔고 (100% 실제)
         predicted_ending = actual_closing
     elif mode == "future":
-        # 월 시작 전: 예상 기말 = 기초 + 전체 예상 + 시차보정
-        predicted_ending = adjusted_forecast_closing
+        # 월 시작 전: 예상 기말 = 기초 + 전체 예상 + 시차보정 (미분류는 미래 월에 0)
+        predicted_ending = forecast_closing
     else:
         # 월 진행 중 (오늘이 last_day 인 경우 포함): 어제(today-1)까지 실제 + 오늘 이후(today 포함) 예상
         # "오늘" 건은 아직 실제 DB에 없을 수 있으므로 예상으로 취급.
@@ -940,6 +941,9 @@ def get_forecast_cashflow(
             + split["remaining_in"] - split["remaining_expense"]
             - unpaid_prev_card
         )
+
+    # P1-2: diff 를 predicted_ending 기준으로 단일화.
+    diff = actual_closing - predicted_ending
 
     # 6-bis. 일별 실제 잔고 (그래프용 — 계단식)
     bank_txs = get_bank_transactions(conn, entity_id, year, month)
@@ -1043,7 +1047,6 @@ def get_forecast_cashflow(
             for c in cards
         ],
         "forecast_closing": float(forecast_closing),
-        "adjusted_forecast_closing": float(adjusted_forecast_closing),
         "predicted_ending": float(predicted_ending),
         "as_of_date": as_of.isoformat(),
         "today_day_in_month": today_day_in_month,
@@ -1051,11 +1054,10 @@ def get_forecast_cashflow(
         "actual_income": float(actual_income),
         "actual_expense": float(actual_expense),
         "actual_closing": float(actual_closing),
-        "diff": float(diff),  # actual_closing - adjusted_forecast_closing (variance bridge baseline)
-        # P1-3: predicted_ending 기준 차이 — KPI 카드/정합도 표시는 이 값으로 통일.
-        "diff_vs_predicted": float(actual_closing - predicted_ending),
-        "diff_pct_vs_predicted": (
-            float((actual_closing - predicted_ending) / abs(predicted_ending) * 100)
+        # P1-2: diff baseline 통일 → actual_closing - predicted_ending.
+        "diff": float(diff),
+        "diff_pct": (
+            float(diff / abs(predicted_ending) * 100)
             if predicted_ending != 0 else 0.0
         ),
         "actual_daily_points": actual_daily_points,
@@ -1201,9 +1203,10 @@ def get_variance_bridge(
         opening + forecast_income - forecast_expense_bank
         - curr_card_estimate + forecast_timing
     )
-    adjusted_forecast = forecast_closing + unmapped_income - unmapped_expense
     actual_closing = opening + actual_income - actual_expense_total
-    total_diff = actual_closing - adjusted_forecast
+    # P1-2: variance bridge baseline 도 forecast_closing 단일 사용.
+    # unmapped 차이는 b5_unmapped 버킷이 명시적으로 표현.
+    total_diff = actual_closing - forecast_closing
 
     # 6개 버킷 (부호: 양수=실제가 높음, 음수=실제가 낮음)
     b1_opening = Decimal("0")  # 같은 snapshot 사용하므로 0
@@ -1331,7 +1334,7 @@ def get_variance_bridge(
         "year": year,
         "month": month,
         "entity_id": entity_id,
-        "forecast_closing": float(adjusted_forecast),
+        "forecast_closing": float(forecast_closing),
         "actual_closing": float(actual_closing),
         "total_diff": float(total_diff),
         "buckets": buckets,

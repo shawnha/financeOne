@@ -514,6 +514,53 @@ class TestClampDayToMonth:
         assert 'min(item["expected_day"], days_in_month)' not in normalized
 
 
+# ── Test 12: adjusted_forecast_closing 제거 — P1-2 ────────────────────────
+
+
+class TestAdjustedForecastClosingRemoved:
+    """P1-2 회귀: adjusted_forecast_closing 변수/필드 제거.
+
+    이전: forecast_closing + 미분류 보정 = adjusted_forecast_closing 이중 변수.
+    수정: 단일 baseline forecast_closing. unmapped 차이는 variance bridge 의
+    b5_unmapped 버킷에서 명시적 표현. diff 의미 = actual_closing - predicted_ending.
+    """
+
+    def test_source_no_longer_defines_adjusted_forecast_closing(self):
+        """cashflow_service.py 에 adjusted_forecast_closing 변수/필드 부재."""
+        from pathlib import Path
+        src = Path(__file__).parent.parent / "services" / "cashflow_service.py"
+        text = src.read_text()
+        # 코드 라인이 아닌 코멘트는 OK ('# P1-2: adjusted_forecast_closing 제거 ...')
+        # 변수 정의 패턴: 'adjusted_forecast_closing =' 또는 응답 dict 키
+        bad_patterns = [
+            "adjusted_forecast_closing =",
+            '"adjusted_forecast_closing":',
+            "adjusted_forecast =",
+        ]
+        for pat in bad_patterns:
+            assert pat not in text, f"잔존 패턴 발견: {pat}"
+
+    def test_response_has_diff_pct_predicted_baseline(self):
+        """forecast 응답에 diff_pct (predicted_ending 기준) 가 있고
+        adjusted_forecast_closing 필드는 없어야 함."""
+        import inspect
+        from backend.services import cashflow_service
+
+        src = inspect.getsource(cashflow_service.get_forecast_cashflow)
+        assert '"diff_pct"' in src
+        assert '"adjusted_forecast_closing"' not in src
+
+    def test_variance_bridge_uses_forecast_closing_baseline(self):
+        """variance bridge total_diff 가 forecast_closing 단일 baseline 사용."""
+        import inspect
+        from backend.services import cashflow_service
+
+        src = inspect.getsource(cashflow_service.get_variance_bridge)
+        assert "actual_closing - forecast_closing" in src.replace(" ", " ")
+        # adjusted_forecast 변수 부재
+        assert "adjusted_forecast = " not in src
+
+
 # ── Test 4: account_breakdown in card expenses ───────────────────────────────
 
 
