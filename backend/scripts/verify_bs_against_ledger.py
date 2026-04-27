@@ -103,9 +103,13 @@ def main() -> int:
     print(f"분개 잔액 != 0 계정 수: {len(balances)}")
     print(f"PDF 비교 대상: {len(expected)} 계정\n")
 
-    pass_count = 0
-    fail_count = 0
-    soft_count = 0  # |diff| > 1000 but |pct| < threshold
+    perfect_count = 0  # |diff| < 1000 (절대 일치)
+    pass_count = 0     # |%| ≤ 1
+    soft_count = 0     # |%| ≤ 5
+    fail_count = 0     # 그 외
+    total_abs_diff = 0
+    pct_abs_sum = 0.0
+    pct_abs_n = 0
 
     print(f"  {'코드':>5}  {'계정명':12s}  {'PDF':>15}  {'시스템':>15}  {'차이':>16}  결과")
     print("  " + "-" * 78)
@@ -113,21 +117,31 @@ def main() -> int:
         cur_val = float(seen.get(code, {}).get("balance", 0))
         diff = cur_val - exp
         pct = (diff / exp * 100) if exp else (0 if diff == 0 else 100)
+        total_abs_diff += abs(diff)
+        if exp != 0:
+            pct_abs_sum += abs(pct)
+            pct_abs_n += 1
 
         if abs(diff) < 1000:
-            flag = "✓ PASS"
+            flag = "✓✓ PERFECT"
+            perfect_count += 1
+        elif abs(pct) <= 1.0:
+            flag = "✓  PASS  "
             pass_count += 1
-        elif abs(pct) < args.threshold_pct:
-            flag = "△ SOFT"
+        elif abs(pct) <= 5.0:
+            flag = "△  SOFT  "
             soft_count += 1
         else:
-            flag = "✗ FAIL"
+            flag = "✗  FAIL  "
             fail_count += 1
-        print(f"  {code:>5}  {name:12s}  {exp:>15,}  {int(cur_val):>15,}  {int(diff):>+16,}  {flag} ({pct:+.1f}%)")
+        print(f"  {code:>5}  {name:12s}  {exp:>15,}  {int(cur_val):>15,}  {int(diff):>+16,}  {flag} ({pct:+.2f}%)")
 
-    total = pass_count + soft_count + fail_count
+    total = perfect_count + pass_count + soft_count + fail_count
+    avg_pct = (pct_abs_sum / pct_abs_n) if pct_abs_n else 0
     print("\n" + "=" * 80)
-    print(f"PASS: {pass_count}/{total} | SOFT: {soft_count}/{total} | FAIL: {fail_count}/{total}")
+    print(f"PERFECT: {perfect_count}/{total} (|diff|<1k) | PASS: {pass_count}/{total} (|%|≤1) | "
+          f"SOFT: {soft_count}/{total} (|%|≤5) | FAIL: {fail_count}/{total}")
+    print(f"진척도: 차이 합계 {int(total_abs_diff):,} | 평균 |%| = {avg_pct:.1f}%")
 
     # 분개/거래 통계
     cur.execute("SELECT COUNT(*) FROM journal_entries WHERE entity_id = %s", [args.entity])
@@ -138,7 +152,7 @@ def main() -> int:
     inv = cur.fetchone()[0]
     print(f"\n시스템 데이터: journal_entries={je}, transactions={tx}, invoices(active)={inv}")
 
-    if fail_count > 0:
+    if fail_count > 0 or soft_count > 0:
         print("\n원인 분석:")
         if inv == 0:
             print("  ⚠ invoices 비어있음 → 외상매출금/외상매입금/부가세대급금 분개 자체가 없음")

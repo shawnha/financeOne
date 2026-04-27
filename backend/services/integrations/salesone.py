@@ -68,6 +68,36 @@ def _decision_date(raw_data: dict | str | None) -> Optional[date]:
         return None
 
 
+def _is_taxation(raw_data: dict | str | None) -> bool:
+    """NAVER raw_data.productOrder.taxType == 'TAXATION' (부가세 과세)."""
+    if not raw_data:
+        return False
+    if isinstance(raw_data, str):
+        try:
+            raw_data = json.loads(raw_data)
+        except Exception:
+            return False
+    if not isinstance(raw_data, dict):
+        return False
+    po = raw_data.get("productOrder", {})
+    if not isinstance(po, dict):
+        return False
+    return po.get("taxType") == "TAXATION"
+
+
+def _split_vat(total: Decimal, taxation: bool) -> tuple[Decimal, Decimal]:
+    """부가세 과세건이면 total = supply * 1.1 → 공급가액/부가세 분리.
+
+    Returns: (supply_amount, vat). round to 0 decimal (원 단위).
+    """
+    if not taxation or total <= 0:
+        return (total, Decimal("0"))
+    # supply = total / 1.1, vat = total - supply (반올림 차이는 vat 에 흡수)
+    supply = (total / Decimal("1.1")).quantize(Decimal("1"))
+    vat = total - supply
+    return (supply, vat)
+
+
 def _expected_settlement(raw_data: dict | str | None) -> tuple[Decimal, Decimal]:
     """NAVER raw_data → (expectedSettlementAmount, totalCommission).
 
@@ -180,27 +210,30 @@ def sync_orders_to_invoices(
     sales_acc_id = row[0]
 
     deleted_old = 0
-    if skip_existing_naver and not dry_run:
-        # 회계법인 원장에서 import 한 기존 NAVER invoices 삭제 (period filter)
-        cur.execute(
-            """
-            SELECT id, journal_entry_id FROM invoices
-            WHERE entity_id = %s
-              AND issue_date BETWEEN %s AND %s
-              AND counterparty ILIKE '%%네이버%%'
-              AND (note IS NULL OR note NOT LIKE 'salesone:%%')
-            """,
-            [entity_id, start_date, end_date],
-        )
-        old_invs = cur.fetchall()
-        for inv_id, je_id in old_invs:
-            if je_id:
-                cur.execute("DELETE FROM journal_entry_lines WHERE journal_entry_id = %s", [je_id])
-                cur.execute("DELETE FROM journal_entries WHERE id = %s", [je_id])
-            cur.execute("DELETE FROM invoice_payments WHERE invoice_id = %s", [inv_id])
-            cur.execute("DELETE FROM invoices WHERE id = %s", [inv_id])
-            deleted_old += 1
-        conn.commit()
+    if not dry_run:
+        # 회계법인 원장 import NAVER + 기존 salesone NAVER 모두 삭제 후 재생성.
+        # P3-9a 부가세 분리 변경 반영을 위해 idempotent 재생성.
+        if skip_existing_naver:
+            cur.execute(
+                """
+                SELECT id, journal_entry_id FROM invoices
+                WHERE entity_id = %s
+                  AND issue_date BETWEEN %s AND %s
+                  AND (counterparty ILIKE '%%네이버%%'
+                       OR counterparty ILIKE 'NAVER%%'
+                       OR note LIKE 'salesone:%%')
+                """,
+                [entity_id, start_date, end_date],
+            )
+            old_invs = cur.fetchall()
+            for inv_id, je_id in old_invs:
+                if je_id:
+                    cur.execute("DELETE FROM journal_entry_lines WHERE journal_entry_id = %s", [je_id])
+                    cur.execute("DELETE FROM journal_entries WHERE id = %s", [je_id])
+                cur.execute("DELETE FROM invoice_payments WHERE invoice_id = %s", [inv_id])
+                cur.execute("DELETE FROM invoices WHERE id = %s", [inv_id])
+                deleted_old += 1
+            conn.commit()
 
     created = 0
     skipped_dup = 0
@@ -233,11 +266,15 @@ def sync_orders_to_invoices(
                 skipped_no_decision += 1
                 continue
 
-        amount = Decimal(str(o.get("total_amount") or 0))
-        if amount <= 0:
+        total = Decimal(str(o.get("total_amount") or 0))
+        if total <= 0:
             # 0원 주문 (시딩 / 광고샘플 등) — invoice 생성 X
             skipped_no_decision += 1
             continue
+
+        # P3-9a: 부가세 분리 (NAVER taxType=TAXATION 인 경우 1/11 분리)
+        taxation = _is_taxation(o.get("raw_data"))
+        supply, vat = _split_vat(total, taxation)
 
         counterparty = f"{o['external_source']} - {o.get('recipient_name') or order_id[:8]}"
         external_no = o.get("external_order_number") or o.get("order_number") or order_id
@@ -253,9 +290,9 @@ def sync_orders_to_invoices(
                 direction="sales",
                 counterparty=counterparty[:200],
                 issue_date=issue_date,
-                amount=amount,
-                vat=Decimal("0"),  # NAVER 매출은 부가세 별도 — TBD
-                total=amount,
+                amount=supply,  # 공급가액 (부가세 제외)
+                vat=vat,         # 부가세 (TAXATION 이면 total/11, ELSE 0)
+                total=total,
                 document_no=external_no,
                 description=f"{o['external_source']} order {external_no}",
                 standard_account_id=sales_acc_id,
