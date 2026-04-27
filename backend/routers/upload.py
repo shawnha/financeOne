@@ -1,5 +1,6 @@
 """파일 업로드 API -- multi-format (xls, xlsx, csv) with auto-detection."""
 
+import logging
 from fastapi import APIRouter, UploadFile, File, Query, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
@@ -11,6 +12,8 @@ from backend.services.parsers import detect_parser
 from backend.services.parsers.woori_bank import WooriBankParser
 from backend.services.dedup_service import build_file_key_counts, is_file_duplicate
 from backend.services.mapping_service import auto_map_transaction
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/upload", tags=["upload"])
 
@@ -279,6 +282,19 @@ async def upload_transactions(
 
         conn.commit()
         cur.close()
+
+        # P0-3: forecast.actual_amount 동기화 (current + prev month). 실패해도 응답 막지 않음.
+        try:
+            from datetime import date as _date
+            from backend.services.cashflow_service import sync_forecast_actuals as _sync_fc
+            today = _date.today()
+            py = today.year if today.month > 1 else today.year - 1
+            pm = today.month - 1 if today.month > 1 else 12
+            _sync_fc(conn, entity_id, today.year, today.month)
+            _sync_fc(conn, entity_id, py, pm)
+        except Exception as _sync_err:
+            logger.warning("forecast actuals sync after upload failed: entity=%s err=%s",
+                           entity_id, _sync_err)
 
         return {
             "file_id": file_id,

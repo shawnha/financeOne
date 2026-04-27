@@ -338,6 +338,45 @@ class TestPredictedEndingMode:
         assert mode == "progressive"
 
 
+# ── Test 8: get_forecast_cashflow GET path는 UPDATE 안 함 — P0-3 ────────────
+
+
+class TestGetForecastCashflowReadOnly:
+    """P0-3 회귀 테스트: GET 경로에서 UPDATE forecasts 가 발생하면 안 됨.
+
+    이전 버그: get_forecast_cashflow 가 actual_amount 동기화 UPDATE+commit 을
+    GET 호출시마다 수행 → 사용자 PATCH 한 actual_amount 가 페이지 로드만으로 덮어써짐.
+    """
+
+    def test_source_does_not_call_sync_forecast_actuals(self):
+        """get_forecast_cashflow 함수 본문에 UPDATE forecasts SET actual_amount 가 없어야 함."""
+        import inspect
+        from backend.services import cashflow_service
+
+        src = inspect.getsource(cashflow_service.get_forecast_cashflow)
+        # GET 함수 안에서 forecasts.actual_amount 자동 갱신 SQL 이 사라졌어야 함
+        normalized = " ".join(src.split())
+        assert "UPDATE forecasts" not in normalized, (
+            "get_forecast_cashflow 내부의 UPDATE forecasts ... SET actual_amount 는 "
+            "race 원인 — sync_forecast_actuals 함수로 분리하고 명시적 호출만 허용"
+        )
+
+    def test_sync_forecast_actuals_function_exists(self):
+        """추출된 동기화 함수가 export 되어야 함."""
+        from backend.services.cashflow_service import sync_forecast_actuals
+        assert callable(sync_forecast_actuals)
+
+    def test_sync_endpoint_is_post(self):
+        """동기화 endpoint 는 POST 여야 함 (GET 은 부작용 없는 read-only)."""
+        from backend.routers.cashflow import router
+
+        for r in router.routes:
+            if getattr(r, "path", "") == "/api/cashflow/forecast/sync-actuals":
+                assert "POST" in r.methods
+                return
+        raise AssertionError("/api/cashflow/forecast/sync-actuals POST endpoint 미발견")
+
+
 # ── Test 4: account_breakdown in card expenses ───────────────────────────────
 
 

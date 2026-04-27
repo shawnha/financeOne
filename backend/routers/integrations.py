@@ -16,6 +16,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
 
 
+def _sync_forecast_actuals_after_import(conn: PgConnection, entity_id: int) -> None:
+    """P0-3: 외부 거래 import 후 current + prev month forecast.actual_amount 갱신.
+
+    GET /forecast 가 더 이상 자동 sync 하지 않으므로 import 직후 명시적 갱신.
+    실패해도 import 결과 응답을 막지 않음 (warning log).
+    """
+    try:
+        from datetime import date as _date
+        from backend.services.cashflow_service import sync_forecast_actuals as _sync_fc
+        today = _date.today()
+        py = today.year if today.month > 1 else today.year - 1
+        pm = today.month - 1 if today.month > 1 else 12
+        _sync_fc(conn, entity_id, today.year, today.month)
+        _sync_fc(conn, entity_id, py, pm)
+    except Exception as sync_err:
+        logger.warning("forecast actuals sync after import failed: entity=%s err=%s",
+                       entity_id, sync_err)
+
+
 # --- Mercury ---
 
 class MercurySyncRequest(BaseModel):
@@ -550,6 +569,7 @@ def codef_sync_bank(
         )
         set_last_sync(conn, body.entity_id, "woori_bank")
         conn.commit()
+        _sync_forecast_actuals_after_import(conn, body.entity_id)
         return result
     except CodefError as e:
         conn.rollback()
@@ -579,6 +599,7 @@ def codef_sync_card(
         )
         set_last_sync(conn, body.entity_id, body.card_type)
         conn.commit()
+        _sync_forecast_actuals_after_import(conn, body.entity_id)
         return result
     except CodefError as e:
         conn.rollback()

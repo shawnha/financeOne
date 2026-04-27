@@ -180,6 +180,23 @@ def _sync_one_sync(entity_id: int, org: str) -> dict:
 
                 set_last_sync(conn, entity_id, org)
                 conn.commit()
+
+                # P0-3: codef sync 직후 forecast actual_amount 동기화 (current + prev month).
+                # GET /forecast 가 더 이상 자동 sync 하지 않으므로 import 직후에 갱신 필요.
+                try:
+                    from datetime import date as _date
+                    from backend.services.cashflow_service import sync_forecast_actuals as _sync_fc
+                    today = _date.today()
+                    py = today.year if today.month > 1 else today.year - 1
+                    pm = today.month - 1 if today.month > 1 else 12
+                    _sync_fc(conn, entity_id, today.year, today.month)
+                    _sync_fc(conn, entity_id, py, pm)
+                except Exception as sync_err:
+                    logger.warning(
+                        "forecast actuals sync after codef failed: entity=%s org=%s err=%s",
+                        entity_id, org, sync_err,
+                    )
+
                 return {
                     "entity_id": entity_id, "org": org, "ok": True,
                     "range": f"{start}~{end}",
