@@ -99,9 +99,39 @@ def main() -> int:
     balances = get_all_account_balances(conn, args.entity, to_date=as_of)
     seen = {b["code"]: b for b in balances if b.get("code")}
 
+    # 미처리결손금 (37800) 자동 합산: 손익 transfer 안 한 상태에서도 BS 비교 가능하게.
+    # 회계법인 PDF 는 결산 후 잔액이므로 손익이 결손금에 합산됨.
+    # 시스템 결손금 잔액 + 당기 손익 (수익-비용) 으로 보정.
+    # opening balance 가 회계연도 첫날 (1-1) 의 결산 후 잔액이므로 손익은 1-1 이후만 합산.
+    fiscal_start = date(as_of.year, 1, 1)
+    cur.execute(
+        """
+        SELECT
+          COALESCE(SUM(CASE WHEN sa.category='수익' THEN jel.credit_amount - jel.debit_amount ELSE 0 END), 0) AS rev,
+          COALESCE(SUM(CASE WHEN sa.category='비용' THEN jel.debit_amount - jel.credit_amount ELSE 0 END), 0) AS exp
+        FROM journal_entries je
+        JOIN journal_entry_lines jel ON jel.journal_entry_id = je.id
+        JOIN standard_accounts sa ON sa.id = jel.standard_account_id
+        WHERE je.entity_id = %s AND je.entry_date >= %s AND je.entry_date <= %s
+          AND sa.category IN ('수익','비용')
+        """,
+        [args.entity, fiscal_start, as_of],
+    )
+    rev_total, exp_total = cur.fetchone()
+    rev_total = float(rev_total or 0)
+    exp_total = float(exp_total or 0)
+    rev_minus_exp = rev_total - exp_total
+    # get_all_account_balances 의 미처리결손금 잔액은 음수로 표시 (자본 차감 시각화).
+    # 손실(rev_minus_exp<0) → 결손이 더 커짐 → balance 가 더 음수가 되어야 함.
+    deficit_adjustment = rev_minus_exp  # 손실(-) 이면 - 더해서 더 음수, 이익(+) 이면 + 더해서 덜 음수
+    if "37800" in seen:
+        seen["37800"] = {**seen["37800"], "balance": seen["37800"]["balance"] + deficit_adjustment}
+
     print(f"\n=== 한아원코리아(entity={args.entity}) {as_of} 잔액 검증 ===")
     print(f"분개 잔액 != 0 계정 수: {len(balances)}")
-    print(f"PDF 비교 대상: {len(expected)} 계정\n")
+    print(f"PDF 비교 대상: {len(expected)} 계정")
+    print(f"손익 자동 합산 ({fiscal_start} ~ {as_of}): 수익 {rev_total:+,.0f}  비용 {exp_total:+,.0f}  손익 {rev_minus_exp:+,.0f}")
+    print(f"  → 결손금 보정 {deficit_adjustment:+,.0f}\n")
 
     perfect_count = 0  # |diff| < 1000 (절대 일치)
     pass_count = 0     # |%| ≤ 1
