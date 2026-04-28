@@ -138,11 +138,13 @@ def generate_consolidated_statements(
             [stmt_id],
         )
     else:
+        # ki_num 분기: 단독 statement(default=3) 와 unique constraint 충돌 방지를 위해
+        # consolidated 는 ki_num=99 사용
         cur.execute(
             """
             INSERT INTO financial_statements
-                (entity_id, fiscal_year, start_month, end_month, is_consolidated, base_currency, status)
-            VALUES (%s, %s, %s, %s, TRUE, 'USD', 'draft')
+                (entity_id, fiscal_year, ki_num, start_month, end_month, is_consolidated, base_currency, status)
+            VALUES (%s, %s, 99, %s, %s, TRUE, 'USD', 'draft')
             RETURNING id
             """,
             [HOI_ENTITY_ID, fiscal_year, start_month, end_month],
