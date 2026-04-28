@@ -1,12 +1,33 @@
 """FinanceOne v2 -- FastAPI Backend"""
 
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-_VERSION = (Path(__file__).resolve().parent.parent / "VERSION").read_text().strip()
+# VERSION 파일은 프로젝트 루트에 있음. Vercel serverless 에서는 backend/ 가 root 라
+# 파일이 없을 수 있어 fallback 처리.
+def _load_version() -> str:
+    candidates = [
+        Path(__file__).resolve().parent.parent / "VERSION",
+        Path(__file__).resolve().parent / "VERSION",
+    ]
+    for p in candidates:
+        if p.exists():
+            try:
+                return p.read_text().strip()
+            except Exception:
+                continue
+    return os.getenv("APP_VERSION", "0.0.0-dev")
+
+
+_VERSION = _load_version()
+
+# Vercel/serverless 환경: scheduler 비활성화 (cold start 마다 종료됨).
+# 정기 sync 는 Vercel Cron Jobs 또는 외부 트리거로 대체.
+_DISABLE_SCHEDULER = os.getenv("DISABLE_SCHEDULER", "").lower() in ("1", "true", "yes") or bool(os.getenv("VERCEL"))
 
 from backend.database.connection import init_pool, close_pool
 from backend.routers import entities, transactions, accounts, upload, dashboard, statements, slack, journal_entries, integrations, exchange_rates, intercompany, notes, cashflow, forecasts, card_settings, expenseone_match, invoices
@@ -16,9 +37,11 @@ from backend.services.scheduler import start_scheduler, shutdown_scheduler
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_pool()
-    start_scheduler()
+    if not _DISABLE_SCHEDULER:
+        start_scheduler()
     yield
-    shutdown_scheduler()
+    if not _DISABLE_SCHEDULER:
+        shutdown_scheduler()
     await close_pool()
 
 
@@ -28,9 +51,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS: 환경변수의 명시 origin + Vercel preview/production 도메인 정규식 fallback.
+_ALLOWED_ORIGINS_ENV = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
+_allowed_origins = [o.strip() for o in _ALLOWED_ORIGINS_ENV.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(","),
+    allow_origins=_allowed_origins,
+    # *.vercel.app + 사용자 도메인 정규식 — 환경변수 ALLOWED_ORIGINS_REGEX 로 override 가능
+    allow_origin_regex=os.getenv("ALLOWED_ORIGINS_REGEX", r"https://.*\.vercel\.app"),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
