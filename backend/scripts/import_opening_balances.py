@@ -29,6 +29,23 @@ from backend.services.bookkeeping_engine import create_journal_entry
 # (code, name, normal_side, amount).
 # normal_side='debit'  = 자산 + 결손금 (차변에 기재)
 # normal_side='credit' = 부채 + 자본금/잉여금 (대변에 기재)
+HOI_OPENING_2026 = [
+    # 자산 (USD)
+    ("10300", "Mercury Checking",      "debit",  Decimal("144362.71")),
+    ("12000", "Channel Clearing",      "debit",  Decimal("2732.36")),  # Amazon/Shopify/PayPal/TikTok 합산
+    ("14600", "Inventory",             "debit",  Decimal("141825.18")),
+    ("96200", "Industrious Security",  "debit",  Decimal("2472.00")),
+    ("18400", "Investment in Subsidiary", "debit", Decimal("134180.00")),
+    # 부채 (USD)
+    ("25500", "Shopify Sales Tax",     "credit", Decimal("93.86")),
+    ("30300", "Loan from HOCL",        "credit", Decimal("125305.50")),
+    # 자본 (USD)
+    ("33100", "Capital Stock",         "credit", Decimal("134180.00")),
+    ("34100", "Additional Paid-In Capital", "credit", Decimal("219000.00")),
+    ("37800", "Net Income (year 1 결손)", "debit", Decimal("53007.11")),
+]
+
+
 HANAH_KOREA_OPENING_2026 = [
     # 자산 — 722,144,369
     ("10300", "보통예금",       "debit",   161_065_312),
@@ -63,17 +80,23 @@ def main() -> int:
     g.add_argument("--commit", action="store_true")
     args = parser.parse_args()
 
-    if args.entity != 2:
-        print(f"⚠ 현재는 entity=2 (한아원코리아) 만 지원. HOI/리테일 별도 데이터 필요.")
+    if args.entity == 2:
+        opening = HANAH_KOREA_OPENING_2026
+        entity_name = "한아원코리아"
+    elif args.entity == 1:
+        opening = HOI_OPENING_2026
+        entity_name = "HOI Inc. (USD)"
+    else:
+        print(f"⚠ entity={args.entity} 데이터 미정의. (지원: 1=HOI, 2=한아원코리아)")
         return 2
 
     as_of = date.fromisoformat(args.as_of)
 
     # 검증
-    debit_total = sum(amt for _, _, side, amt in HANAH_KOREA_OPENING_2026 if side == "debit")
-    credit_total = sum(amt for _, _, side, amt in HANAH_KOREA_OPENING_2026 if side == "credit")
-    print(f"\n=== opening balance 26-01-01 (entity={args.entity}) ===")
-    print(f"  계정 수: {len(HANAH_KOREA_OPENING_2026)}")
+    debit_total = sum(amt for _, _, side, amt in opening if side == "debit")
+    credit_total = sum(amt for _, _, side, amt in opening if side == "credit")
+    print(f"\n=== opening balance 26-01-01 (entity={args.entity} {entity_name}) ===")
+    print(f"  계정 수: {len(opening)}")
     print(f"  차변 합계: {debit_total:>15,} (자산 + 결손금)")
     print(f"  대변 합계: {credit_total:>15,} (부채 + 자본금/잉여금)")
     print(f"  차이:      {debit_total - credit_total:>15,}")
@@ -108,7 +131,7 @@ def main() -> int:
 
     lines = []
     missing = []
-    for code, name, side, amount in HANAH_KOREA_OPENING_2026:
+    for code, name, side, amount in opening:
         sa_id = code_to_id.get(code)
         if not sa_id:
             missing.append((code, name))
