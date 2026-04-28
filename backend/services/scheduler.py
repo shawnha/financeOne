@@ -208,6 +208,14 @@ def _sync_one_sync(entity_id: int, org: str) -> dict:
                         entity_id, org, sync_err,
                     )
 
+                # Notify ExpenseOne about new card transactions
+                if org in CARD_ORGS and (result.get("synced") or 0) > 0:
+                    try:
+                        from backend.routers.integrations import _notify_expenseone_card_sync
+                        _notify_expenseone_card_sync()
+                    except Exception as notify_err:
+                        logger.warning("ExpenseOne notify failed: %s", notify_err)
+
                 return {
                     "entity_id": entity_id, "org": org, "ok": True,
                     "range": f"{start}~{end}",

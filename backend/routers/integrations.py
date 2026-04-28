@@ -16,6 +16,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
 
 
+def _notify_expenseone_card_sync() -> None:
+    """Fire-and-forget webhook to ExpenseOne after Codef card sync."""
+    import httpx
+    expenseone_url = os.environ.get("EXPENSEONE_URL", "https://expenseone.vercel.app")
+    cron_secret = os.environ.get("EXPENSEONE_CRON_SECRET", "")
+    if not cron_secret:
+        logger.warning("[ExpenseOne] EXPENSEONE_CRON_SECRET not set, skipping notify")
+        return
+    try:
+        resp = httpx.post(
+            f"{expenseone_url}/api/cron/codef-notify",
+            headers={"Authorization": f"Bearer {cron_secret}"},
+            timeout=15,
+        )
+        logger.info("[ExpenseOne] codef-notify: %s %s", resp.status_code, resp.text[:200])
+    except Exception as e:
+        logger.error("[ExpenseOne] codef-notify failed: %s", e)
+
+
 def _sync_forecast_actuals_after_import(conn: PgConnection, entity_id: int) -> None:
     """P0-3: 외부 거래 import 후 current + prev month forecast.actual_amount 갱신.
 
@@ -40,12 +59,23 @@ def _sync_forecast_actuals_after_import(conn: PgConnection, entity_id: int) -> N
 
 class MercurySyncRequest(BaseModel):
     account_id: str
+    start_date: Optional[str] = None  # ISO 8601 YYYY-MM-DD
+    end_date: Optional[str] = None
 
     @field_validator("account_id")
     @classmethod
     def validate_account_id(cls, v: str) -> str:
         if not re.match(r"^[a-zA-Z0-9_-]+$", v):
             raise ValueError("Invalid account_id format")
+        return v
+
+    @field_validator("start_date", "end_date")
+    @classmethod
+    def validate_iso_date(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", v):
+            raise ValueError("Date must be ISO 8601 (YYYY-MM-DD)")
         return v
 
 
@@ -110,7 +140,11 @@ def mercury_sync(
     from backend.services.integrations.mercury import MercuryClient
     client = MercuryClient(token)
     try:
-        result = client.sync_transactions(conn, body.account_id)
+        result = client.sync_transactions(
+            conn, body.account_id,
+            start_date=getattr(body, "start_date", None),
+            end_date=getattr(body, "end_date", None),
+        )
         conn.commit()
         return result
     except Exception:
@@ -601,6 +635,8 @@ def codef_sync_card(
         set_last_sync(conn, body.entity_id, body.card_type)
         conn.commit()
         _sync_forecast_actuals_after_import(conn, body.entity_id)
+        # Notify ExpenseOne about new card transactions
+        _notify_expenseone_card_sync()
         return result
     except CodefError as e:
         conn.rollback()

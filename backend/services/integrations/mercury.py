@@ -66,8 +66,13 @@ class MercuryClient:
         self,
         conn: PgConnection,
         account_id: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
     ) -> dict:
         """Mercury 거래를 transactions 테이블에 동기화.
+
+        Args:
+            start_date / end_date: ISO 8601 (YYYY-MM-DD). 미지정 시 Mercury API default (최근).
 
         Returns:
             {"synced": int, "duplicates": int, "total_fetched": int}
@@ -78,7 +83,8 @@ class MercuryClient:
 
         # 페이지네이션으로 전체 조회
         while True:
-            batch = self.get_transactions(account_id, limit=limit, offset=offset)
+            batch = self.get_transactions(account_id, start_date=start_date,
+                                          end_date=end_date, limit=limit, offset=offset)
             if not batch:
                 break
             all_transactions.extend(batch)
@@ -91,8 +97,10 @@ class MercuryClient:
         duplicates = 0
 
         for tx in all_transactions:
-            mercury_amount = abs(Decimal(str(tx.get("amount", 0))))
-            tx_type = "in" if tx.get("kind") == "credit" else "out"
+            raw_amount = Decimal(str(tx.get("amount", 0)))
+            mercury_amount = abs(raw_amount)
+            # Mercury API: amount 부호로 in/out 결정 (음수 = 지출, 양수 = 입금)
+            tx_type = "in" if raw_amount > 0 else "out"
             tx_date = tx.get("createdAt", "")[:10]  # YYYY-MM-DD
             counterparty = tx.get("counterpartyName", "") or tx.get("bankDescription", "")
             description = tx.get("bankDescription", "") or tx.get("counterpartyName", "")
