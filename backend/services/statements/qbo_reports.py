@@ -172,22 +172,27 @@ def fetch_qbo_balance_sheet(
     order = [100]
     _walk_rows(rows, 0, items, "balance_sheet", order)
 
-    # 합계 추출 — top-level Summary 들에서 Total Assets / Total Liab+Equity 찾기
+    # 합계 추출 — QBO 는 "TOTAL ASSETS" 대문자 + "Total Liabilities and Equity" 혼용
     totals = {"total_assets": 0.0, "total_liabilities": 0.0, "total_equity": 0.0}
+    liab_equity = None
     for it in items:
-        if "Total Assets" in it["label"]:
-            totals["total_assets"] = it["auto_amount"]
-        elif "Total Liabilities and Equity" in it["label"] or "Total Liabilities & Equity" in it["label"]:
-            totals["liab_equity"] = it["auto_amount"]
-        elif it["label"].strip() == "Total Liabilities":
-            totals["total_liabilities"] = it["auto_amount"]
-        elif it["label"].strip() == "Total Equity":
-            totals["total_equity"] = it["auto_amount"]
+        lbl = it["label"].strip().lower()
+        amt = it["auto_amount"]
+        if lbl == "total assets":
+            totals["total_assets"] = amt
+        elif lbl in ("total liabilities and equity", "total liabilities & equity"):
+            liab_equity = amt
+        elif lbl == "total liabilities":
+            totals["total_liabilities"] = amt
+        elif lbl == "total equity":
+            totals["total_equity"] = amt
 
-    diff = totals["total_assets"] - (totals.get("liab_equity") or
-                                     (totals["total_liabilities"] + totals["total_equity"]))
+    if liab_equity is None:
+        liab_equity = totals["total_liabilities"] + totals["total_equity"]
+    diff = totals["total_assets"] - liab_equity
     totals["is_balanced"] = abs(diff) < 0.01
-    totals["difference"] = diff
+    totals["difference"] = float(diff)
+    totals["liab_equity"] = float(liab_equity)
     totals["net_income"] = 0.0  # PL report 에서 채움
 
     return items, totals
@@ -221,27 +226,26 @@ def fetch_qbo_profit_loss(
         "income_before_tax": 0.0, "total_tax": 0.0, "net_income": 0.0,
     }
     for it in items:
-        lbl = it["label"].strip()
-        if lbl == "Total Income":
-            totals["total_revenue"] = it["auto_amount"]
-        elif lbl == "Total Cost of Goods Sold":
-            totals["total_cogs"] = it["auto_amount"]
-        elif lbl == "Gross Profit":
-            totals["gross_profit"] = it["auto_amount"]
-        elif lbl == "Total Expenses":
-            totals["total_sga"] = it["auto_amount"]
-        elif lbl == "Net Operating Income":
-            totals["operating_income"] = it["auto_amount"]
-        elif lbl == "Total Other Income":
-            totals["total_other_income"] = it["auto_amount"]
-        elif lbl == "Total Other Expenses":
-            totals["total_other_expense"] = it["auto_amount"]
-        elif lbl == "Net Other Income":
-            pass  # other income - other expense
-        elif lbl == "Net Income":
-            totals["net_income"] = it["auto_amount"]
+        lbl = it["label"].strip().lower()
+        amt = it["auto_amount"]
+        if lbl == "total income":
+            totals["total_revenue"] = amt
+        elif lbl == "total cost of goods sold":
+            totals["total_cogs"] = amt
+        elif lbl == "gross profit":
+            totals["gross_profit"] = amt
+        elif lbl == "total expenses":
+            totals["total_sga"] = amt
+        elif lbl == "net operating income":
+            totals["operating_income"] = amt
+        elif lbl == "total other income":
+            totals["total_other_income"] = amt
+        elif lbl == "total other expenses":
+            totals["total_other_expense"] = amt
+        elif lbl == "net income":
+            totals["net_income"] = amt
 
-    totals["income_before_tax"] = totals["net_income"]  # QBO 는 tax provision 없음 (Schedule K-1 에서 처리)
+    totals["income_before_tax"] = totals["net_income"]
     return items, totals
 
 

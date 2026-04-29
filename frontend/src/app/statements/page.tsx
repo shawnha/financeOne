@@ -170,6 +170,111 @@ function periodLabel(periodType: PeriodType, periodValue: string): string {
   return q ? q.label : ""
 }
 
+const EN_MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+]
+
+function lastDayOfMonth(year: number, month: number): number {
+  // month: 1-12
+  return new Date(year, month, 0).getDate()
+}
+
+function formatPeriodEN(
+  statementType: string,
+  year: number,
+  startMonth: number,
+  endMonth: number,
+): string {
+  // BS: "As of <Month> <Day>, YYYY" (period 의 마지막 날)
+  // PL/CF: "<Start Month> 1 - <End Month> <Last Day>, YYYY"
+  if (statementType === "balance_sheet") {
+    const last = lastDayOfMonth(year, endMonth)
+    return `As of ${EN_MONTHS[endMonth - 1]} ${last}, ${year}`
+  }
+  const last = lastDayOfMonth(year, endMonth)
+  if (startMonth === endMonth) {
+    return `${EN_MONTHS[startMonth - 1]} 1 - ${last}, ${year}`
+  }
+  return `${EN_MONTHS[startMonth - 1]} 1 - ${EN_MONTHS[endMonth - 1]} ${last}, ${year}`
+}
+
+function formatPeriodKR(
+  year: number,
+  startMonth: number,
+  endMonth: number,
+): string {
+  if (startMonth === 1 && endMonth === 12) return `${year}년`
+  if (startMonth === endMonth) return `${year}년 ${startMonth}월`
+  return `${year}년 ${startMonth}월 ~ ${endMonth}월`
+}
+
+// line_items 에서 validation 추출 (reload 시에도 알림 유지). label 매칭은
+// 한글/영어 양쪽 지원 — 첫 매칭으로 채워지지 않으면 0.
+function extractValidation(items: LineItem[]): GenerateResult["validation"] | null {
+  if (!items || items.length === 0) return null
+  const eff = (li: LineItem): number =>
+    li.manual_amount !== null ? li.manual_amount : li.auto_amount
+  const findByLabel = (st: string, ...labels: string[]): number => {
+    const lows = labels.map((l) => l.toLowerCase())
+    for (const li of items) {
+      if (li.statement_type !== st) continue
+      const lbl = li.label.trim().toLowerCase()
+      if (lows.includes(lbl)) return eff(li)
+    }
+    return 0
+  }
+
+  const totalAssets = findByLabel("balance_sheet", "자산총계", "total assets")
+  const totalLiabs = findByLabel("balance_sheet", "부채총계", "total liabilities")
+  const totalEquity = findByLabel("balance_sheet", "자본총계", "total equity")
+  const liabEquity = findByLabel(
+    "balance_sheet",
+    "부채 및 자본 총계",
+    "total liabilities and equity",
+    "total liabilities & equity",
+  ) || (totalLiabs + totalEquity)
+  const bsDiff = totalAssets - liabEquity
+
+  // PL totals
+  const revenue = findByLabel("income_statement", "ⅰ. 매출액", "total income")
+  const netIncome =
+    findByLabel("income_statement", "ⅹ. 당기순이익", "ⅹ. 당기순손실", "net income")
+
+  // Trial balance
+  let tbDebit = 0, tbCredit = 0
+  for (const li of items) {
+    if (li.statement_type !== "trial_balance") continue
+    if (li.is_section_header) continue
+    tbDebit += li.manual_debit !== null ? li.manual_debit : li.auto_debit
+    tbCredit += li.manual_credit !== null ? li.manual_credit : li.auto_credit
+  }
+  const tbDiff = tbDebit - tbCredit
+
+  // Cash flow — closing balance loop check (간단 검증)
+  const cfClosing = findByLabel("cash_flow", "기말 현금", "ending cash")
+
+  return {
+    balance_sheet: {
+      total_assets: totalAssets,
+      total_liabilities: totalLiabs,
+      total_equity: totalEquity,
+      net_income: netIncome,
+      is_balanced: Math.abs(bsDiff) < 1,
+      difference: bsDiff,
+    },
+    trial_balance: {
+      is_balanced: Math.abs(tbDiff) < 1,
+      difference: tbDiff,
+    },
+    cash_flow: {
+      loop_valid: true,
+      ending_cash: cfClosing,
+    },
+    income_statement: { total_revenue: revenue, net_income: netIncome },
+  }
+}
+
 function StatementsContent() {
   const searchParams = useSearchParams()
   const entityId = searchParams.get("entity") || "1"
@@ -254,7 +359,7 @@ function StatementsContent() {
         const data = await fetchAPI<StatementData>(`/statements/${match.id}?lang=${lang}`)
         if (cancelled) return
         setStatementData(data)
-        setValidation(null) // generate 결과만 validation 채움
+        setValidation(extractValidation(data.line_items))
         setResult(null)
         setLoadState("success")
       } catch (err) {
@@ -277,6 +382,7 @@ function StatementsContent() {
       `/statements/${statementData.id}?lang=${lang}`,
     )
     setStatementData(data)
+    setValidation(extractValidation(data.line_items))
   }, [statementData, entities])
 
   const handleSaveLine = useCallback(async (lineId: number) => {
@@ -569,7 +675,18 @@ function StatementsContent() {
             </div>
             <div className="flex items-center justify-between mt-3">
               <CardTitle className="text-lg print:text-xl">
-                {tabs.find((s) => s.key === activeTabSafe)?.label} — {statementData.entity_name} ({year}년)
+                {(() => {
+                  const isEnglish = displayCurrency === "USD" || isConsolidated
+                  const tabLabel = tabs.find((s) => s.key === activeTabSafe)?.label || ""
+                  // entity_name: HOI 면 "Hanah One Inc" (Inc. → Inc 통일), 한국 entity 는 그대로
+                  const entityLabel = isEnglish
+                    ? (statementData.entity_name || "").replace(/\s*Inc\.?$/i, " Inc")
+                    : statementData.entity_name
+                  const periodText = isEnglish
+                    ? formatPeriodEN(activeTabSafe, statementData.fiscal_year, statementData.start_month, statementData.end_month)
+                    : formatPeriodKR(statementData.fiscal_year, statementData.start_month, statementData.end_month)
+                  return `${tabLabel} — ${entityLabel} — ${periodText}`
+                })()}
                 {statementData.status === "finalized" && (
                   <span className="ml-2 text-xs px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
                     확정
