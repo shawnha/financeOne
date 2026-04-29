@@ -2,6 +2,14 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-04-29 — Codef 자동 sync 마지막 실행 시각 노출 (Vercel 호환)
+
+### Added
+- 자동 sync 스케줄러: 기관별 마지막 sync 시각을 DB(`settings.codef_last_sync_*`) 영구 기록 기반으로 표시
+  - `GET /api/integrations/codef/scheduler/status` 응답에 `last_sync_by_target[]`, `serverless` 필드 추가
+  - 설정 페이지 → 통합 → 자동 sync 카드 안에 "기관별 마지막 sync (DB 영구 기록)" 섹션 + 상대시간(예: "3시간 전")
+  - Vercel 배포(스케줄러 비활성, cold start 회피)에서도 마지막 시각 정상 표시 + serverless 안내 배너
+
 ## [Unreleased] - 2026-04-19 — Codef 카드 파싱 + 프로덕션-레디 연동
 
 ### Added

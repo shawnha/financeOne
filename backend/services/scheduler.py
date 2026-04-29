@@ -336,14 +336,21 @@ def shutdown_scheduler() -> None:
 
 
 def get_status() -> dict:
-    """UI 노출용 현재 상태."""
+    """UI 노출용 현재 상태.
+
+    `last_sync_by_target` 은 DB(`settings.codef_last_sync_<org>`)에 영구 저장된
+    마지막 sync 시각이라 in-memory `_last_run` 과 달리 Vercel(스케줄러 비활성,
+    DISABLE_SCHEDULER=1)에서도 마지막 시각을 그대로 반환한다.
+    """
     cron_hours = os.environ.get("SCHEDULER_CRON_HOURS", "").strip()
+    serverless = os.environ.get("DISABLE_SCHEDULER", "").lower() in ("1", "true", "yes")
     info = {
         "running": _scheduler is not None and _scheduler.running,
         "mode": "cron" if cron_hours else "interval",
         "cron_hours": cron_hours or None,
         "interval_min": int(os.environ.get("SCHEDULER_INTERVAL_MIN", "90")),
         "enabled": os.environ.get("SCHEDULER_ENABLED", "1").lower() not in ("0", "false", "no"),
+        "serverless": serverless,
         "last_run": _last_run.copy() if _last_run else None,
     }
     if _scheduler is not None:
@@ -355,6 +362,43 @@ def get_status() -> dict:
                 "next_run_time": j.next_run_time.isoformat() if j.next_run_time else None,
             })
         info["jobs"] = jobs
+
+    # DB 영구 기록 — Vercel(스케줄러 비활성) 환경에서도 마지막 sync 시각 표시 가능.
+    info["last_sync_by_target"] = []
+    try:
+        if db_conn_mod._pool is not None:
+            with _db() as conn:
+                cur = conn.cursor()
+                try:
+                    cur.execute(
+                        """
+                        SELECT s.entity_id,
+                               COALESCE(e.name, '?') AS entity_name,
+                               regexp_replace(s.key, '^codef_last_sync_', '') AS org,
+                               s.value,
+                               s.updated_at
+                        FROM financeone.settings s
+                        LEFT JOIN financeone.entities e ON e.id = s.entity_id
+                        WHERE s.key LIKE 'codef_last_sync_%'
+                          AND s.entity_id IS NOT NULL
+                        ORDER BY s.updated_at DESC NULLS LAST
+                        """
+                    )
+                    rows = cur.fetchall()
+                finally:
+                    cur.close()
+            info["last_sync_by_target"] = [
+                {
+                    "entity_id": r[0],
+                    "entity_name": r[1],
+                    "org": r[2],
+                    "last_sync": (r[4].isoformat() if r[4] else r[3]),
+                }
+                for r in rows
+            ]
+    except Exception as e:
+        logger.warning("get_status: last_sync_by_target query failed: %s", e)
+
     return info
 
 

@@ -103,9 +103,17 @@ interface SchedulerResult {
   detail?: unknown
 }
 
+interface SchedulerLastSync {
+  entity_id: number
+  entity_name: string
+  org: string
+  last_sync: string | null
+}
+
 interface SchedulerStatus {
   running: boolean
   enabled: boolean
+  serverless?: boolean
   interval_min: number
   last_run: {
     started_at: string | null
@@ -115,6 +123,21 @@ interface SchedulerStatus {
     results: SchedulerResult[]
   } | null
   jobs?: Array<{ id: string; name: string; next_run_time: string | null }>
+  last_sync_by_target?: SchedulerLastSync[]
+}
+
+function formatRelativeTime(iso: string | null | undefined): string {
+  if (!iso) return ""
+  const t = new Date(iso).getTime()
+  if (isNaN(t)) return ""
+  const diffSec = Math.max(0, Math.floor((Date.now() - t) / 1000))
+  if (diffSec < 60) return "방금 전"
+  const m = Math.floor(diffSec / 60)
+  if (m < 60) return `${m}분 전`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}시간 전`
+  const d = Math.floor(h / 24)
+  return `${d}일 전`
 }
 
 type CodefOrg =
@@ -1202,6 +1225,10 @@ function SettingsContent() {
                       <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] text-emerald-300 ring-1 ring-emerald-500/30">
                         running
                       </span>
+                    ) : schedulerStatus?.serverless ? (
+                      <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] text-amber-300 ring-1 ring-amber-500/30">
+                        serverless (Vercel)
+                      </span>
                     ) : (
                       <span className="rounded-full bg-white/[0.08] px-2 py-0.5 text-[10px] text-muted-foreground">
                         stopped
@@ -1234,6 +1261,38 @@ function SettingsContent() {
                         </>
                       )}
                     </div>
+                    {schedulerStatus.serverless && (
+                      <div className="text-[11px] text-amber-300/80">
+                        Vercel 배포에서는 in-process 스케줄러가 비활성 (cold start). 마지막 sync 시각은
+                        DB 기록(아래) 기준 — 수동 실행 또는 외부 cron으로 트리거된 결과.
+                      </div>
+                    )}
+                    {schedulerStatus.last_sync_by_target && schedulerStatus.last_sync_by_target.length > 0 && (
+                      <div className="pt-1 border-t border-white/[0.03] space-y-0.5">
+                        <div className="text-[11px] text-muted-foreground/70">
+                          기관별 마지막 sync (DB 영구 기록)
+                        </div>
+                        {schedulerStatus.last_sync_by_target.map((s, i) => {
+                          const orgLabel =
+                            (CODEF_ORG_LABELS as Record<string, string>)[s.org] ?? s.org
+                          const abs = s.last_sync
+                            ? new Date(s.last_sync).toLocaleString("ko-KR")
+                            : "-"
+                          const rel = formatRelativeTime(s.last_sync)
+                          return (
+                            <div key={`${s.entity_id}-${s.org}-${i}`} className="pl-2 text-[11px]">
+                              <span className="text-muted-foreground/70">
+                                {s.entity_name} · {orgLabel}
+                              </span>{" "}
+                              <span className="text-foreground">{abs}</span>
+                              {rel && (
+                                <span className="text-muted-foreground/70"> · {rel}</span>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
                     <div className="text-[11px] text-muted-foreground/70">
                       안전장치: 최초 sync를 수동으로 실행한 org만 자동 sync 대상 (신규 연결 즉시 대량 INSERT 방지)
                     </div>
