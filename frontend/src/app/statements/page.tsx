@@ -98,12 +98,23 @@ interface GenerateResult {
   eliminations_count?: number
 }
 
-const STATEMENT_TYPES = [
+const STATEMENT_TYPES_KR = [
   { key: "balance_sheet", label: "재무상태표" },
   { key: "income_statement", label: "손익계산서" },
   { key: "cash_flow", label: "현금흐름표" },
   { key: "trial_balance", label: "합계잔액시산표" },
   { key: "deficit_treatment", label: "결손금처리계산서" },
+] as const
+
+// HOI (USD) — US GAAP. Cash Flow / Trial Balance / Deficit Treatment 양식이 K-GAAP 과 달라 hide.
+const STATEMENT_TYPES_EN = [
+  { key: "balance_sheet", label: "Balance Sheet" },
+  { key: "income_statement", label: "Profit and Loss" },
+] as const
+
+// 연결재무제표 (USD, US GAAP)
+const STATEMENT_TYPES_CONSOLIDATED = [
+  { key: "consolidated_balance_sheet", label: "Consolidated Balance Sheet" },
 ] as const
 
 const currentYear = new Date().getFullYear()
@@ -177,6 +188,16 @@ function StatementsContent() {
       .then(setEntities)
       .catch(() => setEntities([]))
   }, [])
+
+  // entity / currency 변경 시 activeTab 이 현재 탭 list 에 없으면 reset
+  useEffect(() => {
+    const validTabs = isConsolidated
+      ? STATEMENT_TYPES_CONSOLIDATED
+      : (displayCurrency === "USD" ? STATEMENT_TYPES_EN : STATEMENT_TYPES_KR)
+    if (!validTabs.some((t) => t.key === activeTab)) {
+      setActiveTab(validTabs[0].key)
+    }
+  }, [isConsolidated, displayCurrency, activeTab])
 
   // entity / year / period 바뀌면 자동으로 해당 기간의 statement load (정확 매칭 우선)
   useEffect(() => {
@@ -443,17 +464,23 @@ function StatementsContent() {
       )}
 
       {/* SUCCESS state */}
-      {loadState === "success" && statementData && (
+      {loadState === "success" && statementData && (() => {
+        // entity 통화 / 연결 여부에 따라 statement type 탭 분기
+        const tabs = isConsolidated
+          ? STATEMENT_TYPES_CONSOLIDATED
+          : (displayCurrency === "USD" ? STATEMENT_TYPES_EN : STATEMENT_TYPES_KR)
+        const activeTabSafe = tabs.some((t) => t.key === activeTab) ? activeTab : tabs[0].key
+        return (
         <Card>
           <CardHeader className="pb-3">
             {/* Tabs */}
             <div className="flex flex-wrap gap-1 border-b border-border -mx-6 px-6 pb-3">
-              {STATEMENT_TYPES.map((st) => (
+              {tabs.map((st) => (
                 <button
                   key={st.key}
                   onClick={() => setActiveTab(st.key)}
                   className={`px-3 py-2 text-sm rounded-t-md transition-colors ${
-                    activeTab === st.key
+                    activeTabSafe === st.key
                       ? "bg-secondary text-foreground font-medium border-b-2 border-[hsl(var(--accent))]"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
@@ -463,7 +490,7 @@ function StatementsContent() {
               ))}
             </div>
             <CardTitle className="text-lg mt-3 print:text-xl">
-              {STATEMENT_TYPES.find((s) => s.key === activeTab)?.label} — {statementData.entity_name} ({year}년)
+              {tabs.find((s) => s.key === activeTabSafe)?.label} — {statementData.entity_name} ({year}년)
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -557,7 +584,8 @@ function StatementsContent() {
             </div>
           </CardContent>
         </Card>
-      )}
+        )
+      })()}
     </div>
   )
 }

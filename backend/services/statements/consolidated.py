@@ -14,6 +14,13 @@ from .income_statement import generate_income_statement
 from .cash_flow import generate_cash_flow_statement
 from .trial_balance import generate_trial_balance
 from .deficit import generate_deficit_treatment
+from .qbo_reports import generate_qbo_balance_sheet, generate_qbo_income_statement
+
+
+def _entity_currency(cur, entity_id: int) -> str:
+    cur.execute("SELECT currency FROM entities WHERE id = %s", [entity_id])
+    row = cur.fetchone()
+    return (row[0] if row else "KRW").upper()
 
 
 # --- 전체 재무제표 생성 ---
@@ -27,11 +34,13 @@ def generate_all_statements(
 ) -> dict:
     """5종 재무제표 일괄 생성. financial_statement_line_items에 저장.
 
+    HOI (USD) → QBO Report API 사용 (영어, US GAAP 양식).
+    한국 entity (KRW) → 분개 기반 자동 생성 (한글, K-GAAP 양식).
+
     Returns:
         {"statement_id": int, "validation": {...per statement...}}
     """
     start_date = date(fiscal_year, start_month, 1)
-    # end_month의 마지막 날
     if end_month == 12:
         end_date = date(fiscal_year, 12, 31)
     else:
@@ -40,11 +49,39 @@ def generate_all_statements(
     cur = conn.cursor()
     stmt_id = _get_or_create_statement(cur, entity_id, fiscal_year, start_month, end_month)
 
-    bs = generate_balance_sheet(conn, cur, stmt_id, entity_id, fiscal_year, end_date, start_date)
-    inc = generate_income_statement(conn, cur, stmt_id, entity_id, start_date, end_date)
-    cf = generate_cash_flow_statement(conn, cur, stmt_id, entity_id, start_date, end_date)
-    tb = generate_trial_balance(conn, cur, stmt_id, entity_id, end_date)
-    dt = generate_deficit_treatment(conn, cur, stmt_id, entity_id, fiscal_year, start_date, end_date)
+    # 기존 line_items 삭제 (재생성 안전)
+    cur.execute(
+        "DELETE FROM financial_statement_line_items WHERE statement_id = %s",
+        [stmt_id],
+    )
+
+    currency = _entity_currency(cur, entity_id)
+    use_qbo = currency == "USD"
+
+    if use_qbo:
+        # HOI (US GAAP) — QBO Report API 사용
+        bs = generate_qbo_balance_sheet(conn, cur, stmt_id, entity_id, fiscal_year, end_date, start_date)
+        inc = generate_qbo_income_statement(conn, cur, stmt_id, entity_id, start_date, end_date)
+        # QBO 는 Cash Flow / Trial Balance / Deficit Treatment 제공 안함 → empty placeholder
+        cf = {"opening_cash": 0.0, "cash_inflows": 0.0, "cash_outflows": 0.0,
+              "net_cash": 0.0, "ending_cash": 0.0, "loop_valid": True}
+        tb = {"total_debit": 0.0, "total_credit": 0.0, "is_balanced": True,
+              "difference": 0.0, "account_count": 0}
+        dt = {"prior_retained": 0.0, "net_income": float(inc.get("net_income", 0.0)),
+              "ending_retained": 0.0, "is_deficit": False}
+    else:
+        # K-GAAP — 분개 기반 5종 자동 생성
+        bs = generate_balance_sheet(conn, cur, stmt_id, entity_id, fiscal_year, end_date, start_date)
+        inc = generate_income_statement(conn, cur, stmt_id, entity_id, start_date, end_date)
+        cf = generate_cash_flow_statement(conn, cur, stmt_id, entity_id, start_date, end_date)
+        tb = generate_trial_balance(conn, cur, stmt_id, entity_id, end_date)
+        dt = generate_deficit_treatment(conn, cur, stmt_id, entity_id, fiscal_year, start_date, end_date)
+
+    # base_currency 설정
+    cur.execute(
+        "UPDATE financial_statements SET base_currency = %s WHERE id = %s",
+        [currency, stmt_id],
+    )
 
     cur.close()
 
@@ -53,6 +90,7 @@ def generate_all_statements(
         "fiscal_year": fiscal_year,
         "start_month": start_month,
         "end_month": end_month,
+        "base_currency": currency,
         "validation": {
             "balance_sheet": bs,
             "income_statement": inc,
