@@ -104,6 +104,7 @@ interface StatementListItem {
   end_month: number
   is_consolidated: boolean
   entity_name: string
+  base_currency?: string
 }
 
 interface GenerateResult {
@@ -303,6 +304,7 @@ function StatementsContent() {
   const [entities, setEntities] = useState<Entity[]>([])
   const [periodType, setPeriodType] = useState<PeriodType>("annual")
   const [periodValue, setPeriodValue] = useState<string>("1")
+  const [consolidatedCurrency, setConsolidatedCurrency] = useState<"USD" | "KRW">("USD")
   const [edit, setEdit] = useState<EditState>({ lineId: null, amount: "", note: "" })
   const [savingLine, setSavingLine] = useState(false)
   const [accountInfo, setAccountInfo] = useState<Record<string, { name: string; category: string; subcategory: string | null; normal_side: string; description: string | null }>>({})
@@ -371,10 +373,11 @@ function StatementsContent() {
         )
         if (cancelled) return
         // 정확히 같은 기간 (start_month=start, end_month=end) 이고 consolidated/entity 일치
+        // 연결재무제표는 base_currency 도 일치해야 함 (USD/KRW 별도 stmt)
         const match = list.items.find((s) => {
           const periodOk = s.start_month === start && s.end_month === end
           const scopeOk = isConsolidated
-            ? s.is_consolidated
+            ? (s.is_consolidated && s.base_currency === consolidatedCurrency)
             : !s.is_consolidated && s.entity_id === Number(entityId)
           return periodOk && scopeOk
         })
@@ -385,9 +388,11 @@ function StatementsContent() {
           setLoadState("empty")
           return
         }
-        // HOI (USD) 또는 consolidated 면 영어 라벨, 한국 entity 면 한글
+        // 연결: 통화별 / 단독: HOI 영문, 한국 한글
         const targetEntity = entities.find((e) => e.id === match.entity_id)
-        const lang = (isConsolidated || targetEntity?.currency === "USD") ? "en" : "ko"
+        const lang = isConsolidated
+          ? (consolidatedCurrency === "KRW" ? "ko" : "en")
+          : (targetEntity?.currency === "USD" ? "en" : "ko")
         const data = await fetchAPI<StatementData>(`/statements/${match.id}?lang=${lang}`)
         if (cancelled) return
         setStatementData(data)
@@ -404,12 +409,15 @@ function StatementsContent() {
     return () => {
       cancelled = true
     }
-  }, [entityId, year, isConsolidated, entities, periodType, periodValue])
+  }, [entityId, year, isConsolidated, entities, periodType, periodValue, consolidatedCurrency])
 
   const reloadStatement = useCallback(async () => {
     if (!statementData) return
     const targetEntity = entities.find((e) => e.id === statementData.entity_id)
-    const lang = (statementData.is_consolidated || targetEntity?.currency === "USD") ? "en" : "ko"
+    // 연결재무제표: base_currency=KRW 면 한글, USD 면 영문 / 단독: HOI=영문, 한국=한글
+    const lang = statementData.is_consolidated
+      ? (statementData.base_currency === "KRW" ? "ko" : "en")
+      : (targetEntity?.currency === "USD" ? "en" : "ko")
     const data = await fetchAPI<StatementData>(
       `/statements/${statementData.id}?lang=${lang}`,
     )
@@ -480,7 +488,7 @@ function StatementsContent() {
         ? "/statements/generate-consolidated"
         : "/statements/generate"
       const body = isConsolidated
-        ? { fiscal_year: Number(year), start_month: start, end_month: end }
+        ? { fiscal_year: Number(year), start_month: start, end_month: end, base_currency: consolidatedCurrency }
         : { entity_id: Number(entityId), fiscal_year: Number(year), start_month: start, end_month: end }
 
       const result = await fetchAPI<GenerateResult>(endpoint, {
@@ -490,9 +498,11 @@ function StatementsContent() {
       setResult(result)
       setValidation(result.validation)
 
-      // 생성된 재무제표 로드 (HOI/consolidated → 영어, 한국 entity → 한글)
+      // 생성된 재무제표 로드 (연결: 통화별 / 단독: HOI 영문, 한국 한글)
       const targetEntity = entities.find((e) => e.id === Number(entityId))
-      const lang = (isConsolidated || targetEntity?.currency === "USD") ? "en" : "ko"
+      const lang = isConsolidated
+        ? (consolidatedCurrency === "KRW" ? "ko" : "en")
+        : (targetEntity?.currency === "USD" ? "en" : "ko")
       const data = await fetchAPI<StatementData>(
         `/statements/${result.statement_id}?lang=${lang}`,
       )
@@ -504,7 +514,7 @@ function StatementsContent() {
     } finally {
       setGenerating(false)
     }
-  }, [entityId, year, isConsolidated, periodType, periodValue, entities])
+  }, [entityId, year, isConsolidated, periodType, periodValue, entities, consolidatedCurrency])
 
   const effectiveTab = isConsolidated ? "consolidated_balance_sheet" : activeTab
   const filteredItems = statementData?.line_items.filter(
@@ -579,6 +589,18 @@ function StatementsContent() {
                   {q.label}
                 </SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        {isConsolidated && (
+          <Select value={consolidatedCurrency} onValueChange={(v) => setConsolidatedCurrency(v as "USD" | "KRW")}>
+            <SelectTrigger className="w-[140px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="USD">USD (US GAAP)</SelectItem>
+              <SelectItem value="KRW">KRW (K-GAAP)</SelectItem>
             </SelectContent>
           </Select>
         )}

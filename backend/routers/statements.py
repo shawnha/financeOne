@@ -375,6 +375,7 @@ class ConsolidatedGenerateRequest(BaseModel):
     fiscal_year: int
     start_month: int = 1
     end_month: int = 12
+    base_currency: str = "USD"
 
     def model_post_init(self, __context) -> None:
         if not (1 <= self.start_month <= 12):
@@ -383,6 +384,8 @@ class ConsolidatedGenerateRequest(BaseModel):
             raise ValueError("end_month must be 1-12")
         if self.start_month > self.end_month:
             raise ValueError("start_month must be <= end_month")
+        if self.base_currency.upper() not in ("USD", "KRW"):
+            raise ValueError("base_currency must be USD or KRW")
 
 
 @router.post("/generate-consolidated")
@@ -390,13 +393,14 @@ def generate_consolidated(
     body: ConsolidatedGenerateRequest,
     conn: PgConnection = Depends(get_db),
 ):
-    """연결재무제표 생성 (US GAAP, USD)."""
+    """연결재무제표 생성 (USD: US GAAP / KRW: K-GAAP)."""
     try:
         result = generate_consolidated_statements(
             conn=conn,
             fiscal_year=body.fiscal_year,
             start_month=body.start_month,
             end_month=body.end_month,
+            base_currency=body.base_currency.upper(),
         )
         conn.commit()
         return result

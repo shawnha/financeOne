@@ -44,3 +44,4 @@ transaction_sample/
 uploads/
 .superpowers/
 .vercel
+.claude-tmp/
