@@ -518,7 +518,9 @@ function StatementsContent() {
                         >
                           <TableCell
                             className={
-                              item.is_section_header ? "font-semibold" : ""
+                              item.is_section_header
+                                ? "font-semibold whitespace-pre"
+                                : "whitespace-pre"
                             }
                           >
                             {item.label}
