@@ -676,6 +676,33 @@ function StatementsContent() {
             </DropdownMenuContent>
           </DropdownMenu>
         )}
+
+        {statementData && (
+          <Button
+            variant={statementData.status === "finalized" ? "default" : "outline"}
+            size="sm"
+            onClick={async () => {
+              const next = statementData.status === "finalized" ? "draft" : "finalized"
+              const confirmMsg = next === "finalized"
+                ? "재무제표를 확정 (finalized) 하시겠습니까? 확정 후 수정/삭제/재생성이 잠깁니다."
+                : "재무제표를 임시 (draft) 상태로 되돌리시겠습니까?"
+              if (!window.confirm(confirmMsg)) return
+              try {
+                await fetchAPI(`/statements/${statementData.id}/status`, {
+                  method: "PATCH",
+                  body: JSON.stringify({ status: next }),
+                })
+                setStatementData({ ...statementData, status: next })
+                toast.success(next === "finalized" ? "확정 완료 (finalized)" : "임시 상태 (draft)")
+              } catch (err) {
+                toast.error(err instanceof Error ? err.message : "상태 변경 실패")
+              }
+            }}
+            title={statementData.status === "finalized" ? "확정 상태 — 클릭 시 임시 상태로 되돌림" : "임시 상태 — 클릭 시 확정"}
+          >
+            {statementData.status === "finalized" ? "확정됨 (잠금)" : "임시 (확정하기)"}
+          </Button>
+        )}
       </div>
 
       {/* Validation Summary */}
