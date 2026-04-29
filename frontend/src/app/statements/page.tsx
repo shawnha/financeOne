@@ -109,6 +109,44 @@ const STATEMENT_TYPES = [
 const currentYear = new Date().getFullYear()
 const YEARS = Array.from({ length: 5 }, (_, i) => currentYear - i)
 
+type PeriodType = "monthly" | "quarterly" | "annual"
+
+const PERIOD_TYPES: { key: PeriodType; label: string }[] = [
+  { key: "monthly", label: "월별" },
+  { key: "quarterly", label: "분기별" },
+  { key: "annual", label: "연말" },
+]
+
+const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => ({
+  value: String(i + 1),
+  label: `${i + 1}월`,
+}))
+
+const QUARTER_OPTIONS = [
+  { value: "1", label: "1분기 (1-3월)", start: 1, end: 3 },
+  { value: "2", label: "2분기 (4-6월)", start: 4, end: 6 },
+  { value: "3", label: "3분기 (7-9월)", start: 7, end: 9 },
+  { value: "4", label: "4분기 (10-12월)", start: 10, end: 12 },
+]
+
+function computeMonthRange(periodType: PeriodType, periodValue: string): { start: number; end: number } {
+  if (periodType === "annual") return { start: 1, end: 12 }
+  if (periodType === "monthly") {
+    const m = Number(periodValue)
+    return { start: m, end: m }
+  }
+  // quarterly
+  const q = QUARTER_OPTIONS.find((o) => o.value === periodValue) || QUARTER_OPTIONS[0]
+  return { start: q.start, end: q.end }
+}
+
+function periodLabel(periodType: PeriodType, periodValue: string): string {
+  if (periodType === "annual") return "연말"
+  if (periodType === "monthly") return `${periodValue}월`
+  const q = QUARTER_OPTIONS.find((o) => o.value === periodValue)
+  return q ? q.label : ""
+}
+
 function StatementsContent() {
   const searchParams = useSearchParams()
   const entityId = searchParams.get("entity") || "1"
@@ -122,6 +160,8 @@ function StatementsContent() {
   const [year, setYear] = useState(currentYear.toString())
   const [generating, setGenerating] = useState(false)
   const [entities, setEntities] = useState<Entity[]>([])
+  const [periodType, setPeriodType] = useState<PeriodType>("annual")
+  const [periodValue, setPeriodValue] = useState<string>("1")
 
   const isConsolidated = entityId === "consolidated"
   const currentEntity = entities.find((e) => e.id === Number(entityId))
@@ -138,7 +178,7 @@ function StatementsContent() {
       .catch(() => setEntities([]))
   }, [])
 
-  // entity / year / entities 바뀌면 자동으로 해당 entity 의 가장 최근 statement load
+  // entity / year / period 바뀌면 자동으로 해당 기간의 statement load (정확 매칭 우선)
   useEffect(() => {
     if (entities.length === 0) return // entities 로드되기 전엔 skip
     let cancelled = false
@@ -146,9 +186,10 @@ function StatementsContent() {
       setLoadState("loading")
       setError("")
       try {
+        const { start, end } = computeMonthRange(periodType, periodValue)
         const params = new URLSearchParams({
           fiscal_year: year,
-          per_page: "1",
+          per_page: "50",
         })
         if (!isConsolidated) {
           params.set("entity_id", entityId)
@@ -157,10 +198,14 @@ function StatementsContent() {
           `/statements?${params.toString()}`,
         )
         if (cancelled) return
-        // consolidated 면 is_consolidated=true 만, 아니면 entity 일치하는 것
-        const match = list.items.find((s) =>
-          isConsolidated ? s.is_consolidated : !s.is_consolidated && s.entity_id === Number(entityId),
-        ) || list.items[0]
+        // 정확히 같은 기간 (start_month=start, end_month=end) 이고 consolidated/entity 일치
+        const match = list.items.find((s) => {
+          const periodOk = s.start_month === start && s.end_month === end
+          const scopeOk = isConsolidated
+            ? s.is_consolidated
+            : !s.is_consolidated && s.entity_id === Number(entityId)
+          return periodOk && scopeOk
+        })
         if (!match) {
           setStatementData(null)
           setValidation(null)
@@ -187,18 +232,19 @@ function StatementsContent() {
     return () => {
       cancelled = true
     }
-  }, [entityId, year, isConsolidated, entities])
+  }, [entityId, year, isConsolidated, entities, periodType, periodValue])
 
   const handleGenerate = useCallback(async () => {
     setGenerating(true)
     setError("")
     try {
+      const { start, end } = computeMonthRange(periodType, periodValue)
       const endpoint = isConsolidated
         ? "/statements/generate-consolidated"
         : "/statements/generate"
       const body = isConsolidated
-        ? { fiscal_year: Number(year), start_month: 1, end_month: 12 }
-        : { entity_id: Number(entityId), fiscal_year: Number(year), start_month: 1, end_month: 12 }
+        ? { fiscal_year: Number(year), start_month: start, end_month: end }
+        : { entity_id: Number(entityId), fiscal_year: Number(year), start_month: start, end_month: end }
 
       const result = await fetchAPI<GenerateResult>(endpoint, {
         method: "POST",
@@ -207,9 +253,11 @@ function StatementsContent() {
       setResult(result)
       setValidation(result.validation)
 
-      // 생성된 재무제표 로드
+      // 생성된 재무제표 로드 (HOI/consolidated → 영어, 한국 entity → 한글)
+      const targetEntity = entities.find((e) => e.id === Number(entityId))
+      const lang = (isConsolidated || targetEntity?.currency === "USD") ? "en" : "ko"
       const data = await fetchAPI<StatementData>(
-        `/statements/${result.statement_id}`,
+        `/statements/${result.statement_id}?lang=${lang}`,
       )
       setStatementData(data)
       setLoadState("success")
@@ -219,7 +267,7 @@ function StatementsContent() {
     } finally {
       setGenerating(false)
     }
-  }, [entityId, year, isConsolidated])
+  }, [entityId, year, isConsolidated, periodType, periodValue, entities])
 
   const effectiveTab = isConsolidated ? "consolidated_balance_sheet" : activeTab
   const filteredItems = statementData?.line_items.filter(
@@ -244,6 +292,59 @@ function StatementsContent() {
             ))}
           </SelectContent>
         </Select>
+
+        <Select
+          value={periodType}
+          onValueChange={(v) => {
+            const next = v as PeriodType
+            setPeriodType(next)
+            // 기본 periodValue 자동 설정
+            if (next === "monthly") setPeriodValue("1")
+            else if (next === "quarterly") setPeriodValue("1")
+            else setPeriodValue("annual")
+          }}
+        >
+          <SelectTrigger className="w-[120px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PERIOD_TYPES.map((p) => (
+              <SelectItem key={p.key} value={p.key}>
+                {p.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {periodType === "monthly" && (
+          <Select value={periodValue} onValueChange={setPeriodValue}>
+            <SelectTrigger className="w-[100px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MONTH_OPTIONS.map((m) => (
+                <SelectItem key={m.value} value={m.value}>
+                  {m.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        {periodType === "quarterly" && (
+          <Select value={periodValue} onValueChange={setPeriodValue}>
+            <SelectTrigger className="w-[160px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {QUARTER_OPTIONS.map((q) => (
+                <SelectItem key={q.value} value={q.value}>
+                  {q.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
 
         <Button onClick={handleGenerate} disabled={generating}>
           {generating ? (
@@ -506,7 +607,7 @@ function StatementsSkeleton() {
 
 export default function StatementsPage() {
   return (
-    <div className="space-y-6">
+    <div className="p-6 space-y-6">
       <Suspense fallback={<Skeleton className="h-10 w-full border-b" />}>
         <EntityTabs />
       </Suspense>
