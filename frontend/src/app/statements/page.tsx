@@ -30,6 +30,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import {
   FileText,
   RefreshCw,
   CheckCircle2,
@@ -299,6 +305,7 @@ function StatementsContent() {
   const [periodValue, setPeriodValue] = useState<string>("1")
   const [edit, setEdit] = useState<EditState>({ lineId: null, amount: "", note: "" })
   const [savingLine, setSavingLine] = useState(false)
+  const [accountInfo, setAccountInfo] = useState<Record<string, { name: string; category: string; subcategory: string | null; normal_side: string }>>({})
 
   const isConsolidated = entityId === "consolidated"
   const currentEntity = entities.find((e) => e.id === Number(entityId))
@@ -313,6 +320,17 @@ function StatementsContent() {
     fetchAPI<Entity[]>("/entities")
       .then(setEntities)
       .catch(() => setEntities([]))
+  }, [])
+
+  // standard accounts 캐시 (계정 코드 hover tooltip 용)
+  useEffect(() => {
+    fetchAPI<{ items: Array<{ code: string; name: string; category: string; subcategory: string | null; normal_side: string }> }>("/accounts/standard?per_page=500")
+      .then((r) => {
+        const map: Record<string, { name: string; category: string; subcategory: string | null; normal_side: string }> = {}
+        for (const a of r.items) map[a.code] = { name: a.name, category: a.category, subcategory: a.subcategory, normal_side: a.normal_side }
+        setAccountInfo(map)
+      })
+      .catch(() => setAccountInfo({}))
   }, [])
 
   // entity / currency 변경 시 activeTab 이 현재 탭 list 에 없으면 reset
@@ -804,16 +822,45 @@ function StatementsContent() {
                             }
                           >
                             {item.label}
-                            {item.account_code && (
-                              <a
-                                href={`/accounts/ledger?entity=${entityId}&code=${encodeURIComponent(item.account_code)}`}
-                                className="ml-2 text-xs text-muted-foreground font-mono hover:text-primary hover:underline"
-                                title={`${item.account_code} 계정별 원장 보기`}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                {item.account_code}
-                              </a>
-                            )}
+                            {item.account_code && (() => {
+                              const info = accountInfo[item.account_code]
+                              const sideKR = info?.normal_side === "debit" ? "차변" : info?.normal_side === "credit" ? "대변" : ""
+                              return (
+                                <TooltipProvider delayDuration={200}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <a
+                                        href={`/accounts/ledger?entity=${entityId}&code=${encodeURIComponent(item.account_code)}`}
+                                        className="ml-2 text-xs text-muted-foreground font-mono hover:text-primary hover:underline"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        {item.account_code}
+                                      </a>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" className="max-w-sm">
+                                      <div className="space-y-1 text-xs">
+                                        <div className="font-semibold">
+                                          {item.account_code} {info?.name || ""}
+                                        </div>
+                                        {info && (
+                                          <>
+                                            <div className="text-muted-foreground">
+                                              분류: {info.category}{info.subcategory ? ` / ${info.subcategory}` : ""}
+                                            </div>
+                                            <div className="text-muted-foreground">
+                                              정상잔액: {sideKR} (잔액 증가 시 {sideKR} 기재)
+                                            </div>
+                                          </>
+                                        )}
+                                        <div className="text-primary mt-2 italic">
+                                          → 클릭하면 계정별 원장 표시
+                                        </div>
+                                      </div>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              )
+                            })()}
                             {isEdited && !isEditing && (
                               <Pencil className="inline h-3 w-3 ml-2 text-yellow-500" />
                             )}
