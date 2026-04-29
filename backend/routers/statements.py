@@ -161,7 +161,23 @@ def generate_statements(
     body: GenerateRequest,
     conn: PgConnection = Depends(get_db),
 ):
-    """5종 재무제표 일괄 생성."""
+    """5종 재무제표 일괄 생성. status='finalized' 면 거부."""
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT id, status FROM financial_statements
+           WHERE entity_id = %s AND fiscal_year = %s
+             AND start_month = %s AND end_month = %s
+             AND is_consolidated = false""",
+        [body.entity_id, body.fiscal_year, body.start_month, body.end_month],
+    )
+    existing = cur.fetchone()
+    cur.close()
+    if existing and existing[1] == "finalized":
+        raise HTTPException(
+            409,
+            f"Statement {existing[0]} 은 finalized 상태 — 자동 재생성 불가. 먼저 status 를 'draft' 로 변경하세요.",
+        )
+
     try:
         result = generate_all_statements(
             conn=conn,
@@ -172,6 +188,184 @@ def generate_statements(
         )
         conn.commit()
         return result
+    except Exception:
+        conn.rollback()
+        raise
+
+
+@router.delete("/{stmt_id}")
+def delete_statement(
+    stmt_id: int,
+    force: bool = Query(False, description="finalized 도 강제 삭제"),
+    conn: PgConnection = Depends(get_db),
+):
+    """Statement 1건 삭제. line_items CASCADE."""
+    cur = conn.cursor()
+    cur.execute("SELECT status FROM financial_statements WHERE id = %s", [stmt_id])
+    row = cur.fetchone()
+    if not row:
+        cur.close()
+        raise HTTPException(404, "Statement not found")
+    status = row[0]
+    if status == "finalized" and not force:
+        cur.close()
+        raise HTTPException(
+            409,
+            f"Statement {stmt_id} 는 finalized — 강제 삭제하려면 ?force=true 추가",
+        )
+    try:
+        cur.execute(
+            "DELETE FROM financial_statement_line_items WHERE statement_id = %s",
+            [stmt_id],
+        )
+        line_count = cur.rowcount
+        cur.execute("DELETE FROM financial_statements WHERE id = %s", [stmt_id])
+        conn.commit()
+        cur.close()
+        return {"deleted": True, "statement_id": stmt_id, "line_items_deleted": line_count}
+    except Exception:
+        conn.rollback()
+        raise
+
+
+class StatementStatusUpdate(BaseModel):
+    status: str  # 'draft' | 'finalized'
+
+
+@router.patch("/{stmt_id}/status")
+def update_statement_status(
+    stmt_id: int,
+    body: StatementStatusUpdate,
+    conn: PgConnection = Depends(get_db),
+):
+    """Statement 상태 변경 (draft / finalized)."""
+    if body.status not in ("draft", "finalized"):
+        raise HTTPException(400, "status must be 'draft' or 'finalized'")
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE financial_statements SET status = %s, updated_at = NOW() WHERE id = %s RETURNING id",
+        [body.status, stmt_id],
+    )
+    row = cur.fetchone()
+    if not row:
+        conn.rollback()
+        cur.close()
+        raise HTTPException(404, "Statement not found")
+    conn.commit()
+    cur.close()
+    return {"id": stmt_id, "status": body.status}
+
+
+@router.patch("/lines/{line_id}")
+def update_line_item(
+    line_id: int,
+    body: LineItemUpdate,
+    conn: PgConnection = Depends(get_db),
+):
+    """line_item 의 manual_amount/manual_debit/manual_credit/note 수정.
+
+    finalized statement 는 거부. NULL 입력 시 manual 값 초기화 (auto 값 사용).
+    """
+    cur = conn.cursor()
+
+    cur.execute(
+        """SELECT li.id, fs.status, fs.id as stmt_id
+           FROM financial_statement_line_items li
+           JOIN financial_statements fs ON fs.id = li.statement_id
+           WHERE li.id = %s""",
+        [line_id],
+    )
+    row = cur.fetchone()
+    if not row:
+        cur.close()
+        raise HTTPException(404, "Line item not found")
+    if row[1] == "finalized":
+        cur.close()
+        raise HTTPException(409, f"Statement {row[2]} 는 finalized — 수정 불가")
+
+    fields = []
+    params = []
+    if body.manual_amount is not None:
+        fields.append("manual_amount = %s")
+        params.append(body.manual_amount)
+    elif "manual_amount" in body.model_fields_set:
+        fields.append("manual_amount = NULL")
+    if body.manual_debit is not None:
+        fields.append("manual_debit = %s")
+        params.append(body.manual_debit)
+    elif "manual_debit" in body.model_fields_set:
+        fields.append("manual_debit = NULL")
+    if body.manual_credit is not None:
+        fields.append("manual_credit = %s")
+        params.append(body.manual_credit)
+    elif "manual_credit" in body.model_fields_set:
+        fields.append("manual_credit = NULL")
+    if body.note is not None:
+        fields.append("note = %s")
+        params.append(body.note)
+    elif "note" in body.model_fields_set:
+        fields.append("note = NULL")
+
+    if not fields:
+        cur.close()
+        raise HTTPException(400, "No fields to update")
+
+    params.append(line_id)
+    try:
+        cur.execute(
+            f"UPDATE financial_statement_line_items SET {', '.join(fields)} WHERE id = %s "
+            f"RETURNING id, manual_amount, manual_debit, manual_credit, note, auto_amount, auto_debit, auto_credit",
+            params,
+        )
+        result_row = cur.fetchone()
+        conn.commit()
+        cur.close()
+        return {
+            "id": result_row[0],
+            "manual_amount": float(result_row[1]) if result_row[1] is not None else None,
+            "manual_debit": float(result_row[2]) if result_row[2] is not None else None,
+            "manual_credit": float(result_row[3]) if result_row[3] is not None else None,
+            "note": result_row[4],
+            "auto_amount": float(result_row[5]),
+            "auto_debit": float(result_row[6]),
+            "auto_credit": float(result_row[7]),
+        }
+    except Exception:
+        conn.rollback()
+        raise
+
+
+@router.post("/lines/{line_id}/reset")
+def reset_line_item(
+    line_id: int,
+    conn: PgConnection = Depends(get_db),
+):
+    """manual_* 모두 NULL → auto 값 사용으로 복원."""
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT li.id, fs.status FROM financial_statement_line_items li
+           JOIN financial_statements fs ON fs.id = li.statement_id
+           WHERE li.id = %s""",
+        [line_id],
+    )
+    row = cur.fetchone()
+    if not row:
+        cur.close()
+        raise HTTPException(404, "Line item not found")
+    if row[1] == "finalized":
+        cur.close()
+        raise HTTPException(409, "finalized statement — 수정 불가")
+
+    try:
+        cur.execute(
+            """UPDATE financial_statement_line_items
+               SET manual_amount = NULL, manual_debit = NULL, manual_credit = NULL, note = NULL
+               WHERE id = %s""",
+            [line_id],
+        )
+        conn.commit()
+        cur.close()
+        return {"id": line_id, "reset": True}
     except Exception:
         conn.rollback()
         raise

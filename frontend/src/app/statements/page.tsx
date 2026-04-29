@@ -29,7 +29,13 @@ import {
   CheckCircle2,
   AlertTriangle,
   Printer,
+  Pencil,
+  Trash2,
+  Check,
+  X,
+  Undo2,
 } from "lucide-react"
+import { toast } from "sonner"
 
 type LoadState = "idle" | "loading" | "success" | "error" | "empty"
 
@@ -61,6 +67,12 @@ interface StatementData {
   entity_name: string
   base_currency?: string
   is_consolidated?: boolean
+}
+
+type EditState = {
+  lineId: number | null
+  amount: string
+  note: string
 }
 
 interface Entity {
@@ -173,6 +185,8 @@ function StatementsContent() {
   const [entities, setEntities] = useState<Entity[]>([])
   const [periodType, setPeriodType] = useState<PeriodType>("annual")
   const [periodValue, setPeriodValue] = useState<string>("1")
+  const [edit, setEdit] = useState<EditState>({ lineId: null, amount: "", note: "" })
+  const [savingLine, setSavingLine] = useState(false)
 
   const isConsolidated = entityId === "consolidated"
   const currentEntity = entities.find((e) => e.id === Number(entityId))
@@ -254,6 +268,70 @@ function StatementsContent() {
       cancelled = true
     }
   }, [entityId, year, isConsolidated, entities, periodType, periodValue])
+
+  const reloadStatement = useCallback(async () => {
+    if (!statementData) return
+    const targetEntity = entities.find((e) => e.id === statementData.entity_id)
+    const lang = (statementData.is_consolidated || targetEntity?.currency === "USD") ? "en" : "ko"
+    const data = await fetchAPI<StatementData>(
+      `/statements/${statementData.id}?lang=${lang}`,
+    )
+    setStatementData(data)
+  }, [statementData, entities])
+
+  const handleSaveLine = useCallback(async (lineId: number) => {
+    setSavingLine(true)
+    try {
+      const amt = edit.amount.trim() === "" ? null : Number(edit.amount.replace(/,/g, ""))
+      if (amt !== null && Number.isNaN(amt)) {
+        toast.error("올바른 숫자를 입력하세요")
+        return
+      }
+      await fetchAPI(`/statements/lines/${lineId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          manual_amount: amt,
+          note: edit.note || null,
+        }),
+      })
+      toast.success("수정되었습니다")
+      setEdit({ lineId: null, amount: "", note: "" })
+      await reloadStatement()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "저장 실패")
+    } finally {
+      setSavingLine(false)
+    }
+  }, [edit, reloadStatement])
+
+  const handleResetLine = useCallback(async (lineId: number) => {
+    if (!confirm("이 항목의 수정을 되돌리시겠습니까? auto 값으로 복원됩니다.")) return
+    try {
+      await fetchAPI(`/statements/lines/${lineId}/reset`, { method: "POST" })
+      toast.success("초기화되었습니다")
+      await reloadStatement()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "초기화 실패")
+    }
+  }, [reloadStatement])
+
+  const handleDeleteStatement = useCallback(async () => {
+    if (!statementData) return
+    if (!confirm(`"${statementData.entity_name} ${statementData.fiscal_year}년 ${statementData.start_month}-${statementData.end_month}월" 재무제표를 삭제합니까? 모든 항목이 사라집니다.`)) return
+    try {
+      const isFinalized = statementData.status === "finalized"
+      const url = isFinalized
+        ? `/statements/${statementData.id}?force=true`
+        : `/statements/${statementData.id}`
+      if (isFinalized && !confirm("이 statement 는 finalized 상태입니다. 정말 삭제하시겠습니까?")) return
+      await fetchAPI(url, { method: "DELETE" })
+      toast.success("삭제되었습니다")
+      setStatementData(null)
+      setLoadState("empty")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "삭제 실패")
+    }
+  }, [statementData])
 
   const handleGenerate = useCallback(async () => {
     setGenerating(true)
@@ -489,31 +567,49 @@ function StatementsContent() {
                 </button>
               ))}
             </div>
-            <CardTitle className="text-lg mt-3 print:text-xl">
-              {tabs.find((s) => s.key === activeTabSafe)?.label} — {statementData.entity_name} ({year}년)
-            </CardTitle>
+            <div className="flex items-center justify-between mt-3">
+              <CardTitle className="text-lg print:text-xl">
+                {tabs.find((s) => s.key === activeTabSafe)?.label} — {statementData.entity_name} ({year}년)
+                {statementData.status === "finalized" && (
+                  <span className="ml-2 text-xs px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                    확정
+                  </span>
+                )}
+              </CardTitle>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleDeleteStatement}
+                className="text-destructive hover:bg-destructive/10 print:hidden"
+                title="이 재무제표 삭제"
+              >
+                <Trash2 className="h-4 w-4" />
+                삭제
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[50%]">계정과목</TableHead>
+                    <TableHead className="w-[45%]">계정과목</TableHead>
                     {isTB ? (
                       <>
                         <TableHead className="text-right w-[25%]">차변</TableHead>
                         <TableHead className="text-right w-[25%]">대변</TableHead>
                       </>
                     ) : (
-                      <TableHead className="text-right w-[50%]">금액</TableHead>
+                      <TableHead className="text-right w-[45%]">금액</TableHead>
                     )}
+                    <TableHead className="w-[10%] print:hidden"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredItems.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={isTB ? 3 : 2}
+                        colSpan={isTB ? 4 : 3}
                         className="text-center text-muted-foreground py-8"
                       >
                         해당 기간에 데이터가 없습니다
@@ -533,6 +629,9 @@ function StatementsContent() {
                         item.manual_credit !== null
                           ? item.manual_credit
                           : item.auto_credit
+                      const isEdited = item.manual_amount !== null
+                      const isEditing = edit.lineId === item.id
+                      const canEdit = !isTB && !item.is_section_header && statementData.status !== "finalized"
 
                       return (
                         <TableRow
@@ -540,8 +639,11 @@ function StatementsContent() {
                           className={
                             item.is_section_header
                               ? "font-semibold bg-muted/30"
+                              : isEdited
+                              ? "bg-yellow-500/5"
                               : ""
                           }
+                          title={item.note || undefined}
                         >
                           <TableCell
                             className={
@@ -556,6 +658,9 @@ function StatementsContent() {
                                 {item.account_code}
                               </span>
                             )}
+                            {isEdited && !isEditing && (
+                              <Pencil className="inline h-3 w-3 ml-2 text-yellow-500" />
+                            )}
                           </TableCell>
                           {isTB ? (
                             <>
@@ -566,6 +671,26 @@ function StatementsContent() {
                                 {effectiveCredit !== 0 ? formatMoney(effectiveCredit) : ""}
                               </TableCell>
                             </>
+                          ) : isEditing ? (
+                            <TableCell className="text-right">
+                              <input
+                                type="text"
+                                value={edit.amount}
+                                onChange={(e) => setEdit({ ...edit, amount: e.target.value })}
+                                placeholder={String(item.auto_amount)}
+                                className="w-32 px-2 py-1 text-right font-mono bg-background border border-input rounded text-sm"
+                                autoFocus
+                                disabled={savingLine}
+                              />
+                              <input
+                                type="text"
+                                value={edit.note}
+                                onChange={(e) => setEdit({ ...edit, note: e.target.value })}
+                                placeholder="수정 사유 (선택)"
+                                className="w-full mt-1 px-2 py-1 text-xs bg-background border border-input rounded"
+                                disabled={savingLine}
+                              />
+                            </TableCell>
                           ) : (
                             <TableCell
                               className={`text-right font-mono tabular-nums ${
@@ -575,6 +700,52 @@ function StatementsContent() {
                               {formatMoney(effectiveAmount)}
                             </TableCell>
                           )}
+                          <TableCell className="print:hidden text-right">
+                            {canEdit && !isEditing && (
+                              <div className="flex gap-1 justify-end">
+                                <button
+                                  onClick={() => setEdit({
+                                    lineId: item.id,
+                                    amount: String(item.manual_amount ?? item.auto_amount),
+                                    note: item.note || "",
+                                  })}
+                                  className="text-muted-foreground hover:text-foreground p-1"
+                                  title="수정"
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                                {isEdited && (
+                                  <button
+                                    onClick={() => handleResetLine(item.id)}
+                                    className="text-muted-foreground hover:text-yellow-500 p-1"
+                                    title="원래 값으로 되돌리기"
+                                  >
+                                    <Undo2 className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                            {isEditing && (
+                              <div className="flex gap-1 justify-end">
+                                <button
+                                  onClick={() => handleSaveLine(item.id)}
+                                  disabled={savingLine}
+                                  className="text-emerald-500 hover:text-emerald-400 p-1 disabled:opacity-50"
+                                  title="저장"
+                                >
+                                  <Check className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => setEdit({ lineId: null, amount: "", note: "" })}
+                                  disabled={savingLine}
+                                  className="text-muted-foreground hover:text-foreground p-1 disabled:opacity-50"
+                                  title="취소"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            )}
+                          </TableCell>
                         </TableRow>
                       )
                     })
