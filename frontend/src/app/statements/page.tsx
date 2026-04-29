@@ -827,55 +827,68 @@ function StatementsContent() {
                                 : "whitespace-pre"
                             }
                           >
-                            {item.account_code ? (() => {
-                              const info = accountInfo[item.account_code]
-                              const sideKR = info?.normal_side === "debit" ? "차변" : info?.normal_side === "credit" ? "대변" : ""
+                            {item.account_code && accountInfo[item.account_code] ? (() => {
+                              const info = accountInfo[item.account_code!]
+                              // label 의 leading whitespace 와 실제 계정명 분리 (whitespace 보존)
+                              const match = item.label.match(/^(\s*)(.*)$/)
+                              const leadingWS = match?.[1] || ""
+                              const rawName = match?.[2] || item.label
                               return (
-                                <TooltipProvider delayDuration={200}>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <a
-                                        href={`/accounts/ledger?entity=${entityId}&code=${encodeURIComponent(item.account_code)}`}
-                                        className="hover:text-primary hover:underline cursor-pointer decoration-dotted underline-offset-4"
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        {item.label}
-                                        <span className="ml-2 text-xs text-muted-foreground font-mono">
-                                          {item.account_code}
+                                <>
+                                  {leadingWS}
+                                  <TooltipProvider delayDuration={200}>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <span className="cursor-help border-b border-dotted border-muted-foreground/40 hover:border-primary hover:text-primary">
+                                          {rawName}
                                         </span>
-                                      </a>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="top" className="max-w-sm">
-                                      <div className="space-y-1.5 text-xs">
-                                        <div className="font-semibold text-sm">
-                                          {item.account_code} {info?.name || ""}
-                                        </div>
-                                        {info?.description ? (
-                                          <div className="text-foreground leading-relaxed">
-                                            {info.description}
+                                      </TooltipTrigger>
+                                      <TooltipContent side="top" className="max-w-sm">
+                                        <div className="space-y-1.5 text-xs">
+                                          <div className="font-semibold text-sm">
+                                            {item.account_code} {info?.name || ""}
                                           </div>
-                                        ) : (
-                                          <div className="text-muted-foreground italic">
-                                            (설명 미등록 — 추후 보완 예정)
-                                          </div>
-                                        )}
-                                        {info && (
-                                          <div className="pt-1 border-t border-border/50 space-y-0.5">
-                                            <div className="text-muted-foreground">
-                                              분류: {info.category}{info.subcategory ? ` / ${info.subcategory}` : ""}
+                                          {info?.description ? (
+                                            <div className="text-foreground leading-relaxed">
+                                              {info.description}
                                             </div>
+                                          ) : (
+                                            <div className="text-muted-foreground italic">
+                                              (설명 미등록 — 추후 보완 예정)
+                                            </div>
+                                          )}
+                                          {info && (
+                                            <div className="pt-1 border-t border-border/50">
+                                              <div className="text-muted-foreground">
+                                                분류: {info.category}{info.subcategory ? ` / ${info.subcategory}` : ""}
+                                              </div>
+                                            </div>
+                                          )}
+                                          <div className="text-primary italic">
+                                            → 코드 클릭하면 계정별 원장 표시
                                           </div>
-                                        )}
-                                        <div className="text-primary italic">
-                                          → 클릭하면 계정별 원장 표시
                                         </div>
-                                      </div>
-                                    </TooltipContent>
-                                  </Tooltip>
-                                </TooltipProvider>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                  <a
+                                    href={`/accounts/ledger?entity=${entityId}&code=${encodeURIComponent(item.account_code)}`}
+                                    className="ml-2 text-xs text-muted-foreground font-mono hover:text-primary hover:underline"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    {item.account_code}
+                                  </a>
+                                </>
                               )
                             })() : (
-                              item.label
+                              <>
+                                {item.label}
+                                {item.account_code && (
+                                  <span className="ml-2 text-xs text-muted-foreground font-mono">
+                                    {item.account_code}
+                                  </span>
+                                )}
+                              </>
                             )}
                             {isEdited && !isEditing && (
                               <Pencil className="inline h-3 w-3 ml-2 text-yellow-500" />
