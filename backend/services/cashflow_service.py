@@ -379,7 +379,7 @@ def get_monthly_summary_data(
     """
     cur = conn.cursor()
 
-    # 데이터가 있는 월 목록 조회
+    # 데이터가 있는 월 목록 조회 (date 직접 비교 → idx_tx_entity_date 활용)
     cur.execute(
         """
         SELECT DISTINCT to_char(date_trunc('month', date), 'YYYY-MM') AS month
@@ -402,11 +402,12 @@ def get_monthly_summary_data(
     target_months = available_months[-months:]
     first_month = target_months[0]  # "YYYY-MM"
     first_year, first_mon = int(first_month[:4]), int(first_month[5:7])
+    first_date = f"{first_year:04d}-{first_mon:02d}-01"
 
     # Opening balance for the first month
     opening = get_opening_balance(conn, entity_id, first_year, first_mon)
 
-    # Monthly aggregation
+    # Monthly aggregation — date >= first_date 로 변경 (sargable, 인덱스 사용)
     cur.execute(
         """
         SELECT
@@ -418,11 +419,11 @@ def get_monthly_summary_data(
           AND source_type IN ('woori_bank', 'codef_woori_bank', 'codef_ibk_bank', 'mercury_api', 'manual')
           AND is_duplicate = false
           AND (is_cancel IS NOT TRUE)
-          AND to_char(date_trunc('month', date), 'YYYY-MM') >= %s
+          AND date >= %s::date
         GROUP BY date_trunc('month', date)
         ORDER BY month
         """,
-        [entity_id, first_month],
+        [entity_id, first_date],
     )
 
     result_months = []

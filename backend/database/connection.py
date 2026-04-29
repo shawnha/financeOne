@@ -14,12 +14,21 @@ logger = logging.getLogger(__name__)
 
 _pool: pool.ThreadedConnectionPool | None = None
 
+# Vercel serverless: 한 lambda 인스턴스가 동시에 1개 요청만 처리.
+# minconn=0 으로 init 시 connection 안 만들고, 첫 요청 때 lazy 생성 → cold start 단축.
+_IS_SERVERLESS = bool(os.getenv("VERCEL"))
+_MIN_CONN = 0 if _IS_SERVERLESS else 2
+_MAX_CONN = 2 if _IS_SERVERLESS else 10
+
 
 async def init_pool():
     global _pool
     db_url = os.environ["DATABASE_URL"]
-    _pool = pool.ThreadedConnectionPool(minconn=2, maxconn=10, dsn=db_url)
-    logger.info("Database connection pool initialized (Supabase)")
+    _pool = pool.ThreadedConnectionPool(minconn=_MIN_CONN, maxconn=_MAX_CONN, dsn=db_url)
+    logger.info(
+        "Database connection pool initialized (min=%d, max=%d, serverless=%s)",
+        _MIN_CONN, _MAX_CONN, _IS_SERVERLESS,
+    )
 
 
 async def close_pool():
