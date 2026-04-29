@@ -305,7 +305,7 @@ function StatementsContent() {
   const [periodValue, setPeriodValue] = useState<string>("1")
   const [edit, setEdit] = useState<EditState>({ lineId: null, amount: "", note: "" })
   const [savingLine, setSavingLine] = useState(false)
-  const [accountInfo, setAccountInfo] = useState<Record<string, { name: string; category: string; subcategory: string | null; normal_side: string }>>({})
+  const [accountInfo, setAccountInfo] = useState<Record<string, { name: string; category: string; subcategory: string | null; normal_side: string; description: string | null }>>({})
 
   const isConsolidated = entityId === "consolidated"
   const currentEntity = entities.find((e) => e.id === Number(entityId))
@@ -324,10 +324,16 @@ function StatementsContent() {
 
   // standard accounts 캐시 (계정 코드 hover tooltip 용)
   useEffect(() => {
-    fetchAPI<{ items: Array<{ code: string; name: string; category: string; subcategory: string | null; normal_side: string }> }>("/accounts/standard?per_page=500")
-      .then((r) => {
-        const map: Record<string, { name: string; category: string; subcategory: string | null; normal_side: string }> = {}
-        for (const a of r.items) map[a.code] = { name: a.name, category: a.category, subcategory: a.subcategory, normal_side: a.normal_side }
+    fetchAPI<Array<{ code: string; name: string; category: string; subcategory: string | null; normal_side: string; description: string | null }>>("/accounts/standard")
+      .then((rows) => {
+        const map: Record<string, { name: string; category: string; subcategory: string | null; normal_side: string; description: string | null }> = {}
+        for (const a of rows) map[a.code] = {
+          name: a.name,
+          category: a.category,
+          subcategory: a.subcategory,
+          normal_side: a.normal_side,
+          description: a.description,
+        }
         setAccountInfo(map)
       })
       .catch(() => setAccountInfo({}))
@@ -838,21 +844,26 @@ function StatementsContent() {
                                       </a>
                                     </TooltipTrigger>
                                     <TooltipContent side="top" className="max-w-sm">
-                                      <div className="space-y-1 text-xs">
-                                        <div className="font-semibold">
+                                      <div className="space-y-1.5 text-xs">
+                                        <div className="font-semibold text-sm">
                                           {item.account_code} {info?.name || ""}
                                         </div>
+                                        {info?.description && (
+                                          <div className="text-foreground leading-relaxed">
+                                            {info.description}
+                                          </div>
+                                        )}
                                         {info && (
-                                          <>
+                                          <div className="pt-1 border-t border-border/50 space-y-0.5">
                                             <div className="text-muted-foreground">
                                               분류: {info.category}{info.subcategory ? ` / ${info.subcategory}` : ""}
                                             </div>
                                             <div className="text-muted-foreground">
-                                              정상잔액: {sideKR} (잔액 증가 시 {sideKR} 기재)
+                                              정상잔액: {sideKR}
                                             </div>
-                                          </>
+                                          </div>
                                         )}
-                                        <div className="text-primary mt-2 italic">
+                                        <div className="text-primary italic">
                                           → 클릭하면 계정별 원장 표시
                                         </div>
                                       </div>

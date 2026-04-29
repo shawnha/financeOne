@@ -101,8 +101,8 @@ function LedgerContent() {
   // Load entities + standard accounts
   useEffect(() => {
     fetchAPI<Entity[]>("/entities").then(setEntities).catch(() => {})
-    fetchAPI<{ items: StandardAccount[] }>("/accounts/standard?per_page=500")
-      .then((r) => setAccounts(r.items))
+    fetchAPI<StandardAccount[]>("/accounts/standard")
+      .then((rows) => setAccounts(Array.isArray(rows) ? rows : []))
       .catch(() => setAccounts([]))
   }, [])
 

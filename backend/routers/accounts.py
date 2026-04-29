@@ -245,7 +245,7 @@ def list_standard_accounts(
         cur.execute(
             """
             SELECT sa.id, sa.code, sa.name, sa.category, sa.subcategory,
-                   sa.normal_side, sa.sort_order,
+                   sa.normal_side, sa.sort_order, sa.description,
                    ia.id AS mapped_internal_id,
                    ia.name AS mapped_internal_name,
                    ia.code AS mapped_internal_code
@@ -261,7 +261,7 @@ def list_standard_accounts(
         )
     else:
         cur.execute(
-            "SELECT id, code, name, category, subcategory, normal_side, sort_order "
+            "SELECT id, code, name, category, subcategory, normal_side, sort_order, description "
             "FROM standard_accounts WHERE is_active = true ORDER BY sort_order, code"
         )
     rows = fetch_all(cur)
