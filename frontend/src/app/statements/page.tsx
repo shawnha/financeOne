@@ -829,48 +829,40 @@ function StatementsContent() {
                           >
                             {item.account_code && accountInfo[item.account_code] ? (() => {
                               const info = accountInfo[item.account_code!]
-                              // label 의 leading whitespace 와 실제 계정명 분리 (whitespace 보존)
                               const match = item.label.match(/^(\s*)(.*)$/)
                               const leadingWS = match?.[1] || ""
                               const rawName = match?.[2] || item.label
                               return (
                                 <>
                                   {leadingWS}
-                                  <TooltipProvider delayDuration={200}>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <span className="cursor-help border-b border-dotted border-muted-foreground/40 hover:border-primary hover:text-primary">
-                                          {rawName}
+                                  <span className="group relative inline-block">
+                                    <span className="cursor-help border-b border-dotted border-muted-foreground/50 group-hover:border-primary group-hover:text-primary">
+                                      {rawName}
+                                    </span>
+                                    <span
+                                      role="tooltip"
+                                      className="invisible group-hover:visible absolute left-0 bottom-full mb-2 z-50 w-80 p-3 rounded-md border border-border bg-popover text-popover-foreground shadow-lg text-left whitespace-normal"
+                                    >
+                                      <span className="block font-semibold text-sm mb-1">
+                                        {item.account_code} {info?.name || ""}
+                                      </span>
+                                      {info?.description ? (
+                                        <span className="block text-xs text-foreground leading-relaxed">
+                                          {info.description}
                                         </span>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="top" className="max-w-sm">
-                                        <div className="space-y-1.5 text-xs">
-                                          <div className="font-semibold text-sm">
-                                            {item.account_code} {info?.name || ""}
-                                          </div>
-                                          {info?.description ? (
-                                            <div className="text-foreground leading-relaxed">
-                                              {info.description}
-                                            </div>
-                                          ) : (
-                                            <div className="text-muted-foreground italic">
-                                              (설명 미등록 — 추후 보완 예정)
-                                            </div>
-                                          )}
-                                          {info && (
-                                            <div className="pt-1 border-t border-border/50">
-                                              <div className="text-muted-foreground">
-                                                분류: {info.category}{info.subcategory ? ` / ${info.subcategory}` : ""}
-                                              </div>
-                                            </div>
-                                          )}
-                                          <div className="text-primary italic">
-                                            → 코드 클릭하면 계정별 원장 표시
-                                          </div>
-                                        </div>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
+                                      ) : (
+                                        <span className="block text-xs text-muted-foreground italic">
+                                          (설명 미등록 — 추후 보완 예정)
+                                        </span>
+                                      )}
+                                      <span className="block text-xs text-muted-foreground pt-2 mt-2 border-t border-border/50">
+                                        분류: {info.category}{info.subcategory ? ` / ${info.subcategory}` : ""}
+                                      </span>
+                                      <span className="block text-xs text-primary italic mt-1">
+                                        → 코드 클릭하면 계정별 원장 표시
+                                      </span>
+                                    </span>
+                                  </span>
                                   <a
                                     href={`/accounts/ledger?entity=${entityId}&code=${encodeURIComponent(item.account_code)}`}
                                     className="ml-2 text-xs text-muted-foreground font-mono hover:text-primary hover:underline"
