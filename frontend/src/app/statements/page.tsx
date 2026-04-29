@@ -306,7 +306,7 @@ function StatementsContent() {
   const [edit, setEdit] = useState<EditState>({ lineId: null, amount: "", note: "" })
   const [savingLine, setSavingLine] = useState(false)
   const [accountInfo, setAccountInfo] = useState<Record<string, { name: string; category: string; subcategory: string | null; normal_side: string; description: string | null }>>({})
-  const [hoverPopup, setHoverPopup] = useState<{ x: number; y: number; code: string } | null>(null)
+  const [hoverPopup, setHoverPopup] = useState<{ x: number; y: number; code: string; placement: "top" | "bottom" } | null>(null)
 
   const isConsolidated = entityId === "consolidated"
   const currentEntity = entities.find((e) => e.id === Number(entityId))
@@ -838,7 +838,10 @@ function StatementsContent() {
                                   <span
                                     onMouseEnter={(e) => {
                                       const r = (e.target as HTMLElement).getBoundingClientRect()
-                                      setHoverPopup({ x: r.left, y: r.bottom + 4, code: item.account_code! })
+                                      // 위쪽 우선 — 위쪽 공간 부족 (200px 이하) 이면 아래쪽 fallback
+                                      const placement: "top" | "bottom" = r.top > 200 ? "top" : "bottom"
+                                      const y = placement === "top" ? r.top - 4 : r.bottom + 4
+                                      setHoverPopup({ x: r.left, y, code: item.account_code!, placement })
                                     }}
                                     onMouseLeave={() => setHoverPopup(null)}
                                     className="cursor-help"
@@ -973,7 +976,9 @@ function StatementsContent() {
             style={{
               position: "fixed",
               left: hoverPopup.x,
-              top: hoverPopup.y,
+              ...(hoverPopup.placement === "top"
+                ? { bottom: window.innerHeight - hoverPopup.y }
+                : { top: hoverPopup.y }),
               zIndex: 100,
               pointerEvents: "none",
             }}
