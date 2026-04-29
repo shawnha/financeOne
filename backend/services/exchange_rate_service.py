@@ -161,7 +161,10 @@ def get_historical_rate(
             [from_currency, to_currency, event_date],
         )
         row = cur.fetchone()
-        if not row:
+        if row:
+            # 정방향 미래 매칭 — inverse fallback 흔적 reset
+            inverse = False
+        else:
             cur.execute(
                 """
                 SELECT rate, date FROM exchange_rates
