@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useCallback, useEffect, Suspense } from "react"
+import { useState, useCallback, useEffect, Suspense, useRef } from "react"
+import { exportElementToPdf } from "@/lib/export-pdf"
 import { useSearchParams } from "next/navigation"
 import { fetchAPI } from "@/lib/api"
 import { formatKRW, formatUSD } from "@/lib/format"
@@ -305,6 +306,8 @@ function StatementsContent() {
   const [periodType, setPeriodType] = useState<PeriodType>("annual")
   const [periodValue, setPeriodValue] = useState<string>("1")
   const [consolidatedCurrency, setConsolidatedCurrency] = useState<"USD" | "KRW">("USD")
+  const [downloadingPdf, setDownloadingPdf] = useState(false)
+  const printableRef = useRef<HTMLDivElement>(null)
   const [edit, setEdit] = useState<EditState>({ lineId: null, amount: "", note: "" })
   const [savingLine, setSavingLine] = useState(false)
   const [accountInfo, setAccountInfo] = useState<Record<string, { name: string; category: string; subcategory: string | null; normal_side: string; description: string | null }>>({})
@@ -640,13 +643,35 @@ function StatementsContent() {
                 Excel (.xlsx)
               </DropdownMenuItem>
               <DropdownMenuItem
+                onClick={async () => {
+                  if (!statementData || !printableRef.current) {
+                    toast.error("재무제표를 먼저 로드해주세요")
+                    return
+                  }
+                  setDownloadingPdf(true)
+                  try {
+                    const filename = `statement_${statementData.id}_${statementData.fiscal_year}_${statementData.start_month}-${statementData.end_month}.pdf`
+                    await exportElementToPdf(printableRef.current, filename)
+                    toast.success("PDF 다운로드 완료")
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : "PDF 생성 실패")
+                  } finally {
+                    setDownloadingPdf(false)
+                  }
+                }}
+                disabled={downloadingPdf}
+              >
+                <Printer className="h-4 w-4 mr-2" />
+                {downloadingPdf ? "PDF 생성 중..." : "PDF (.pdf)"}
+              </DropdownMenuItem>
+              <DropdownMenuItem
                 onClick={() => {
                   toast.message("인쇄 다이얼로그에서 'PDF로 저장' 을 선택하세요")
                   setTimeout(() => window.print(), 200)
                 }}
               >
                 <Printer className="h-4 w-4 mr-2" />
-                PDF (인쇄 → PDF 저장)
+                인쇄 (브라우저)
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -736,10 +761,10 @@ function StatementsContent() {
           : (displayCurrency === "USD" ? STATEMENT_TYPES_EN : STATEMENT_TYPES_KR)
         const activeTabSafe = tabs.some((t) => t.key === activeTab) ? activeTab : tabs[0].key
         return (
-        <Card>
+        <Card ref={printableRef}>
           <CardHeader className="pb-3">
             {/* Tabs */}
-            <div className="flex flex-wrap gap-1 border-b border-border -mx-6 px-6 pb-3">
+            <div className="flex flex-wrap gap-1 border-b border-border -mx-6 px-6 pb-3 print:hidden">
               {tabs.map((st) => (
                 <button
                   key={st.key}
