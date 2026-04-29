@@ -25,13 +25,15 @@ BS_GROUPS = {
     ],
 }
 
-# 공시 소그룹 라벨 (sub_category 표시용)
+# 공시 소그룹 라벨 (sub_category 표시용) — K-GAAP 확정 결산 양식
+# (1) 당좌자산 / (2) 재고자산 식 괄호 번호는 macro_key 단위로 부여 (자산: 1=당좌, 2=재고)
 SUB_LABEL = {
     "당좌자산": "당좌자산",
     "재고자산": "재고자산",
     "유동자산": "기타유동자산",
     "투자자산": "투자자산",
     "유형자산": "유형자산",
+    "무형자산": "무형자산",
     "기타비유동": "기타비유동자산",
     "기타비유동자산": "기타비유동자산",
     "비유동자산": "기타비유동자산",
@@ -39,7 +41,30 @@ SUB_LABEL = {
     "비유동부채": "비유동부채",
     "자본금": "자본금",
     "자본잉여금": "자본잉여금",
-    "이익잉여금": "이익잉여금",
+    "자본조정": "자본조정",
+    "기타포괄손익누계액": "기타포괄손익누계액",
+    "이익잉여금": "결손금",  # K-GAAP 결손 회사는 "결손금" 으로 표시
+}
+
+# macro_key 별 sub 그룹의 괄호 번호 prefix (PDF 양식과 일치)
+SUB_NUMBER_PREFIX = {
+    "current_assets": {"당좌자산": "(1)", "재고자산": "(2)", "유동자산": "(3)"},
+    "noncurrent_assets": {"투자자산": "(1)", "유형자산": "(2)", "무형자산": "(3)",
+                           "기타비유동": "(4)", "기타비유동자산": "(4)", "비유동자산": "(4)"},
+    # 부채/자본 sub는 prefix 안 붙임 (PDF 도 동일)
+}
+
+# macro_key 별 로마자 prefix (Ⅰ. 유동자산, Ⅱ. 비유동자산 등 — 동일 grand-section 안에서 순서대로)
+MACRO_ROMAN = {
+    "current_assets": "Ⅰ.",
+    "noncurrent_assets": "Ⅱ.",
+    "current_liab": "Ⅰ.",
+    "noncurrent_liab": "Ⅱ.",
+    "equity_capital": "Ⅰ.",
+    "equity_surplus": "Ⅱ.",
+    "equity_adjust": "Ⅲ.",
+    "equity_aoci": "Ⅳ.",
+    "equity_retained": "Ⅴ.",
 }
 
 
@@ -54,13 +79,24 @@ def _emit_group(
     order: int,
     net_income_adj: dict | None = None,
 ) -> tuple[Decimal, int]:
-    """macro 그룹 하나를 출력: 헤더 → 각 sub 그룹(헤더 + 계정들 + 소계) → macro 소계.
+    """K-GAAP PDF 확정 결산 양식 출력:
+        Ⅰ. 유동자산                              505,508,004    (macro 헤더 + 합계)
+          (1) 당좌자산                           469,811,609    (sub 헤더 + 소계, prefix)
+            현금                                          0    (item, 인덴트 6 space)
+            보통예금                            161,065,312
+            ...
+          (2) 재고자산                            35,696,395
+            상품                                 35,696,395
 
-    net_income_adj: {account_code: Decimal} — 특정 계정에 당기순이익 가산용.
-    계정이 전혀 없으면 매크로 헤더도 생략 (noise 방지).
+    별도 "소계" 줄 없음 (sub 헤더에 sub_total 직접 표시).
+    별도 "합계" 줄 없음 (macro 헤더에 macro_total 직접 표시).
+    grand_total 만 별도 줄 (caller 가 처리).
+
+    net_income_adj: {account_code: Decimal} — 특정 계정에 당기순이익 가산.
+    계정이 전혀 없으면 매크로 헤더 자체 생략 (noise 방지).
     """
-    # 해당 macro에 속한 계정 모음 (sub별 그룹핑 유지)
-    grouped: list[tuple[str, list]] = []
+    # 해당 macro에 속한 계정 모음 (sub별 그룹핑 유지) — 먼저 sub_total 계산
+    grouped: list[tuple[str, list, Decimal]] = []
     seen: set[str] = set()
     for sub in sub_list:
         if sub in seen:
@@ -70,22 +106,51 @@ def _emit_group(
             b for b in balances
             if b["category"] == category and (b.get("subcategory") or "") == sub
         ]
+        sub_total = Decimal("0")
+        for b in sub_accounts:
+            bal = Decimal(str(b["balance"]))
+            if net_income_adj and b["code"] in net_income_adj:
+                bal += net_income_adj[b["code"]]
+            sub_total += bal
         if sub_accounts:
-            grouped.append((sub, sub_accounts))
+            grouped.append((sub, sub_accounts, sub_total))
 
-    has_accounts = any(accts for _, accts in grouped)
+    has_accounts = any(accts for _, accts, _ in grouped)
     if not has_accounts:
         return Decimal("0"), order
 
-    items.append(_section_header(st, f"{macro_key}_header", f"  {macro_label}", order))
-    order += 10
-    macro_total = Decimal("0")
+    macro_total = sum((st_ for _, _, st_ in grouped), Decimal("0"))
 
-    for sub, sub_accounts in grouped:
+    # ── macro 헤더 — "Ⅰ. 유동자산" + 총액 표시
+    roman = MACRO_ROMAN.get(macro_key, "")
+    macro_label_full = f"  {roman} {macro_label}".rstrip() if roman else f"  {macro_label}"
+    items.append({
+        "statement_type": st,
+        "line_key": f"{macro_key}_header",
+        "label": macro_label_full,
+        "sort_order": order,
+        "auto_amount": float(macro_total),
+        "auto_debit": 0, "auto_credit": 0,
+        "is_section_header": True,
+    })
+    order += 10
+
+    sub_prefix_map = SUB_NUMBER_PREFIX.get(macro_key, {})
+
+    for sub, sub_accounts, sub_total in grouped:
         sub_ko = SUB_LABEL.get(sub, sub)
-        items.append(_section_header(st, f"{macro_key}_{sub}_header", f"    {sub_ko}", order))
+        prefix = sub_prefix_map.get(sub, "")
+        sub_label_full = f"    {prefix} {sub_ko}".rstrip() if prefix else f"    {sub_ko}"
+        items.append({
+            "statement_type": st,
+            "line_key": f"{macro_key}_{sub}_header",
+            "label": sub_label_full,
+            "sort_order": order,
+            "auto_amount": float(sub_total),
+            "auto_debit": 0, "auto_credit": 0,
+            "is_section_header": True,
+        })
         order += 10
-        sub_total = Decimal("0")
         for b in sub_accounts:
             bal = Decimal(str(b["balance"]))
             label_suffix = ""
@@ -102,28 +167,8 @@ def _emit_group(
                 "auto_debit": float(b["debit_total"]),
                 "auto_credit": float(b["credit_total"]),
             })
-            sub_total += bal
             order += 10
-        items.append({
-            "statement_type": st,
-            "line_key": f"{macro_key}_{sub}_subtotal",
-            "label": f"    {sub_ko} 소계",
-            "sort_order": order,
-            "auto_amount": float(sub_total),
-            "auto_debit": 0, "auto_credit": 0,
-        })
-        order += 10
-        macro_total += sub_total
 
-    items.append({
-        "statement_type": st,
-        "line_key": f"{macro_key}_total",
-        "label": f"  {macro_label} 합계",
-        "sort_order": order,
-        "auto_amount": float(macro_total),
-        "auto_debit": 0, "auto_credit": 0,
-    })
-    order += 10
     return macro_total, order
 
 
@@ -175,7 +220,7 @@ def generate_balance_sheet(
     total_assets = total_current_assets + total_noncurrent_assets
     items.append({
         "statement_type": st, "line_key": "total_assets",
-        "label": "자산 총계", "sort_order": order,
+        "label": "자산총계", "sort_order": order,
         "auto_amount": float(total_assets), "auto_debit": 0, "auto_credit": 0,
         "is_section_header": True,
     })
@@ -197,7 +242,7 @@ def generate_balance_sheet(
     total_liabilities = total_current_liab + total_noncurrent_liab
     items.append({
         "statement_type": st, "line_key": "total_liabilities",
-        "label": "부채 총계", "sort_order": order,
+        "label": "부채총계", "sort_order": order,
         "auto_amount": float(total_liabilities), "auto_debit": 0, "auto_credit": 0,
         "is_section_header": True,
     })
@@ -238,7 +283,7 @@ def generate_balance_sheet(
 
     items.append({
         "statement_type": st, "line_key": "total_equity",
-        "label": "자본 총계", "sort_order": order,
+        "label": "자본총계", "sort_order": order,
         "auto_amount": float(total_equity), "auto_debit": 0, "auto_credit": 0,
         "is_section_header": True,
     })
