@@ -318,32 +318,32 @@ def generate_consolidated_statements(
             [stmt_id, elim.get("description", ""), float(elim_amount), float(elim_amount_usd), elim["entity_a_id"]],
         )
 
-    # ── net_income 자동 합산 → retained_earnings ──
-    # Revenue (수익) - Expense (비용) = net_income
-    # 이를 Equity 의 retained_earnings 에 가산해야 BS 항등식 성립
-    net_income_total = Decimal("0")
+    # ── PL 항목 → net_income 계산 후 BS 의 retained_earnings 에 합산 ──
+    # 이유: K-GAAP entity 의 잔액에는 BS + PL 모두 포함되어 있어, BS 항등식
+    # (Assets = Liab + Equity) 이 PL 부분 때문에 어긋남.
+    # → PL 카테고리는 line_items 에서 제외하고, 그 net 을 retained_earnings 에 합산.
+    #
+    # 부호 처리: convert_kgaap_to_usgaap 에서 잔액은 normal_side 기반 양수.
+    #   Revenue (credit normal): 수익 → +
+    #   Expense (debit normal): 비용 → +
+    #   net_income = Revenue - Expense
     pl_categories = {"Revenue", "Income", "Expense", "Cost of Goods Sold"}
-    for code, data in list(consolidated_balances.items()):
+    net_income_total = Decimal("0")
+    for code, data in consolidated_balances.items():
         cat = data["category"]
         bal = data["balance"]
         if cat in ("Revenue", "Income"):
-            net_income_total += bal  # 수익 +
+            net_income_total += bal
         elif cat in ("Expense", "Cost of Goods Sold"):
-            net_income_total -= bal  # 비용 -
+            net_income_total -= bal
 
-    # Retained Earnings 코드 — 3200 (Retained Earnings) 우선, 없으면 신규 생성
-    retained_code = "3200"
-    if net_income_total != 0:
-        if retained_code in consolidated_balances:
-            consolidated_balances[retained_code]["balance"] += net_income_total
-        else:
-            consolidated_balances[retained_code] = {
-                "name": "Retained Earnings (Net Income for Period)",
-                "category": "Equity",
-                "balance": net_income_total,
-            }
+    # 단, K-GAAP entity 의 BS 에 이미 결손금이 들어있는지 확인.
+    # standard_account 37800 (미처리결손금) 이 매핑된 us_gaap_code 잔액이 net_income 을
+    # 포함하는지 — 분개 기반으로는 아직 결손금 코드에 net_income 이 자동 가산되지 않음
+    # (generate_balance_sheet 만 net_income_adj 사용, consolidated 는 raw 잔액 사용).
+    # → consolidated 에서는 명시적으로 retained_earnings 에 가산해야 정합.
 
-    # line items 저장 — PL 카테고리는 BS 에 표시 안 함 (retained_earnings 로 합산 완료)
+    # line items 저장 — PL 카테고리는 BS 에 표시 안 함
     st = "consolidated_balance_sheet"
     order = 100
     total_assets = Decimal("0")
@@ -354,15 +354,15 @@ def generate_consolidated_statements(
         cat = data["category"]
         bal = data["balance"]
 
+        if cat in pl_categories:
+            continue  # BS 에 표시 안 함
+
         if cat == "Assets":
             total_assets += bal
         elif cat == "Liabilities":
             total_liabilities += bal
         elif cat == "Equity":
             total_equity += bal
-        elif cat in pl_categories:
-            # PL 항목은 BS 에 표시 안 함 (이미 retained_earnings 로 합산됨)
-            continue
 
         _insert_line_item(cur, stmt_id, {
             "statement_type": st,
@@ -376,6 +376,21 @@ def generate_consolidated_statements(
             "is_section_header": False,
         })
         order += 10
+
+    # net_income 을 별도 line + total_equity 에 가산
+    if net_income_total != 0:
+        _insert_line_item(cur, stmt_id, {
+            "statement_type": st,
+            "account_code": "3200",
+            "line_key": "cons_net_income",
+            "label": f"Net Income for Period (3200)",
+            "sort_order": order,
+            "auto_amount": float(net_income_total),
+            "auto_debit": 0, "auto_credit": 0,
+            "is_section_header": False,
+        })
+        order += 10
+        total_equity += net_income_total
 
     # 합계 행
     for key, label, amount in [
