@@ -14,11 +14,12 @@ logger = logging.getLogger(__name__)
 
 _pool: pool.ThreadedConnectionPool | None = None
 
-# Vercel serverless: 한 lambda 인스턴스가 동시에 1개 요청만 처리.
-# minconn=0 으로 init 시 connection 안 만들고, 첫 요청 때 lazy 생성 → cold start 단축.
+# Vercel serverless 에서도 FastAPI threadpool 이 같은 lambda 안에서 여러 동시 요청
+# 처리 → 한 페이지에서 여러 endpoint 병렬 호출 시 pool 고갈.
+# minconn=0 (lazy, cold start 단축) + maxconn=10 (concurrent 보장).
 _IS_SERVERLESS = bool(os.getenv("VERCEL"))
 _MIN_CONN = 0 if _IS_SERVERLESS else 2
-_MAX_CONN = 2 if _IS_SERVERLESS else 10
+_MAX_CONN = 10
 
 
 async def init_pool():
