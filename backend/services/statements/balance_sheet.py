@@ -14,14 +14,19 @@ from .helpers import _insert_line_item, _section_header
 BS_GROUPS = {
     "자산": [
         ("current_assets", "유동자산", ["당좌자산", "재고자산", "유동자산"]),
-        ("noncurrent_assets", "비유동자산", ["투자자산", "유형자산", "기타비유동", "기타비유동자산", "비유동자산"]),
+        ("noncurrent_assets", "비유동자산", ["투자자산", "유형자산", "무형자산", "기타비유동", "기타비유동자산", "비유동자산"]),
     ],
     "부채": [
         ("current_liab", "유동부채", ["유동부채"]),
         ("noncurrent_liab", "비유동부채", ["비유동부채"]),
     ],
     "자본": [
-        ("equity", "자본", ["자본금", "자본잉여금", "이익잉여금", "기타포괄손익누계액", "기타자본"]),
+        # PDF 양식: Ⅰ. 자본금 / Ⅱ. 자본잉여금 / Ⅲ. 자본조정 / Ⅳ. 기타포괄손익누계액 / Ⅴ. 결손금
+        ("equity_capital", "자본금", ["자본금"]),
+        ("equity_surplus", "자본잉여금", ["자본잉여금"]),
+        ("equity_adjust", "자본조정", ["자본조정"]),
+        ("equity_aoci", "기타포괄손익누계액", ["기타포괄손익누계액"]),
+        ("equity_retained", "결손금", ["이익잉여금", "기타자본"]),  # 결손 회사 표기
     ],
 }
 
@@ -281,12 +286,21 @@ def generate_balance_sheet(
         }]
 
     equity_adj = {ni_target: net_income} if ni_target else {}
-    total_equity, order = _emit_group(
-        items, st, synthetic_balances, "자본",
-        "equity", "자본",
-        BS_GROUPS["자본"][0][2], order,
-        net_income_adj=equity_adj,
-    )
+
+    # ── 자본 grand-section header
+    items.append(_section_header(st, "equity_section", "자본", order))
+    order += 10
+
+    # 5개 macro 모두 호출 (Ⅰ. 자본금 / Ⅱ. 자본잉여금 / ... / Ⅴ. 결손금)
+    total_equity = Decimal("0")
+    for macro_key, macro_label, sub_list in BS_GROUPS["자본"]:
+        sub_total, order = _emit_group(
+            items, st, synthetic_balances, "자본",
+            macro_key, macro_label,
+            sub_list, order,
+            net_income_adj=equity_adj,
+        )
+        total_equity += sub_total
 
     items.append({
         "statement_type": st, "line_key": "total_equity",
