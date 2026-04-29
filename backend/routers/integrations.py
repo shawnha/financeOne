@@ -1028,17 +1028,37 @@ class QBOSeedRequest(BaseModel):
 
 
 def _get_qbo_client():
-    """QBO 클라이언트 생성."""
+    """QBO 클라이언트 생성. backend public URL 자동 감지 (Vercel 환경)."""
     from backend.services.integrations.qbo import QBOClient
     client_id = os.environ.get("QUICKBOOKS_CLIENT_ID", "")
     client_secret = os.environ.get("QUICKBOOKS_CLIENT_SECRET", "")
     if not client_id or not client_secret:
         raise HTTPException(400, "QuickBooks credentials not configured")
-    redirect_uri = os.environ.get(
-        "QUICKBOOKS_REDIRECT_URI",
-        "http://localhost:8000/api/integrations/quickbooks/callback",
-    )
+    # 우선순위: 명시 ENV > Vercel 자동 URL > localhost
+    redirect_uri = os.environ.get("QUICKBOOKS_REDIRECT_URI")
+    if not redirect_uri:
+        backend_url = _backend_public_url()
+        redirect_uri = f"{backend_url}/api/integrations/quickbooks/callback"
     return QBOClient(client_id, client_secret, redirect_uri)
+
+
+def _backend_public_url() -> str:
+    """현재 backend 의 public URL. 우선순위: BACKEND_PUBLIC_URL > Vercel auto > localhost."""
+    explicit = os.environ.get("BACKEND_PUBLIC_URL", "").rstrip("/")
+    if explicit:
+        return explicit
+    vercel_url = os.environ.get("VERCEL_PROJECT_PRODUCTION_URL") or os.environ.get("VERCEL_URL")
+    if vercel_url:
+        return f"https://{vercel_url}"
+    return "http://localhost:8000"
+
+
+def _frontend_public_url() -> str:
+    """Frontend public URL (OAuth callback 후 redirect). 환경변수 fallback."""
+    explicit = os.environ.get("FRONTEND_PUBLIC_URL", "").rstrip("/")
+    if explicit:
+        return explicit
+    return "http://localhost:3000"
 
 
 @router.get("/quickbooks/status")
@@ -1119,17 +1139,17 @@ def quickbooks_callback(
     from backend.services.integrations.qbo import validate_csrf_state, _save_tokens
 
     if not code or not state or not realmId:
-        return RedirectResponse("http://localhost:3000/settings?qbo=error&reason=missing_params")
+        return RedirectResponse(f"{_frontend_public_url()}/settings?qbo=error&reason=missing_params")
 
     # CSRF 검증: state에서 entity_id 추출
     parts = state.split(":", 1)
     if len(parts) != 2:
-        return RedirectResponse("http://localhost:3000/settings?qbo=error&reason=invalid_state")
+        return RedirectResponse(f"{_frontend_public_url()}/settings?qbo=error&reason=invalid_state")
 
     try:
         entity_id = int(parts[0])
     except ValueError:
-        return RedirectResponse("http://localhost:3000/settings?qbo=error&reason=invalid_state")
+        return RedirectResponse(f"{_frontend_public_url()}/settings?qbo=error&reason=invalid_state")
 
     # 저장된 state와 비교
     cur = conn.cursor()
@@ -1141,7 +1161,7 @@ def quickbooks_callback(
     cur.close()
 
     if not stored_row or stored_row[0] != state:
-        return RedirectResponse("http://localhost:3000/settings?qbo=error&reason=csrf_mismatch")
+        return RedirectResponse(f"{_frontend_public_url()}/settings?qbo=error&reason=csrf_mismatch")
 
     # Token exchange
     client = _get_qbo_client()
@@ -1150,11 +1170,11 @@ def quickbooks_callback(
         tokens["realm_id"] = realmId
         _save_tokens(conn, entity_id, tokens)
         conn.commit()
-        return RedirectResponse(f"http://localhost:3000/settings?qbo=connected")
+        return RedirectResponse(f"{_frontend_public_url()}/settings?qbo=connected")
     except Exception as e:
         logger.exception("QBO callback failed")
         conn.rollback()
-        return RedirectResponse(f"http://localhost:3000/settings?qbo=error&reason=token_exchange")
+        return RedirectResponse(f"{_frontend_public_url()}/settings?qbo=error&reason=token_exchange")
     finally:
         client.close()
 
