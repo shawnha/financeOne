@@ -841,6 +841,7 @@ function StatementsContent() {
                                       setHoverPopup({ x: r.left, y: r.bottom + 4, code: item.account_code! })
                                     }}
                                     onMouseLeave={() => setHoverPopup(null)}
+                                    className="cursor-help"
                                   >
                                     {rawName}
                                   </span>
