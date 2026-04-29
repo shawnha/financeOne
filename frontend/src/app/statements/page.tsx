@@ -827,8 +827,7 @@ function StatementsContent() {
                                 : "whitespace-pre"
                             }
                           >
-                            {item.label}
-                            {item.account_code && (() => {
+                            {item.account_code ? (() => {
                               const info = accountInfo[item.account_code]
                               const sideKR = info?.normal_side === "debit" ? "차변" : info?.normal_side === "credit" ? "대변" : ""
                               return (
@@ -837,10 +836,13 @@ function StatementsContent() {
                                     <TooltipTrigger asChild>
                                       <a
                                         href={`/accounts/ledger?entity=${entityId}&code=${encodeURIComponent(item.account_code)}`}
-                                        className="ml-2 text-xs text-muted-foreground font-mono hover:text-primary hover:underline"
+                                        className="hover:text-primary hover:underline cursor-pointer decoration-dotted underline-offset-4"
                                         onClick={(e) => e.stopPropagation()}
                                       >
-                                        {item.account_code}
+                                        {item.label}
+                                        <span className="ml-2 text-xs text-muted-foreground font-mono">
+                                          {item.account_code}
+                                        </span>
                                       </a>
                                     </TooltipTrigger>
                                     <TooltipContent side="top" className="max-w-sm">
@@ -848,9 +850,13 @@ function StatementsContent() {
                                         <div className="font-semibold text-sm">
                                           {item.account_code} {info?.name || ""}
                                         </div>
-                                        {info?.description && (
+                                        {info?.description ? (
                                           <div className="text-foreground leading-relaxed">
                                             {info.description}
+                                          </div>
+                                        ) : (
+                                          <div className="text-muted-foreground italic">
+                                            (설명 미등록 — 추후 보완 예정)
                                           </div>
                                         )}
                                         {info && (
@@ -871,7 +877,9 @@ function StatementsContent() {
                                   </Tooltip>
                                 </TooltipProvider>
                               )
-                            })()}
+                            })() : (
+                              item.label
+                            )}
                             {isEdited && !isEditing && (
                               <Pencil className="inline h-3 w-3 ml-2 text-yellow-500" />
                             )}
