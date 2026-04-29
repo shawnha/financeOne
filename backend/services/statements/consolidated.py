@@ -318,7 +318,32 @@ def generate_consolidated_statements(
             [stmt_id, elim.get("description", ""), float(elim_amount), float(elim_amount_usd), elim["entity_a_id"]],
         )
 
-    # line items 저장
+    # ── net_income 자동 합산 → retained_earnings ──
+    # Revenue (수익) - Expense (비용) = net_income
+    # 이를 Equity 의 retained_earnings 에 가산해야 BS 항등식 성립
+    net_income_total = Decimal("0")
+    pl_categories = {"Revenue", "Income", "Expense", "Cost of Goods Sold"}
+    for code, data in list(consolidated_balances.items()):
+        cat = data["category"]
+        bal = data["balance"]
+        if cat in ("Revenue", "Income"):
+            net_income_total += bal  # 수익 +
+        elif cat in ("Expense", "Cost of Goods Sold"):
+            net_income_total -= bal  # 비용 -
+
+    # Retained Earnings 코드 — 3200 (Retained Earnings) 우선, 없으면 신규 생성
+    retained_code = "3200"
+    if net_income_total != 0:
+        if retained_code in consolidated_balances:
+            consolidated_balances[retained_code]["balance"] += net_income_total
+        else:
+            consolidated_balances[retained_code] = {
+                "name": "Retained Earnings (Net Income for Period)",
+                "category": "Equity",
+                "balance": net_income_total,
+            }
+
+    # line items 저장 — PL 카테고리는 BS 에 표시 안 함 (retained_earnings 로 합산 완료)
     st = "consolidated_balance_sheet"
     order = 100
     total_assets = Decimal("0")
@@ -335,6 +360,9 @@ def generate_consolidated_statements(
             total_liabilities += bal
         elif cat == "Equity":
             total_equity += bal
+        elif cat in pl_categories:
+            # PL 항목은 BS 에 표시 안 함 (이미 retained_earnings 로 합산됨)
+            continue
 
         _insert_line_item(cur, stmt_id, {
             "statement_type": st,
@@ -384,6 +412,7 @@ def generate_consolidated_statements(
             "total_assets": float(total_assets),
             "total_liabilities": float(total_liabilities),
             "total_equity": float(total_equity),
+            "net_income": float(net_income_total),
             "is_balanced": is_balanced,
             "difference": float(total_assets - total_liabilities - total_equity),
         },
