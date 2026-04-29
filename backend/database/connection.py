@@ -40,32 +40,22 @@ async def close_pool():
         logger.info("Database connection pool closed")
 
 
-_SEARCH_PATH_INITIALIZED = "_financeone_search_path_set"
-
-
-def _ensure_search_path(conn: PgConnection) -> None:
-    """SET search_path 를 connection 생성 후 1회만 실행 (재사용 시 skip).
-
-    Supabase Session pooler 는 DSN options 의 search_path 를 무시하므로
-    SQL 로 명시 설정 필요. conn 객체에 marker attribute 를 붙여 중복 실행 방지.
-    """
-    if getattr(conn, _SEARCH_PATH_INITIALIZED, False):
-        return
-    cur = conn.cursor()
-    cur.execute("SET search_path TO financeone, public")
-    cur.close()
-    setattr(conn, _SEARCH_PATH_INITIALIZED, True)
-
-
 def _acquire_healthy_conn(max_attempts: int = 3) -> PgConnection:
-    """Get a connection from pool, ensure search_path set, discard stale conns."""
+    """Get a connection from pool, set search_path, discard stale conns.
+
+    SET search_path TO financeone, public 매 acquire 마다 실행 — Supabase pooler 는
+    DSN options 무시하고, psycopg2 C-extension conn 에 marker attribute 못 붙여서
+    캐싱 불가. icn1 리전이라 RTT ~10ms 라 비용 무시 가능.
+    """
     assert _pool is not None
     last_err: Exception | None = None
     for attempt in range(max_attempts):
         conn = _pool.getconn()
         if not conn.closed:
             try:
-                _ensure_search_path(conn)
+                cur = conn.cursor()
+                cur.execute("SET search_path TO financeone, public")
+                cur.close()
                 return conn
             except psycopg2.Error as e:
                 last_err = e
