@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, Suspense } from "react"
+import { useState, useCallback, useEffect, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import { fetchAPI } from "@/lib/api"
 import { formatKRW, formatUSD } from "@/lib/format"
@@ -59,6 +59,26 @@ interface StatementData {
   status: string
   line_items: LineItem[]
   entity_name: string
+  base_currency?: string
+  is_consolidated?: boolean
+}
+
+interface Entity {
+  id: number
+  code: string
+  name: string
+  type: string
+  currency: string
+}
+
+interface StatementListItem {
+  id: number
+  entity_id: number
+  fiscal_year: number
+  start_month: number
+  end_month: number
+  is_consolidated: boolean
+  entity_name: string
 }
 
 interface GenerateResult {
@@ -101,8 +121,73 @@ function StatementsContent() {
   const [activeTab, setActiveTab] = useState("balance_sheet")
   const [year, setYear] = useState(currentYear.toString())
   const [generating, setGenerating] = useState(false)
+  const [entities, setEntities] = useState<Entity[]>([])
 
   const isConsolidated = entityId === "consolidated"
+  const currentEntity = entities.find((e) => e.id === Number(entityId))
+  const displayCurrency = isConsolidated
+    ? "USD"
+    : (statementData?.base_currency || currentEntity?.currency || "KRW")
+  const formatMoney = (n: number) =>
+    displayCurrency === "USD" ? formatUSD(n) : formatKRW(n)
+
+  // entities 목록 로드 (currency 표시용)
+  useEffect(() => {
+    fetchAPI<Entity[]>("/entities")
+      .then(setEntities)
+      .catch(() => setEntities([]))
+  }, [])
+
+  // entity / year / entities 바뀌면 자동으로 해당 entity 의 가장 최근 statement load
+  useEffect(() => {
+    if (entities.length === 0) return // entities 로드되기 전엔 skip
+    let cancelled = false
+    async function loadLatest() {
+      setLoadState("loading")
+      setError("")
+      try {
+        const params = new URLSearchParams({
+          fiscal_year: year,
+          per_page: "1",
+        })
+        if (!isConsolidated) {
+          params.set("entity_id", entityId)
+        }
+        const list = await fetchAPI<{ items: StatementListItem[] }>(
+          `/statements?${params.toString()}`,
+        )
+        if (cancelled) return
+        // consolidated 면 is_consolidated=true 만, 아니면 entity 일치하는 것
+        const match = list.items.find((s) =>
+          isConsolidated ? s.is_consolidated : !s.is_consolidated && s.entity_id === Number(entityId),
+        ) || list.items[0]
+        if (!match) {
+          setStatementData(null)
+          setValidation(null)
+          setResult(null)
+          setLoadState("empty")
+          return
+        }
+        // HOI (USD) 또는 consolidated 면 영어 라벨, 한국 entity 면 한글
+        const targetEntity = entities.find((e) => e.id === match.entity_id)
+        const lang = (isConsolidated || targetEntity?.currency === "USD") ? "en" : "ko"
+        const data = await fetchAPI<StatementData>(`/statements/${match.id}?lang=${lang}`)
+        if (cancelled) return
+        setStatementData(data)
+        setValidation(null) // generate 결과만 validation 채움
+        setResult(null)
+        setLoadState("success")
+      } catch (err) {
+        if (cancelled) return
+        setError(err instanceof Error ? err.message : "재무제표 로드 실패")
+        setLoadState("error")
+      }
+    }
+    loadLatest()
+    return () => {
+      cancelled = true
+    }
+  }, [entityId, year, isConsolidated, entities])
 
   const handleGenerate = useCallback(async () => {
     setGenerating(true)
@@ -188,14 +273,14 @@ function StatementsContent() {
             <ValidationBadge
               label="재무상태표"
               valid={validation.balance_sheet.is_balanced}
-              detail={validation.balance_sheet.is_balanced ? "균형" : `차이 ${formatKRW(validation.balance_sheet.difference)}`}
+              detail={validation.balance_sheet.is_balanced ? "균형" : `차이 ${formatMoney(validation.balance_sheet.difference)}`}
             />
           )}
           {validation.trial_balance && (
             <ValidationBadge
               label="시산표"
               valid={validation.trial_balance.is_balanced}
-              detail={validation.trial_balance.is_balanced ? "균형" : `차이 ${formatKRW(validation.trial_balance.difference)}`}
+              detail={validation.trial_balance.is_balanced ? "균형" : `차이 ${formatMoney(validation.trial_balance.difference)}`}
             />
           )}
           {validation.cash_flow && (
@@ -345,14 +430,10 @@ function StatementsContent() {
                           {isTB ? (
                             <>
                               <TableCell className="text-right font-mono tabular-nums">
-                                {effectiveDebit !== 0
-                                  ? (isConsolidated ? formatUSD(effectiveDebit) : formatKRW(effectiveDebit))
-                                  : ""}
+                                {effectiveDebit !== 0 ? formatMoney(effectiveDebit) : ""}
                               </TableCell>
                               <TableCell className="text-right font-mono tabular-nums">
-                                {effectiveCredit !== 0
-                                  ? (isConsolidated ? formatUSD(effectiveCredit) : formatKRW(effectiveCredit))
-                                  : ""}
+                                {effectiveCredit !== 0 ? formatMoney(effectiveCredit) : ""}
                               </TableCell>
                             </>
                           ) : (
@@ -361,7 +442,7 @@ function StatementsContent() {
                                 effectiveAmount < 0 ? "text-[hsl(var(--loss))]" : ""
                               }`}
                             >
-                              {isConsolidated ? formatUSD(effectiveAmount) : formatKRW(effectiveAmount)}
+                              {formatMoney(effectiveAmount)}
                             </TableCell>
                           )}
                         </TableRow>

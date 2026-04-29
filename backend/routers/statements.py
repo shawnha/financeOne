@@ -112,7 +112,7 @@ def get_statement(
 
     cur.execute(
         """
-        SELECT fs.*, e.name AS entity_name
+        SELECT fs.*, e.name AS entity_name, e.currency AS entity_currency
         FROM financial_statements fs
         LEFT JOIN entities e ON fs.entity_id = e.id
         WHERE fs.id = %s
@@ -149,6 +149,10 @@ def get_statement(
 
     header["line_items"] = line_items
     header["lang"] = lang
+    # frontend 가 currency 표시할 때 우선순위: base_currency (consolidated) > entity_currency
+    if not header.get("base_currency") or header.get("base_currency") == "KRW":
+        if not header.get("is_consolidated") and header.get("entity_currency"):
+            header["base_currency"] = header["entity_currency"]
     return header
 
 
