@@ -864,9 +864,6 @@ function StatementsContent() {
                                             <div className="text-muted-foreground">
                                               분류: {info.category}{info.subcategory ? ` / ${info.subcategory}` : ""}
                                             </div>
-                                            <div className="text-muted-foreground">
-                                              정상잔액: {sideKR}
-                                            </div>
                                           </div>
                                         )}
                                         <div className="text-primary italic">
