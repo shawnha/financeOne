@@ -21,25 +21,12 @@ _MIN_CONN = 0 if _IS_SERVERLESS else 2
 _MAX_CONN = 2 if _IS_SERVERLESS else 10
 
 
-def _build_dsn() -> str:
-    """DATABASE_URL + search_path 를 connect-time options 로 주입.
-
-    매 request 마다 SET search_path 실행하면 Vercel iad1 ↔ Supabase ap-northeast-2
-    RTT (~150ms) 이 추가됨. options 로 옮기면 connection 생성 시 1회만 실행.
-    """
-    db_url = os.environ["DATABASE_URL"]
-    sep = "&" if "?" in db_url else "?"
-    if "options=" in db_url:
-        return db_url  # 이미 사용자가 options 지정했으면 건드리지 않음
-    return f"{db_url}{sep}options=-csearch_path%3Dfinanceone,public"
-
-
 async def init_pool():
     global _pool
-    dsn = _build_dsn()
-    _pool = pool.ThreadedConnectionPool(minconn=_MIN_CONN, maxconn=_MAX_CONN, dsn=dsn)
+    db_url = os.environ["DATABASE_URL"]
+    _pool = pool.ThreadedConnectionPool(minconn=_MIN_CONN, maxconn=_MAX_CONN, dsn=db_url)
     logger.info(
-        "Database connection pool initialized (min=%d, max=%d, serverless=%s, search_path=options)",
+        "Database connection pool initialized (min=%d, max=%d, serverless=%s)",
         _MIN_CONN, _MAX_CONN, _IS_SERVERLESS,
     )
 
@@ -52,24 +39,40 @@ async def close_pool():
         logger.info("Database connection pool closed")
 
 
-def _acquire_healthy_conn(max_attempts: int = 3) -> PgConnection:
-    """Get a connection from pool. Trust conn.closed (no roundtrip), let real query
-    surface connection errors. search_path 는 DSN options 으로 connect-time 설정.
+_SEARCH_PATH_INITIALIZED = "_financeone_search_path_set"
 
-    Vercel iad1 ↔ Supabase ap-northeast-2 RTT ~170ms — health probe 1회 = 170ms 절약.
-    Stale 은 첫 쿼리에서 InterfaceError 로 잡아서 재시도.
+
+def _ensure_search_path(conn: PgConnection) -> None:
+    """SET search_path 를 connection 생성 후 1회만 실행 (재사용 시 skip).
+
+    Supabase Session pooler 는 DSN options 의 search_path 를 무시하므로
+    SQL 로 명시 설정 필요. conn 객체에 marker attribute 를 붙여 중복 실행 방지.
     """
+    if getattr(conn, _SEARCH_PATH_INITIALIZED, False):
+        return
+    cur = conn.cursor()
+    cur.execute("SET search_path TO financeone, public")
+    cur.close()
+    setattr(conn, _SEARCH_PATH_INITIALIZED, True)
+
+
+def _acquire_healthy_conn(max_attempts: int = 3) -> PgConnection:
+    """Get a connection from pool, ensure search_path set, discard stale conns."""
     assert _pool is not None
     last_err: Exception | None = None
     for attempt in range(max_attempts):
         conn = _pool.getconn()
         if not conn.closed:
-            return conn
-        last_err = RuntimeError("Connection from pool is closed")
+            try:
+                _ensure_search_path(conn)
+                return conn
+            except psycopg2.Error as e:
+                last_err = e
+                logger.warning("Stale DB connection (attempt %d/%d): %s", attempt + 1, max_attempts, e)
         try:
             _pool.putconn(conn, close=True)
         except Exception as put_err:
-            logger.warning("Failed to discard closed conn: %s", put_err)
+            logger.warning("Failed to discard stale conn: %s", put_err)
     raise RuntimeError(f"Could not acquire healthy DB connection after {max_attempts} attempts: {last_err}") from last_err
 
 
