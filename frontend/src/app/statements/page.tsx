@@ -24,6 +24,12 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
   FileText,
   RefreshCw,
   CheckCircle2,
@@ -485,7 +491,7 @@ function StatementsContent() {
   return (
     <div className="space-y-6">
       {/* Controls */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3 print:hidden">
         <Select value={year} onValueChange={setYear}>
           <SelectTrigger className="w-[120px]">
             <SelectValue />
@@ -562,21 +568,17 @@ function StatementsContent() {
         </Button>
 
         {statementData && (
-          <>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => window.print()}
-            >
-              <Printer className="h-4 w-4" />
-              인쇄
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={async () => {
-                if (!statementData) return
-                try {
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Download className="h-4 w-4" />
+                저장
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={() => {
+                  if (!statementData) return
                   const url = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"}/statements/${statementData.id}/export`
                   const a = document.createElement("a")
                   a.href = url
@@ -585,21 +587,28 @@ function StatementsContent() {
                   a.click()
                   document.body.removeChild(a)
                   toast.success("Excel 다운로드 시작")
-                } catch (err) {
-                  toast.error(err instanceof Error ? err.message : "다운로드 실패")
-                }
-              }}
-            >
-              <Download className="h-4 w-4" />
-              Excel 저장
-            </Button>
-          </>
+                }}
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Excel (.xlsx)
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  toast.message("인쇄 다이얼로그에서 'PDF로 저장' 을 선택하세요")
+                  setTimeout(() => window.print(), 200)
+                }}
+              >
+                <Printer className="h-4 w-4 mr-2" />
+                PDF (인쇄 → PDF 저장)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
 
       {/* Validation Summary */}
       {validation && !isConsolidated && (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 print:hidden">
           {validation.balance_sheet && (
             <ValidationBadge
               label="재무상태표"

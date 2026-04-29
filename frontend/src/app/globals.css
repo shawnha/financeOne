@@ -141,3 +141,34 @@
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
   }
 }
+
+/* Print styles — PDF 저장 시 깔끔한 흰 배경 + 사이드바/헤더 hide */
+@media print {
+  body { background: white !important; color: black !important; }
+  body::after { display: none !important; }
+  /* 사이드바 / 상단 nav / entity tabs 숨김 */
+  aside, [data-sidebar], nav { display: none !important; }
+  /* 메인 컨텐츠를 풀 폭으로 */
+  main { width: 100% !important; padding: 0 !important; }
+  /* 카드 음영/배경 제거 */
+  [class*="bg-card"], [class*="bg-muted"], [class*="bg-background"] {
+    background: white !important;
+    color: black !important;
+  }
+  /* 텍스트 색상 강제 검정 */
+  * {
+    color: black !important;
+    border-color: #ddd !important;
+  }
+  /* 표 테두리 명확하게 */
+  table { border-collapse: collapse !important; }
+  th, td { border: 1px solid #ddd !important; padding: 4px 8px !important; }
+  /* 링크 underline 제거 (코드 점프 링크 등) */
+  a { text-decoration: none !important; color: black !important; }
+  /* 필터/액션 버튼 영역 hide */
+  .print\:hidden { display: none !important; }
+  /* page break 처리 */
+  .page-break { page-break-after: always; }
+  /* margin 적정 */
+  @page { margin: 1.5cm; }
+}
