@@ -2,10 +2,21 @@
 
 import os
 import re
+import sys
+import types
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Vercel serverless: build root = /var/task (backend 폴더 내용이 펼쳐짐).
+# 'backend.X' import 가 작동하도록 가짜 namespace package 등록.
+# 로컬 dev 에서는 backend 가 실제 폴더이므로 등록 skip.
+_THIS_DIR = Path(__file__).resolve().parent  # /var/task on Vercel, ./backend locally
+if "backend" not in sys.modules and not (_THIS_DIR.parent / "backend").is_dir():
+    _backend_pkg = types.ModuleType("backend")
+    _backend_pkg.__path__ = [str(_THIS_DIR)]
+    sys.modules["backend"] = _backend_pkg
 
 # VERSION 파일은 프로젝트 루트에 있음. Vercel serverless 에서는 backend/ 가 root 라
 # 파일이 없을 수 있어 fallback 처리.
