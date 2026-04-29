@@ -67,6 +67,7 @@ const sections: { label: string; items: SidebarItem[] }[] = [
     items: [
       { label: "내부 계정", icon: BookOpen, href: "/accounts/internal", enabled: true },
       { label: "표준 계정", icon: BookOpen, href: "/accounts/standard", enabled: true },
+      { label: "계정별 원장", icon: BookOpen, href: "/accounts/ledger", enabled: true },
       { label: "매핑 규칙", icon: Link2, href: "/accounts/mapping-rules", enabled: true },
     ],
   },

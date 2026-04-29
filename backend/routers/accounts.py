@@ -12,6 +12,155 @@ router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 
 
 # ---------------------------------------------------------------------------
+# 계정별 원장 (Ledger)
+# ---------------------------------------------------------------------------
+
+@router.get("/{account_code}/ledger")
+def get_account_ledger(
+    account_code: str,
+    entity_id: int = Query(...),
+    start_date: Optional[str] = Query(None, description="YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="YYYY-MM-DD"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(100, ge=1, le=500),
+    conn: PgConnection = Depends(get_db),
+):
+    """특정 standard_account 의 분개 history (계정별 원장).
+
+    Returns: { account, opening_balance, lines: [...], summary: {debit, credit, ending} }
+    """
+    cur = conn.cursor()
+
+    # 1. account 정보 조회
+    cur.execute(
+        """
+        SELECT id, code, name, category, subcategory, normal_side
+        FROM standard_accounts WHERE code = %s
+        """,
+        [account_code],
+    )
+    acc_row = cur.fetchone()
+    if not acc_row:
+        cur.close()
+        raise HTTPException(404, f"Account {account_code} not found")
+    account = {
+        "id": acc_row[0], "code": acc_row[1], "name": acc_row[2],
+        "category": acc_row[3], "subcategory": acc_row[4], "normal_side": acc_row[5],
+    }
+
+    # 2. 기초 잔액 (start_date 이전까지)
+    opening = 0.0
+    if start_date:
+        cur.execute(
+            """
+            SELECT
+              COALESCE(SUM(jel.debit_amount), 0) - COALESCE(SUM(jel.credit_amount), 0) AS bal
+            FROM journal_entry_lines jel
+            JOIN journal_entries je ON je.id = jel.journal_entry_id
+            WHERE je.entity_id = %s
+              AND jel.standard_account_id = %s
+              AND je.entry_date < %s
+            """,
+            [entity_id, account["id"], start_date],
+        )
+        r = cur.fetchone()
+        opening = float(r[0]) if r else 0.0
+        # 대변 normal account 면 부호 반전
+        if account["normal_side"] == "credit":
+            opening = -opening
+
+    # 3. 기간 내 분개 lines
+    where = ["je.entity_id = %s", "jel.standard_account_id = %s"]
+    params = [entity_id, account["id"]]
+    if start_date:
+        where.append("je.entry_date >= %s")
+        params.append(start_date)
+    if end_date:
+        where.append("je.entry_date <= %s")
+        params.append(end_date)
+
+    # 페이지네이션 — 전체 count
+    cur.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM journal_entry_lines jel
+        JOIN journal_entries je ON je.id = jel.journal_entry_id
+        WHERE {' AND '.join(where)}
+        """,
+        params,
+    )
+    total = cur.fetchone()[0]
+
+    offset = (page - 1) * per_page
+    cur.execute(
+        f"""
+        SELECT
+          je.id AS journal_entry_id, je.entry_date, je.description AS je_description,
+          jel.debit_amount, jel.credit_amount, jel.description AS line_description,
+          t.id AS transaction_id, t.counterparty, t.source_type
+        FROM journal_entry_lines jel
+        JOIN journal_entries je ON je.id = jel.journal_entry_id
+        LEFT JOIN transactions t ON t.id = je.transaction_id
+        WHERE {' AND '.join(where)}
+        ORDER BY je.entry_date, je.id, jel.id
+        LIMIT %s OFFSET %s
+        """,
+        params + [per_page, offset],
+    )
+    rows = cur.fetchall()
+
+    # 4. running balance 계산
+    running = opening
+    lines = []
+    sum_debit = 0.0
+    sum_credit = 0.0
+    for r in rows:
+        debit = float(r[3]) if r[3] else 0.0
+        credit = float(r[4]) if r[4] else 0.0
+        sum_debit += debit
+        sum_credit += credit
+        if account["normal_side"] == "debit":
+            running += debit - credit
+        else:
+            running += credit - debit
+        lines.append({
+            "journal_entry_id": r[0],
+            "entry_date": r[1].isoformat() if r[1] else None,
+            "entry_description": r[2],
+            "debit": debit,
+            "credit": credit,
+            "line_description": r[5],
+            "running_balance": running,
+            "transaction_id": r[6],
+            "counterparty": r[7],
+            "source_type": r[8],
+        })
+
+    cur.close()
+
+    ending = running
+    return {
+        "account": account,
+        "entity_id": entity_id,
+        "start_date": start_date,
+        "end_date": end_date,
+        "opening_balance": opening,
+        "lines": lines,
+        "summary": {
+            "total_debit": sum_debit,
+            "total_credit": sum_credit,
+            "net_change": sum_debit - sum_credit if account["normal_side"] == "debit" else sum_credit - sum_debit,
+            "ending_balance": ending,
+            "line_count": len(lines),
+        },
+        "pagination": {"page": page, "per_page": per_page, "total": total, "pages": (total + per_page - 1) // per_page},
+    }
+
+
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
 # Pydantic request models
 # ---------------------------------------------------------------------------
 

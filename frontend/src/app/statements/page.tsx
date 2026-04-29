@@ -34,6 +34,7 @@ import {
   Check,
   X,
   Undo2,
+  Download,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -561,14 +562,38 @@ function StatementsContent() {
         </Button>
 
         {statementData && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => window.print()}
-          >
-            <Printer className="h-4 w-4" />
-            인쇄
-          </Button>
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.print()}
+            >
+              <Printer className="h-4 w-4" />
+              인쇄
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                if (!statementData) return
+                try {
+                  const url = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"}/statements/${statementData.id}/export`
+                  const a = document.createElement("a")
+                  a.href = url
+                  a.download = `statement_${statementData.id}.xlsx`
+                  document.body.appendChild(a)
+                  a.click()
+                  document.body.removeChild(a)
+                  toast.success("Excel 다운로드 시작")
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : "다운로드 실패")
+                }
+              }}
+            >
+              <Download className="h-4 w-4" />
+              Excel 저장
+            </Button>
+          </>
         )}
       </div>
 
@@ -771,9 +796,14 @@ function StatementsContent() {
                           >
                             {item.label}
                             {item.account_code && (
-                              <span className="ml-2 text-xs text-muted-foreground font-mono">
+                              <a
+                                href={`/accounts/ledger?entity=${entityId}&code=${encodeURIComponent(item.account_code)}`}
+                                className="ml-2 text-xs text-muted-foreground font-mono hover:text-primary hover:underline"
+                                title={`${item.account_code} 계정별 원장 보기`}
+                                onClick={(e) => e.stopPropagation()}
+                              >
                                 {item.account_code}
-                              </span>
+                              </a>
                             )}
                             {isEdited && !isEditing && (
                               <Pencil className="inline h-3 w-3 ml-2 text-yellow-500" />
