@@ -136,21 +136,28 @@ def _emit_group(
     order += 10
 
     sub_prefix_map = SUB_NUMBER_PREFIX.get(macro_key, {})
+    # sub 가 1개이고 macro_label 와 sub_label 가 겹치면 (예: 유동부채/유동부채) sub 헤더 생략
+    skip_sub_header = (
+        len(grouped) == 1 and SUB_LABEL.get(grouped[0][0], grouped[0][0]) == macro_label
+    )
 
     for sub, sub_accounts, sub_total in grouped:
-        sub_ko = SUB_LABEL.get(sub, sub)
-        prefix = sub_prefix_map.get(sub, "")
-        sub_label_full = f"    {prefix} {sub_ko}".rstrip() if prefix else f"    {sub_ko}"
-        items.append({
-            "statement_type": st,
-            "line_key": f"{macro_key}_{sub}_header",
-            "label": sub_label_full,
-            "sort_order": order,
-            "auto_amount": float(sub_total),
-            "auto_debit": 0, "auto_credit": 0,
-            "is_section_header": True,
-        })
-        order += 10
+        if not skip_sub_header:
+            sub_ko = SUB_LABEL.get(sub, sub)
+            prefix = sub_prefix_map.get(sub, "")
+            sub_label_full = f"    {prefix} {sub_ko}".rstrip() if prefix else f"    {sub_ko}"
+            items.append({
+                "statement_type": st,
+                "line_key": f"{macro_key}_{sub}_header",
+                "label": sub_label_full,
+                "sort_order": order,
+                "auto_amount": float(sub_total),
+                "auto_debit": 0, "auto_credit": 0,
+                "is_section_header": True,
+            })
+            order += 10
+        # 인덴트 — sub 헤더가 있으면 6 space, 없으면 4 space
+        item_indent = "      " if not skip_sub_header else "    "
         for b in sub_accounts:
             bal = Decimal(str(b["balance"]))
             label_suffix = ""
@@ -161,7 +168,7 @@ def _emit_group(
                 "statement_type": st,
                 "account_code": b["code"],
                 "line_key": f"{macro_key}_{b['code']}",
-                "label": f"      {b['name']}{label_suffix}",
+                "label": f"{item_indent}{b['name']}{label_suffix}",
                 "sort_order": order,
                 "auto_amount": float(bal),
                 "auto_debit": float(b["debit_total"]),
