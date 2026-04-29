@@ -832,36 +832,17 @@ function StatementsContent() {
                               const match = item.label.match(/^(\s*)(.*)$/)
                               const leadingWS = match?.[1] || ""
                               const rawName = match?.[2] || item.label
+                              const tooltipText = info.description
+                                ? `${info.description}\n\n분류: ${info.category}${info.subcategory ? ` / ${info.subcategory}` : ""}`
+                                : `분류: ${info.category}${info.subcategory ? ` / ${info.subcategory}` : ""}`
                               return (
                                 <>
                                   {leadingWS}
-                                  <span className="group relative inline-block">
-                                    <span className="cursor-help border-b border-dotted border-muted-foreground/50 group-hover:border-primary group-hover:text-primary">
-                                      {rawName}
-                                    </span>
-                                    <span
-                                      role="tooltip"
-                                      className="invisible group-hover:visible absolute left-0 bottom-full mb-2 z-50 w-80 p-3 rounded-md border border-border bg-popover text-popover-foreground shadow-lg text-left whitespace-normal"
-                                    >
-                                      <span className="block font-semibold text-sm mb-1">
-                                        {item.account_code} {info?.name || ""}
-                                      </span>
-                                      {info?.description ? (
-                                        <span className="block text-xs text-foreground leading-relaxed">
-                                          {info.description}
-                                        </span>
-                                      ) : (
-                                        <span className="block text-xs text-muted-foreground italic">
-                                          (설명 미등록 — 추후 보완 예정)
-                                        </span>
-                                      )}
-                                      <span className="block text-xs text-muted-foreground pt-2 mt-2 border-t border-border/50">
-                                        분류: {info.category}{info.subcategory ? ` / ${info.subcategory}` : ""}
-                                      </span>
-                                      <span className="block text-xs text-primary italic mt-1">
-                                        → 코드 클릭하면 계정별 원장 표시
-                                      </span>
-                                    </span>
+                                  <span
+                                    title={tooltipText}
+                                    className="cursor-help border-b border-dotted border-muted-foreground/50 hover:text-primary hover:border-primary"
+                                  >
+                                    {rawName}
                                   </span>
                                   <a
                                     href={`/accounts/ledger?entity=${entityId}&code=${encodeURIComponent(item.account_code)}`}
