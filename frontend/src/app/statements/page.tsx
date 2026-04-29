@@ -306,6 +306,7 @@ function StatementsContent() {
   const [edit, setEdit] = useState<EditState>({ lineId: null, amount: "", note: "" })
   const [savingLine, setSavingLine] = useState(false)
   const [accountInfo, setAccountInfo] = useState<Record<string, { name: string; category: string; subcategory: string | null; normal_side: string; description: string | null }>>({})
+  const [hoverPopup, setHoverPopup] = useState<{ x: number; y: number; code: string } | null>(null)
 
   const isConsolidated = entityId === "consolidated"
   const currentEntity = entities.find((e) => e.id === Number(entityId))
@@ -828,19 +829,19 @@ function StatementsContent() {
                             }
                           >
                             {item.account_code && accountInfo[item.account_code] ? (() => {
-                              const info = accountInfo[item.account_code!]
                               const match = item.label.match(/^(\s*)(.*)$/)
                               const leadingWS = match?.[1] || ""
                               const rawName = match?.[2] || item.label
-                              const tooltipText = info.description
-                                ? `${info.description}\n\n분류: ${info.category}${info.subcategory ? ` / ${info.subcategory}` : ""}`
-                                : `분류: ${info.category}${info.subcategory ? ` / ${info.subcategory}` : ""}`
                               return (
                                 <>
                                   {leadingWS}
                                   <span
-                                    title={tooltipText}
-                                    className="cursor-help border-b border-dotted border-muted-foreground/50 hover:text-primary hover:border-primary"
+                                    onMouseEnter={(e) => {
+                                      const r = (e.target as HTMLElement).getBoundingClientRect()
+                                      setHoverPopup({ x: r.left, y: r.bottom + 4, code: item.account_code! })
+                                    }}
+                                    onMouseLeave={() => setHoverPopup(null)}
+                                    className="cursor-help hover:text-primary"
                                   >
                                     {rawName}
                                   </span>
@@ -960,6 +961,34 @@ function StatementsContent() {
             </div>
           </CardContent>
         </Card>
+        )
+      })()}
+
+      {/* Hover popup — fixed positioning, layout 영향 0 */}
+      {hoverPopup && (() => {
+        const info = accountInfo[hoverPopup.code]
+        if (!info) return null
+        return (
+          <div
+            style={{
+              position: "fixed",
+              left: hoverPopup.x,
+              top: hoverPopup.y,
+              zIndex: 100,
+              pointerEvents: "none",
+            }}
+            className="w-80 p-3 rounded-md border border-border bg-popover text-popover-foreground shadow-lg text-left"
+          >
+            <div className="font-semibold text-sm mb-1">{info.name}</div>
+            {info.description ? (
+              <div className="text-xs text-foreground leading-relaxed">{info.description}</div>
+            ) : (
+              <div className="text-xs text-muted-foreground italic">(설명 미등록)</div>
+            )}
+            <div className="text-xs text-muted-foreground pt-2 mt-2 border-t border-border/50">
+              분류: {info.category}{info.subcategory ? ` / ${info.subcategory}` : ""}
+            </div>
+          </div>
         )
       })()}
     </div>
