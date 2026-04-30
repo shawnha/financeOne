@@ -267,6 +267,13 @@ function SettingsContent() {
   const [gowidSyncResult, setGowidSyncResult] = useState<GowidSyncResult | null>(null)
   const [gowidError, setGowidError] = useState<string | null>(null)
   const [gowidEntityId, setGowidEntityId] = useState(2)  // 한아원코리아 default
+
+  // helper: gowidEntityId → display name (4 entity 까지 안전)
+  const gowidEntityName = (id: number): string => {
+    const found = krEntities.find((e) => e.id === id)
+    if (found) return found.name.replace(/^주식회사\s*/, "")
+    return id === 2 ? "한아원코리아" : id === 3 ? "한아원리테일" : id === 13 ? "한아원홀세일" : `entity ${id}`
+  }
   const [gowidApiKeyInput, setGowidApiKeyInput] = useState("")
   const [gowidStart, setGowidStart] = useState(() => {
     const d = new Date()
@@ -328,7 +335,7 @@ function SettingsContent() {
   }
 
   const deleteGowidApiKey = async () => {
-    if (!confirm(`${gowidEntityId === 2 ? "한아원코리아" : "한아원리테일"} Gowid 연결을 해제할까요?`)) return
+    if (!confirm(`${gowidEntityName(gowidEntityId)} Gowid 연결을 해제할까요?`)) return
     setTesting("gowid-key-delete")
     try {
       await fetchAPI(`/integrations/gowid/api-key?entity_id=${gowidEntityId}`, {
@@ -1570,10 +1577,14 @@ function SettingsContent() {
           <div className="flex gap-2 items-center">
             <label className="text-xs text-muted-foreground">법인</label>
             <div className="flex rounded-md overflow-hidden border border-border">
-              {[
-                { id: 2, name: "한아원코리아" },
-                { id: 3, name: "한아원리테일" },
-              ].map((e) => (
+              {(krEntities.length > 0
+                ? krEntities
+                : [
+                    { id: 2, name: "한아원코리아", code: "HOK" },
+                    { id: 3, name: "한아원리테일", code: "HOR" },
+                    { id: 13, name: "한아원홀세일", code: "HOW" },
+                  ]
+              ).map((e) => (
                 <button
                   key={e.id}
                   onClick={() => setGowidEntityId(e.id)}
@@ -1583,7 +1594,7 @@ function SettingsContent() {
                       : "bg-transparent text-muted-foreground hover:bg-secondary/50"
                   }`}
                 >
-                  {e.name}
+                  {e.name.replace(/^주식회사\s*/, "")}
                 </button>
               ))}
             </div>
@@ -1597,7 +1608,7 @@ function SettingsContent() {
           {!gowidStatus?.configured && (
             <div className="space-y-2 rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3">
               <p className="text-xs text-yellow-500">
-                {gowidEntityId === 2 ? "한아원코리아" : "한아원리테일"} Gowid API key 미등록
+                {gowidEntityName(gowidEntityId)} Gowid API key 미등록
               </p>
               <Input
                 type="password"
