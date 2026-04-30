@@ -56,7 +56,8 @@ export function DualIndicatorCard({
   }
 
   const inProgress = accuracyStatus === "in_progress"
-  const showAcc = !inProgress && accValue != null
+  // 사용자 요청: acc 가 일부 entity 만 보이는 혼란 방지 → 항상 표시 (warning chip 으로 정확도 안내)
+  const showAcc = accValue != null
   const accNum = num(accValue)
   const cashNum = num(cashValue)
   const diff = accNum - cashNum
@@ -129,10 +130,10 @@ export function DualIndicatorCard({
 
       {inProgress && (
         <p
-          className="text-[10.5px] text-[hsl(var(--warning))] mt-2 pt-2 border-t border-dashed border-border"
+          className="text-[10px] text-[hsl(var(--warning))] mt-1 inline-flex items-center gap-1"
           role="status"
         >
-          ⚠️ 발생주의 정확도 진행 중 (P3-9)
+          ⚠️ ACC 정확도 진행 중
         </p>
       )}
 

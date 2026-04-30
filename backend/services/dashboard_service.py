@@ -412,19 +412,28 @@ def fetch_accrual_kpi(
 
     params: list = [entity_id] if entity_id else []
 
-    # Cash side — selected month, per-entity 합산 + currency 환산 (Group)
+    # Revenue/Expense Cash — std_account.category 로 필터 (매출/비용 의미)
+    # 단순 type='in/out' 합계는 전체 cash flow (외상 회수, 자본 출자, 차입 등 포함)
+    # 매출 cash = type='in' AND std_account.category='수익'
+    # 비용 cash = type='out' AND std_account.category IN ('비용', '매출원가')
     if entity_id is None:
-        # Group: per-entity sum × FX rate
+        # Group: per-entity sum × FX rate, category 필터 적용
         cur.execute("""
             SELECT
                 e.currency,
-                COALESCE(SUM(CASE WHEN t.type='in' THEN t.amount ELSE 0 END), 0) AS rev,
-                COALESCE(SUM(CASE WHEN t.type='out' THEN t.amount ELSE 0 END), 0) AS exp
+                COALESCE(SUM(CASE
+                    WHEN t.type='in' AND sa.category='수익' THEN t.amount
+                    ELSE 0 END), 0) AS rev,
+                COALESCE(SUM(CASE
+                    WHEN t.type='out' AND sa.category IN ('비용', '매출원가') THEN t.amount
+                    ELSE 0 END), 0) AS exp
             FROM financeone.entities e
             LEFT JOIN financeone.transactions t
               ON t.entity_id = e.id
               AND t.date >= %s AND t.date < %s
               AND (t.is_cancel IS NOT TRUE)
+            LEFT JOIN financeone.standard_accounts sa
+              ON sa.id = t.standard_account_id
             WHERE e.is_active IS NOT FALSE
             GROUP BY e.currency
         """, [month_start, month_end])
@@ -441,30 +450,22 @@ def fetch_accrual_kpi(
         cash_params: list = [month_start, month_end, entity_id]
         cur.execute("""
             SELECT
-                COALESCE(SUM(CASE WHEN type='in' THEN amount ELSE 0 END), 0),
-                COALESCE(SUM(CASE WHEN type='out' THEN amount ELSE 0 END), 0)
-            FROM financeone.transactions
-            WHERE date >= %s AND date < %s
-              AND (is_cancel IS NOT TRUE)
-              AND entity_id = %s
+                COALESCE(SUM(CASE
+                    WHEN t.type='in' AND sa.category='수익' THEN t.amount
+                    ELSE 0 END), 0),
+                COALESCE(SUM(CASE
+                    WHEN t.type='out' AND sa.category IN ('비용', '매출원가') THEN t.amount
+                    ELSE 0 END), 0)
+            FROM financeone.transactions t
+            LEFT JOIN financeone.standard_accounts sa ON sa.id = t.standard_account_id
+            WHERE t.date >= %s AND t.date < %s
+              AND (t.is_cancel IS NOT TRUE)
+              AND t.entity_id = %s
         """, cash_params)
         revenue_cash, expense_cash = (Decimal(v) for v in cur.fetchone())
-    # Accrual side (gating)
-    if status == 'in_progress':
-        cur.close()
-        return AccrualKPI(
-            accuracy_status='in_progress',
-            accuracy_pass_count=pass_count,
-            accuracy_total_count=total_count,
-            accuracy_threshold=ACCRUAL_GATING_THRESHOLD,
-            accuracy_last_run=last_run,
-            revenue_acc=None,
-            revenue_cash=revenue_cash,
-            expense_acc=None,
-            expense_cash=expense_cash,
-            net_income_acc=None,
-            diff_breakdown=None,
-        )
+    # Accrual side — 모든 상태에서 acc 표시 (in_progress 라도)
+    # accuracy_status badge 가 정확도 진행 중임을 사용자에게 안내
+    # (이전엔 in_progress 시 None 으로 hidden했지만 사용자 혼란 → 항상 표시)
 
     # accrual revenue / expense from journal_entries
     # 매출 = 4xxxx (수익) credit / 비용 = 5xxxx-9xxxx debit
@@ -729,8 +730,9 @@ def fetch_chart(
     conn: PgConnection,
     entity_id: Optional[int],
     month_end: date | None = None,
+    target_currency: str = "USD",
 ) -> ChartData:
-    """6 months chart ending at month_end (exclusive). Defaults to next month."""
+    """6 months chart ending at month_end (exclusive). target_currency 환산 적용."""
     if month_end is None:
         today = date.today()
         month_end = date(today.year + (1 if today.month == 12 else 0),
@@ -742,38 +744,81 @@ def fetch_chart(
         chart_start = date(month_end.year - 1, month_end.month + 6, 1)
 
     cur = conn.cursor()
-    params: list = [entity_id] if entity_id else []
 
-    chart_params: list = [chart_start, month_end] + params
-    cur.execute(f"""
-        SELECT
-            to_char(date_trunc('month', date), 'YYYY-MM') AS ym,
-            COALESCE(SUM(CASE WHEN type='in' THEN amount ELSE 0 END), 0) AS cash_in,
-            COALESCE(SUM(CASE WHEN type='out' THEN amount ELSE 0 END), 0) AS cash_out
-        FROM financeone.transactions
-        WHERE date >= %s AND date < %s
-          AND (is_cancel IS NOT TRUE)
-          {"AND entity_id = %s" if entity_id else ""}
-        GROUP BY date_trunc('month', date)
-        ORDER BY ym
-    """, chart_params)
-    rows = cur.fetchall()
+    # Group view: per-entity 합산 + currency 환산
+    if entity_id is None:
+        cur.execute("""
+            SELECT
+                to_char(date_trunc('month', t.date), 'YYYY-MM') AS ym,
+                e.currency,
+                COALESCE(SUM(CASE WHEN t.type='in' THEN t.amount ELSE 0 END), 0) AS cash_in,
+                COALESCE(SUM(CASE WHEN t.type='out' THEN t.amount ELSE 0 END), 0) AS cash_out
+            FROM financeone.transactions t
+            JOIN financeone.entities e ON e.id = t.entity_id
+            WHERE t.date >= %s AND t.date < %s
+              AND (t.is_cancel IS NOT TRUE)
+            GROUP BY date_trunc('month', t.date), e.currency
+            ORDER BY ym
+        """, [chart_start, month_end])
+        krw_r = _fx_rate(conn, "KRW", target_currency)
+        usd_r = _fx_rate(conn, "USD", target_currency)
+        rate_by_curr = {"KRW": krw_r, "USD": usd_r}
+        # Aggregate per month with FX conversion
+        per_month: dict[str, dict] = {}
+        for ym, currency, ci, co in cur.fetchall():
+            r = rate_by_curr.get(currency, Decimal("1"))
+            entry = per_month.setdefault(ym, {"in": Decimal(0), "out": Decimal(0)})
+            entry["in"] += Decimal(ci) * r
+            entry["out"] += Decimal(co) * r
+        rows = [(ym, e["in"], e["out"]) for ym, e in sorted(per_month.items())]
+    else:
+        cur.execute("""
+            SELECT
+                to_char(date_trunc('month', date), 'YYYY-MM') AS ym,
+                COALESCE(SUM(CASE WHEN type='in' THEN amount ELSE 0 END), 0) AS cash_in,
+                COALESCE(SUM(CASE WHEN type='out' THEN amount ELSE 0 END), 0) AS cash_out
+            FROM financeone.transactions
+            WHERE date >= %s AND date < %s
+              AND (is_cancel IS NOT TRUE)
+              AND entity_id = %s
+            GROUP BY date_trunc('month', date)
+            ORDER BY ym
+        """, [chart_start, month_end, entity_id])
+        rows = cur.fetchall()
 
-    # accrual revenue per month
-    chart_acc_params: list = [chart_start, month_end] + params
-    cur.execute(f"""
-        SELECT
-            to_char(date_trunc('month', je.entry_date), 'YYYY-MM') AS ym,
-            COALESCE(SUM(CASE WHEN sa.category = '수익' THEN jel.credit_amount - jel.debit_amount ELSE 0 END), 0) AS rev
-        FROM financeone.journal_entries je
-        JOIN financeone.journal_entry_lines jel ON jel.journal_entry_id = je.id
-        JOIN financeone.standard_accounts sa ON sa.id = jel.standard_account_id
-        WHERE je.entry_date >= %s AND je.entry_date < %s
-          {"AND je.entity_id = %s" if entity_id else ""}
-        GROUP BY date_trunc('month', je.entry_date)
-        ORDER BY ym
-    """, chart_acc_params)
-    accrual_by_month: dict[str, Decimal] = {ym: Decimal(rev) for ym, rev in cur.fetchall()}
+    # accrual revenue per month — Group 은 currency 환산, entity 는 native
+    if entity_id is None:
+        cur.execute("""
+            SELECT
+                to_char(date_trunc('month', je.entry_date), 'YYYY-MM') AS ym,
+                e.currency,
+                COALESCE(SUM(CASE WHEN sa.category = '수익' THEN jel.credit_amount - jel.debit_amount ELSE 0 END), 0) AS rev
+            FROM financeone.journal_entries je
+            JOIN financeone.journal_entry_lines jel ON jel.journal_entry_id = je.id
+            JOIN financeone.standard_accounts sa ON sa.id = jel.standard_account_id
+            JOIN financeone.entities e ON e.id = je.entity_id
+            WHERE je.entry_date >= %s AND je.entry_date < %s
+            GROUP BY date_trunc('month', je.entry_date), e.currency
+            ORDER BY ym
+        """, [chart_start, month_end])
+        accrual_by_month: dict[str, Decimal] = {}
+        for ym, currency, rev in cur.fetchall():
+            r = rate_by_curr.get(currency, Decimal("1"))
+            accrual_by_month[ym] = accrual_by_month.get(ym, Decimal(0)) + Decimal(rev) * r
+    else:
+        cur.execute("""
+            SELECT
+                to_char(date_trunc('month', je.entry_date), 'YYYY-MM') AS ym,
+                COALESCE(SUM(CASE WHEN sa.category = '수익' THEN jel.credit_amount - jel.debit_amount ELSE 0 END), 0) AS rev
+            FROM financeone.journal_entries je
+            JOIN financeone.journal_entry_lines jel ON jel.journal_entry_id = je.id
+            JOIN financeone.standard_accounts sa ON sa.id = jel.standard_account_id
+            WHERE je.entry_date >= %s AND je.entry_date < %s
+              AND je.entity_id = %s
+            GROUP BY date_trunc('month', je.entry_date)
+            ORDER BY ym
+        """, [chart_start, month_end, entity_id])
+        accrual_by_month = {ym: Decimal(rev) for ym, rev in cur.fetchall()}
 
     months = [
         ChartMonthPoint(
@@ -883,5 +928,5 @@ def fetch_dashboard_full(
         accrual_kpi=_safe("accrual_kpi", lambda: with_savepoint(lambda: fetch_accrual_kpi(conn, entity_id, month_start=month_start, month_end=month_end, target_currency=currency)), fallback_accrual),
         decision_queue=_safe("decision_queue", lambda: with_savepoint(lambda: fetch_decision_queue(conn, entity_id)), DecisionQueueSection(items=[], total=0)),
         ai_activity=_safe("ai_activity", lambda: with_savepoint(lambda: fetch_ai_activity(conn, entity_id)), AiActivity(auto_mapped_today=0, review_needed=0, unusual=0, keyword_added_this_week=0, learning_impact=0, cascade=[])),
-        chart=_safe("chart", lambda: with_savepoint(lambda: fetch_chart(conn, entity_id, month_end=month_end)), ChartData(months=[])),
+        chart=_safe("chart", lambda: with_savepoint(lambda: fetch_chart(conn, entity_id, month_end=month_end, target_currency=currency)), ChartData(months=[])),
     )

@@ -14,6 +14,7 @@ import {
 import { AccrualGatingNotice } from "@/components/dashboard/accrual-gating-notice"
 import { AiActivityFeed } from "@/components/dashboard/ai-activity-feed"
 import { BentoEntitySelector } from "@/components/dashboard/bento-entity-selector"
+import { CashflowChart } from "@/components/dashboard/cashflow-chart"
 import { DecisionQueue } from "@/components/dashboard/decision-queue"
 import { DualIndicatorCard } from "@/components/dashboard/dual-indicator-card"
 import { SingleIndicatorCard } from "@/components/dashboard/single-indicator-card"
@@ -150,6 +151,9 @@ function DashboardContent() {
 
       {/* Dual KPI row: 잔고 / 매출 / 비용 / 순이익 */}
       <KpiRow loading={loading} />
+
+      {/* Cashflow + Revenue chart (6mo) */}
+      <CashflowChart data={data?.chart ?? null} loading={loading} />
 
       {/* Quick links to other pages */}
       <div className="flex flex-wrap gap-2 pt-2">
