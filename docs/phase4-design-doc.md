@@ -148,7 +148,69 @@ ORDER BY w DESC, confidence DESC
 LIMIT 1
 ```
 
-## 9. 다음 단계
+## 9. 구현 결과 (Stage 5)
 
-Stage 4 `/plan-design-review` → **스킵** (UI 변경 없음)
-Stage 5 → 구현 시작 (P4-A → P4-B → P4-C → 측정)
+| Sub-task | Commit | Tests |
+|---|---|---|
+| **P4-A** 도메인 키워드 사전 (134개) | `769fd41` | 15 PASS (단위 11 + integration 4) |
+| **P4-B** cascade 통합 SQL + GIN 인덱스 | `cafa42a` | 16 PASS (단위 12 + integration 4) |
+| **P4-C** 학습 루프 + noise filter + metric | `8129beb` | 18 PASS (단위 14 + integration 4) |
+| **Stage 6** 회귀 fix (mapping_service) | `cf2743d` | 29 PASS |
+| **합계** | | **78 PASS** |
+
+### Code Reviewer 발견 + 즉시 fix
+- P4-A: P0 2건 (KT/Adobe substring) + P1 4건 + P2 2건 = 8건 fix
+- P4-B: P0 2건 (cross-entity leak / inactive filter) + P1 3건 (ESCAPE/인덱스/std_active) + P2 2건 = 7건 fix
+
+### Stage 6 Health Check 결과
+| Category | Score | 비고 |
+|---|---|---|
+| Type check (frontend) | 7/10 | 10 errors (기존, P4 무관) |
+| Lint (frontend) | 4/10 | 40 errors (기존, P4 무관) |
+| Tests (backend) | 9/10 | 78/78 P4 PASS, 7건 기존 실패 (P4 무관) |
+| **Composite** | **6.7/10** | P4 작업으로 회귀 추가 0건 |
+
+### 매핑 정확도 metric (2026-04-30 기준)
+| entity | Standard 매핑 | Internal 매핑 | 미매핑 |
+|---|---|---|---|
+| HOI (1) | 100.00% | 0.00% (사용 안함) | 0 |
+| HOK (2) | 96.76% | 99.01% | 141 |
+| HOR (3) | 0.00% | 3.23% | 31 (자본금만) |
+
+DB 변경: `standard_account_keywords` **14 → 243** (134 도메인 + 109 자동학습)
+mapping_source 에 `global_keyword` **1건 실제 동작 확인** (production)
+
+### 성공 기준 추적 (3개월 후 재측정 예정 — 2026-07-30)
+| 지표 | 4월말 (Before) | Target |
+|---|---|---|
+| HOK 매핑 충실도 | 96.76% | ≥ 99% |
+| 미매핑 거래수 (월별) | 132 | ≤ 30 |
+| `standard_account_keywords` 활용도 | 14 (dead) | 243 (cascade 4단계 활성) ✅ |
+
+## 10. 회고 (Stage 8)
+
+### 잘된 점
+1. gstack 워크플로우 강제 적용 — Office Hours → CEO → Eng review 통과 후 구현 (이전 시도는 리뷰 없이 강행해서 revert)
+2. Code Reviewer agent 가 P0 cross-entity leak 등 결정적 발견 (재무 데이터 무결성 직격)
+3. Stage 6 health check 가 회귀 4건 즉시 발견 → fix
+4. 회귀 방지 테스트 7개 추가 (cross_entity_leak / inactive_filter / escape_clause / short_substring / 등)
+
+### 배운 점
+1. ILIKE substring 매칭은 짧은 영문 약자 (KT, ADS) 에 매우 위험. 화이트리스트 + brand 분리 필수.
+2. `ON CONFLICT DO NOTHING` 은 idempotent 하지만 사용자 의도 변경 silent skip 위험. docstring 명시 필요.
+3. Mock cursor side_effect 설계는 함수 변경에 취약. 함수 시그니처 바꾸면 의존 테스트 자동 fail 예상.
+
+### 보류 (Phase 5 또는 별도)
+- NotebookLM API 통합 (Trigger C — API 공개 후)
+- AI is_recurring 자동 제안 (Trigger B — 6개월 데이터 후)
+- Obsidian 거래처 1-pager 자동 생성 (Trigger A)
+- 정기 게이트 미실행: `/cso` (Phase 시작/종료 보안 감사) + `/benchmark` 미수행
+
+## 11. 다음 단계
+
+✅ **Phase 4 완료** (2026-04-30)
+
+다음 후보:
+- 3개월 후 (2026-07-30) 성공 기준 측정 재실행 → Trigger A/B 재평가
+- 별도 트랙: Phase 3 잔여 (P3-51 내부거래 상계 / 4순위 계정 코드 매핑 fix)
+- 보안 보강: `/cso` 정기 게이트 (P4 위주 미수행)
