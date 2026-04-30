@@ -44,18 +44,26 @@ CODEF_TOKEN_URL = "https://oauth.codef.io/oauth/token"
 # 주의: 이전에 brute-force로 추정한 lotte=0301 / kb=0311은 뒤바뀐 값이었다.
 # Codef 지원팀 확인 결과 0301=KB국민카드, 0311=롯데카드 (2026-04-20 정정).
 ORG_CODES = {
+    # 은행 — Codef 공식 표준 4자리 (정합 확인됨, demo 환경에서 정상 routing)
     "woori_bank": "0020",
     "ibk_bank": "0003",
-    "shinhan_bank": "0088",   # 신한은행 BizBank — 한아원홀세일 등에서 사용
-    "lotte_card": "0311",     # ← 0301 (KB) 에서 정정. 롯데 CF-12803 재현 원인
+    "shinhan_bank": "0088",   # SHB 은행 코드 (한국은행 표준). Codef 도 동일.
+
+    # 카드사 — Codef product 페이지가 SPA 라 권위 source 자동 추출 불가.
+    # 아래 매핑은 brute-force 검증 (CF-12803/CF-12800 응답 기준 routing 도달 확인됨)
+    # + git history (commit 75adbe3, fcf47c9 등 ) 의 정정 결과.
+    # 만약 카드사로부터 "아이디 오류 / 비밀번호 오류" 식 응답이 오면 routing 은 정확.
+    # 만약 "지원하지 않는 organization" 식 메시지면 코드가 틀린 것.
+    "kb_card": "0301",        # ← 0311(롯데) 에서 정정 (commit 75adbe3)
     "bc_card": "0302",
     "samsung_card": "0303",
-    "shinhan_card": "0304",   # 이전 0309는 우리카드. 0304가 진짜 신한
+    "shinhan_card": "0304",   # 이전 0309 → 우리카드로 정정. 0304 가 신한 (검증: CF-12800 응답 = routing 정상).
     "hyundai_card": "0305",
     "nh_card": "0306",
-    "woori_card": "0309",     # 이전 0315는 무효. 0309가 진짜 우리카드
-    "kb_card": "0301",        # ← 0311 (롯데) 에서 정정
+    "woori_card": "0309",     # 이전 0315 무효 → 0309 가 우리카드 (확정)
+    "lotte_card": "0311",     # ← 0301(KB) 에서 정정. CF-12803 재현 후 확인
     "hana_card": "0313",
+
     "hometax": "0001",        # 국세청 홈택스 (전자세금계산서 통합 조회)
 }
 

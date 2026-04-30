@@ -355,13 +355,29 @@ def _log_codef_error(
 
 
 def _codef_error_detail(err, log_id: Optional[int] = None) -> dict:
-    """HTTPException.detail 로 반환할 구조화된 에러 정보."""
+    """HTTPException.detail 로 반환할 구조화된 에러 정보 + 카드 routing 진단 hint."""
+    from backend.services.integrations.codef import env_label
+    code = getattr(err, "code", None)
+    msg = str(err)
+    hints: list[str] = []
+
+    # CF-12800 / CF-12803 등 카드사 인증 실패 — organization 코드는 정상 routing 됐다는 증거
+    if code in ("CF-12800", "CF-12803"):
+        hints.append(
+            f"organization routing 은 정상 (Codef → 카드사 시스템 도달 후 카드사가 거절). "
+            f"검토 항목: ① 환경={env_label()} (demo 는 mock 응답, 실제 ID 인증은 production 필요), "
+            f"② BizCenter 법인 ID 형식 (개인 카드 ID 와 다를 수 있음), "
+            f"③ 카드 4자리 비밀번호 미입력, ④ Codef 포털에서 organization 코드 재확인."
+        )
+
     return {
-        "message": str(err),
-        "code": getattr(err, "code", None),
+        "message": msg,
+        "code": code,
         "transaction_id": getattr(err, "transaction_id", None),
         "extra_message": getattr(err, "extra_message", None),
         "endpoint": getattr(err, "endpoint", None),
+        "environment": env_label(),
+        "hints": hints,
         "log_id": log_id,
     }
 
