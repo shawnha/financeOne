@@ -462,12 +462,14 @@ def copy_internal_accounts(
         ]
         src_by_id = {r["id"]: r for r in src}
 
-        # 3) target 기존 active 계정
+        # 3) target 기존 active 계정 — skip 시 자식이 부모로 참조 가능하도록 code→id 매핑 보존
         cur.execute(
-            "SELECT code FROM internal_accounts WHERE entity_id = %s AND is_active = true",
+            "SELECT id, code FROM internal_accounts WHERE entity_id = %s AND is_active = true",
             [body.target_entity_id],
         )
-        target_before = [r[0] for r in cur.fetchall()]
+        target_before_rows = cur.fetchall()
+        target_before = [r[1] for r in target_before_rows]
+        target_id_by_code: dict[str, int] = {r[1]: r[0] for r in target_before_rows}
         existing_codes = set(target_before)
 
         deactivated = 0
@@ -479,6 +481,7 @@ def copy_internal_accounts(
             )
             deactivated = cur.rowcount or 0
             existing_codes = set()
+            target_id_by_code = {}   # 모두 비활성화됐으니 lookup 불필요
 
         # 4) depth 계산 — 부모 먼저 INSERT 되도록 정렬
         depth_cache: dict[int, int] = {}
@@ -517,6 +520,11 @@ def copy_internal_accounts(
         for r in src_sorted:
             if r["code"] in existing_codes:
                 skipped_existing += 1
+                # 자식들이 이 부모를 참조할 수 있도록 target 의 같은 code id 를 id_map 에 등록
+                # (이게 빠지면 손자가 root 로 떨어짐 — 트리 깨짐 버그)
+                target_id = target_id_by_code.get(r["code"])
+                if target_id:
+                    id_map[r["id"]] = target_id
                 continue
             old_pid = r["parent_id"]
             new_pid = id_map.get(old_pid) if old_pid else None
