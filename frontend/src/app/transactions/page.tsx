@@ -202,11 +202,12 @@ const SOURCE_BADGE_CLASSES: Record<string, string> = {
   woori_card: "bg-sky-500/15 text-sky-400 border-sky-500/30",                  // 우리카드 = 하늘
   woori_bank: "bg-cyan-500/15 text-cyan-400 border-cyan-500/30",               // 우리은행 = 청록
   ibk_bank: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",        // IBK = 초록
-  shinhan_bank: "bg-slate-500/15 text-slate-300 border-slate-500/30",          // 신한은행 = 슬레이트 (우리 cyan/sky 와 분리)
+  // 신한은행 = 신한 로고 스타일 (좌측 흰색 / 우측 신한 navy 하드스플릿)
+  shinhan_bank: "bg-[linear-gradient(90deg,#f8fafc_50%,#0046FF_50%)] text-slate-100 border-slate-400/40 [text-shadow:0_0_3px_rgba(0,0,0,0.6)]",
   shinhan_card: "bg-fuchsia-500/15 text-fuchsia-400 border-fuchsia-500/30",    // 신한카드 = 푹시아 (장미보라)
   codef_woori_bank: "bg-cyan-500/15 text-cyan-400 border-cyan-500/30",
   codef_ibk_bank: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  codef_shinhan_bank: "bg-slate-500/15 text-slate-300 border-slate-500/30",
+  codef_shinhan_bank: "bg-[linear-gradient(90deg,#f8fafc_50%,#0046FF_50%)] text-slate-100 border-slate-400/40 [text-shadow:0_0_3px_rgba(0,0,0,0.6)]",
   codef_lotte_card: "bg-red-500/15 text-red-400 border-red-500/30",
   codef_woori_card: "bg-sky-500/15 text-sky-400 border-sky-500/30",
   codef_shinhan_card: "bg-fuchsia-500/15 text-fuchsia-400 border-fuchsia-500/30",
