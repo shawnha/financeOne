@@ -441,6 +441,40 @@ function SettingsContent() {
     }
   }
 
+  // 페이지 진입 시 Mercury 연결 상태 자동 확인 (토큰이 이미 저장되어 있으면 connected 표시)
+  useEffect(() => {
+    fetchAPI<ConnectionStatus>("/integrations/mercury/status")
+      .then(setMercuryStatus)
+      .catch(() => {})
+  }, [])
+
+  const [mercurySyncing, setMercurySyncing] = useState(false)
+  const [mercurySyncResult, setMercurySyncResult] = useState<string | null>(null)
+  const syncMercury = async () => {
+    setMercurySyncing(true)
+    setMercurySyncResult(null)
+    try {
+      const r = await fetchAPI<{
+        accounts_processed: number
+        total_synced: number
+        total_duplicates: number
+        total_fetched: number
+        balance_snapshot?: { upserted?: number; error?: string }
+      }>("/integrations/mercury/sync-all", { method: "POST" })
+      const snap = r.balance_snapshot
+      const snapMsg = snap?.upserted != null
+        ? `잔고 ${snap.upserted}건 upsert`
+        : snap?.error ? `잔고 실패: ${snap.error}` : ""
+      setMercurySyncResult(
+        `${r.accounts_processed}개 계좌 · 신규 ${r.total_synced} · 중복 ${r.total_duplicates} · ${snapMsg}`
+      )
+    } catch (err) {
+      setMercurySyncResult(`실패: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setMercurySyncing(false)
+    }
+  }
+
   const loadCodefStatus = async () => {
     try {
       const status = await fetchAPI<CodefStatus>(
@@ -772,7 +806,7 @@ function SettingsContent() {
           <div className="flex gap-2">
             <Input
               type="password"
-              placeholder="Mercury API Token"
+              placeholder={mercuryStatus?.connected ? "토큰 저장됨 — 변경하려면 새 토큰 입력" : "Mercury API Token"}
               value={mercuryToken}
               onChange={(e) => setMercuryToken(e.target.value)}
               className="flex-1"
@@ -791,6 +825,34 @@ function SettingsContent() {
           </div>
           {mercuryStatus && (
             <StatusBadge status={mercuryStatus} />
+          )}
+          {mercuryStatus?.connected && (
+            <div className="flex flex-col gap-2 pt-2 border-t border-border/50">
+              {mercuryStatus.account_names && mercuryStatus.account_names.length > 0 && (
+                <div className="text-xs text-muted-foreground">
+                  계좌 {mercuryStatus.accounts}개: {mercuryStatus.account_names.join(", ")}
+                </div>
+              )}
+              <div className="flex gap-2 items-center">
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={syncMercury}
+                  disabled={mercurySyncing}
+                  className="gap-2"
+                >
+                  {mercurySyncing ? (
+                    <RefreshCw className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3 w-3" />
+                  )}
+                  {mercurySyncing ? "동기화 중..." : "Mercury 동기화 (모든 계좌)"}
+                </Button>
+                {mercurySyncResult && (
+                  <span className="text-xs text-muted-foreground">{mercurySyncResult}</span>
+                )}
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>

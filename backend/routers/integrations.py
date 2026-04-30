@@ -161,6 +161,66 @@ def mercury_sync(
         client.close()
 
 
+@router.post("/mercury/sync-all")
+def mercury_sync_all(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    conn: PgConnection = Depends(get_db),
+):
+    """Mercury 모든 accounts 거래 + 잔고 snapshot 일괄 동기화.
+
+    Settings 페이지의 단일 '동기화' 버튼이 호출. 사용자가 account_id 선택
+    부담 없이 모든 HOI Mercury 계좌를 한 번에 갱신.
+    """
+    token = _get_mercury_token(conn)
+    from backend.services.integrations.mercury import MercuryClient
+    client = MercuryClient(token)
+    per_account: list[dict] = []
+    total_synced = 0
+    total_dupes = 0
+    total_fetched = 0
+    try:
+        accounts = client.get_accounts()
+        for acc in accounts:
+            acc_id = acc.get("id")
+            if not acc_id:
+                continue
+            try:
+                r = client.sync_transactions(conn, acc_id,
+                                             start_date=start_date, end_date=end_date)
+                total_synced += r.get("synced", 0)
+                total_dupes += r.get("duplicates", 0)
+                total_fetched += r.get("total_fetched", 0)
+                per_account.append({
+                    "account_id": acc_id,
+                    "name": acc.get("name") or acc.get("nickname"),
+                    **r,
+                })
+            except Exception as e:
+                logger.warning("Mercury account %s sync failed: %s", acc_id, e)
+                per_account.append({"account_id": acc_id, "error": str(e)})
+        # 모든 accounts 의 현재 잔고 → balance_snapshots 오늘 날짜 upsert
+        try:
+            balance_result = client.sync_balance_snapshot(conn)
+        except Exception as e:
+            logger.warning("balance snapshot upsert failed (non-fatal): %s", e)
+            balance_result = {"error": str(e)}
+        conn.commit()
+        return {
+            "accounts_processed": len(per_account),
+            "total_synced": total_synced,
+            "total_duplicates": total_dupes,
+            "total_fetched": total_fetched,
+            "balance_snapshot": balance_result,
+            "per_account": per_account,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        client.close()
+
+
 # --- Codef ---
 
 VALID_CODEF_ORGS = {
