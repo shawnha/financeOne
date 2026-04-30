@@ -39,6 +39,38 @@ ACCRUAL_TOTAL_CHECKS = 19
 # Bento Summary — all entities cash balance + sparkline (single query)
 # ─────────────────────────────────────────────────────────────
 
+def _has_accrual_status_column(conn: PgConnection) -> bool:
+    """Schema introspection: graceful fallback when migration not run yet."""
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema='financeone'
+              AND table_name='entities'
+              AND column_name='accrual_data_status'
+            LIMIT 1
+        """)
+        return cur.fetchone() is not None
+    except Exception:
+        return False
+    finally:
+        cur.close()
+
+
+def _has_table(conn: PgConnection, table_name: str, schema: str = "financeone") -> bool:
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema=%s AND table_name=%s LIMIT 1
+        """, [schema, table_name])
+        return cur.fetchone() is not None
+    except Exception:
+        return False
+    finally:
+        cur.close()
+
+
 def fetch_bento_summary(conn: PgConnection, target_currency: str = "USD") -> BentoSummary:
     """5 entity (Group + 4) cash balance + sparkline. Single SQL aggregate.
 
@@ -46,11 +78,13 @@ def fetch_bento_summary(conn: PgConnection, target_currency: str = "USD") -> Ben
     sparkline = 최근 6 monthly 잔고 추이.
     """
     cur = conn.cursor()
+    has_accrual_col = _has_accrual_status_column(conn)
 
-    # 1) entity 목록 + accrual_data_status + 현재 잔고
-    cur.execute("""
+    # 1) entity 목록 + accrual_data_status (optional) + 현재 잔고
+    accrual_select = "e.accrual_data_status" if has_accrual_col else "'cold_start' AS accrual_data_status"
+    cur.execute(f"""
         SELECT
-            e.id, e.code, e.name, e.currency, e.accrual_data_status,
+            e.id, e.code, e.name, e.currency, {accrual_select},
             COALESCE(b.cash_balance, 0) AS cash_balance
         FROM financeone.entities e
         LEFT JOIN (
@@ -214,37 +248,45 @@ def fetch_accrual_kpi(conn: PgConnection, entity_id: Optional[int]) -> AccrualKP
     - 'accurate' or 'cold_start': real accrual numbers
     """
     cur = conn.cursor()
+    has_accrual_col = _has_accrual_status_column(conn)
+    has_health_table = _has_table(conn, "dashboard_accrual_health")
 
-    # Determine accuracy status
-    if entity_id is None:
-        cur.execute("""
-            SELECT
-                CASE
-                    WHEN bool_or(accrual_data_status='in_progress') THEN 'in_progress'
-                    WHEN bool_and(accrual_data_status='accurate') THEN 'accurate'
-                    ELSE 'cold_start'
-                END,
-                COALESCE(MIN(h.pass_count), 0),
-                COALESCE(MIN(h.total_count), 19),
-                MAX(h.last_run)
-            FROM financeone.entities e
-            LEFT JOIN financeone.dashboard_accrual_health h ON h.entity_id = e.id
-            WHERE e.is_active IS NOT FALSE
-        """)
+    # Determine accuracy status (graceful fallback if migration not run)
+    if not has_accrual_col:
+        status, pass_count, total_count, last_run = ('cold_start', 0, ACCRUAL_TOTAL_CHECKS, None)
     else:
-        cur.execute("""
-            SELECT
-                e.accrual_data_status,
-                COALESCE(h.pass_count, 0),
-                COALESCE(h.total_count, 19),
-                h.last_run
-            FROM financeone.entities e
-            LEFT JOIN financeone.dashboard_accrual_health h ON h.entity_id = e.id
-            WHERE e.id = %s
-        """, [entity_id])
+        health_join = "LEFT JOIN financeone.dashboard_accrual_health h ON h.entity_id = e.id" if has_health_table else ""
+        h_pass = "COALESCE(MIN(h.pass_count), 0)" if has_health_table else "0"
+        h_total = "COALESCE(MIN(h.total_count), 19)" if has_health_table else "19"
+        h_last = "MAX(h.last_run)" if has_health_table else "NULL"
+        h_pass_one = "COALESCE(h.pass_count, 0)" if has_health_table else "0"
+        h_total_one = "COALESCE(h.total_count, 19)" if has_health_table else "19"
+        h_last_one = "h.last_run" if has_health_table else "NULL"
 
-    row = cur.fetchone() or ('cold_start', 0, 19, None)
-    status, pass_count, total_count, last_run = row
+        if entity_id is None:
+            cur.execute(f"""
+                SELECT
+                    CASE
+                        WHEN bool_or(accrual_data_status='in_progress') THEN 'in_progress'
+                        WHEN bool_and(accrual_data_status='accurate') THEN 'accurate'
+                        ELSE 'cold_start'
+                    END,
+                    {h_pass}, {h_total}, {h_last}
+                FROM financeone.entities e
+                {health_join}
+                WHERE e.is_active IS NOT FALSE
+            """)
+        else:
+            cur.execute(f"""
+                SELECT
+                    e.accrual_data_status, {h_pass_one}, {h_total_one}, {h_last_one}
+                FROM financeone.entities e
+                {health_join}
+                WHERE e.id = %s
+            """, [entity_id])
+
+        row = cur.fetchone() or ('cold_start', 0, ACCRUAL_TOTAL_CHECKS, None)
+        status, pass_count, total_count, last_run = row
 
     params: list = [entity_id] if entity_id else []
 
@@ -551,6 +593,19 @@ def fetch_chart(conn: PgConnection, entity_id: Optional[int]) -> ChartData:
 # Batch endpoint — single function
 # ─────────────────────────────────────────────────────────────
 
+def _safe(label: str, fn, fallback):
+    """Per-section graceful degrade: log + return fallback on error.
+    Resets transaction state so subsequent queries in same connection can proceed.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        return fn()
+    except Exception as e:
+        logger.warning("dashboard %s failed (graceful fallback): %s", label, e)
+        return fallback
+
+
 def fetch_dashboard_full(
     conn: PgConnection,
     entity_id: Optional[int] = None,
@@ -559,19 +614,48 @@ def fetch_dashboard_full(
 ) -> DashboardFullResponse:
     """6 widget data 한 번에 fetch (plan-eng-review A1).
 
-    Bento 클릭 시 frontend 가 1 query/click 으로 entity 전환 가능.
+    Each section runs in its own savepoint so a failed sub-query does not
+    abort the whole transaction. Missing schema (migration not run) =
+    safe defaults instead of 500.
     """
     scope: Union[str, int] = "group" if entity_id is None else entity_id
+
+    def with_savepoint(fn):
+        # psycopg2 autocommit=False: use SAVEPOINT so one bad query doesn't poison the whole txn
+        cur = conn.cursor()
+        cur.execute("SAVEPOINT dash_section")
+        try:
+            result = fn()
+            cur.execute("RELEASE SAVEPOINT dash_section")
+            return result
+        except Exception:
+            cur.execute("ROLLBACK TO SAVEPOINT dash_section")
+            raise
+        finally:
+            cur.close()
+
+    fallback_bento = BentoSummary(
+        group_total_usd=Decimal(0), eliminations_usd=Decimal(0),
+        eliminations_count=0, entities=[],
+    )
+    fallback_cash = CashKPI(
+        total_balance=Decimal(0), monthly_income=Decimal(0), monthly_expense=Decimal(0),
+    )
+    fallback_accrual = AccrualKPI(
+        accuracy_status='cold_start', accuracy_pass_count=0,
+        accuracy_total_count=ACCRUAL_TOTAL_CHECKS, accuracy_threshold=ACCRUAL_GATING_THRESHOLD,
+        revenue_cash=Decimal(0), expense_cash=Decimal(0),
+    )
 
     return DashboardFullResponse(
         scope=scope,
         currency=currency,  # type: ignore
         gaap=gaap,  # type: ignore
         as_of=datetime.now(timezone.utc),
-        bento=fetch_bento_summary(conn, target_currency=currency),
-        cash_kpi=fetch_cash_kpi(conn, entity_id),
-        accrual_kpi=fetch_accrual_kpi(conn, entity_id),
-        decision_queue=fetch_decision_queue(conn, entity_id),
-        ai_activity=fetch_ai_activity(conn, entity_id),
-        chart=fetch_chart(conn, entity_id),
+        bento=_safe("bento", lambda: with_savepoint(lambda: fetch_bento_summary(conn, target_currency=currency)), fallback_bento),
+        cash_kpi=_safe("cash_kpi", lambda: with_savepoint(lambda: fetch_cash_kpi(conn, entity_id)), fallback_cash),
+        accrual_kpi=_safe("accrual_kpi", lambda: with_savepoint(lambda: fetch_accrual_kpi(conn, entity_id)), fallback_accrual),
+        decision_queue=_safe("decision_queue", lambda: with_savepoint(lambda: fetch_decision_queue(conn, entity_id)), DecisionQueueSection(items=[], total=0)),
+        ai_activity=_safe("ai_activity", lambda: with_savepoint(lambda: fetch_ai_activity(conn, entity_id)), AiActivity(auto_mapped_today=0, review_needed=0, unusual=0, keyword_added_this_week=0, learning_impact=0, cascade=[])),
+        chart=_safe("chart", lambda: with_savepoint(lambda: fetch_chart(conn, entity_id)), ChartData(months=[])),
     )
