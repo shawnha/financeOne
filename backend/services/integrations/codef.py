@@ -174,7 +174,15 @@ def encrypt_password(plain: str, public_key_pem: Optional[str] = None) -> str:
         raise
     except Exception as e:
         logger.exception("Codef password encryption failed")
-        raise CodefError(f"Codef 공개키 처리 실패: {type(e).__name__}")
+        # 진단 hint — pem 길이 + 시작 prefix (값 자체 노출 X)
+        hint = (
+            f"pem_len={len(pem)} "
+            f"starts_BEGIN={pem.lstrip().startswith('-----BEGIN')} "
+            f"has_escaped_newline={chr(92) + chr(110) in pem}"
+        )
+        raise CodefError(
+            f"Codef 공개키 처리 실패: {type(e).__name__}: {str(e)[:160]} ({hint})"
+        )
 
 
 class CodefError(Exception):
