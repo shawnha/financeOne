@@ -580,6 +580,196 @@ def copy_internal_accounts(
         cur.close()
 
 
+class InternalAutoMapStandard(BaseModel):
+    entity_id: int
+    only_unmapped: bool = True   # True 면 standard_account_id IS NULL 만 대상
+    min_confidence: float = 0.55
+    apply: bool = False           # False = preview, True = 실제 UPDATE
+
+
+@router.post("/internal/auto-map-standard")
+def auto_map_standard(
+    body: InternalAutoMapStandard,
+    conn: PgConnection = Depends(get_db),
+):
+    """internal_accounts 의 standard_account_id 자동 매핑 (이름/거래처 통계 기반).
+
+    매핑 알고리즘 (entity 의 GAAP 자동 결정):
+      1. internal_account.name 과 standard_accounts.name similarity (pg_trgm) 매칭
+      2. 그 internal_account 에 매핑된 transactions 의 거래처 → standard_account_keywords 빈도 통계
+      3. 두 신호 weighted: 0.4 * name_sim + 0.6 * keyword_freq_ratio
+      4. min_confidence 이상만 채택
+
+    apply=False (preview) 면 후보 list 반환만, apply=True 면 UPDATE.
+    """
+    cur = conn.cursor()
+    try:
+        # 1) entity 검증 + GAAP 결정
+        cur.execute("SELECT id, type FROM entities WHERE id = %s", [body.entity_id])
+        ent = cur.fetchone()
+        if not ent:
+            raise HTTPException(404, "법인을 찾을 수 없음")
+        gaap_type = "US_GAAP" if ent[1] == "US_CORP" else "K_GAAP"
+
+        # 2) 대상 internal_accounts
+        where = "ia.entity_id = %s AND ia.is_active = true"
+        params = [body.entity_id]
+        if body.only_unmapped:
+            where += " AND ia.standard_account_id IS NULL"
+        cur.execute(
+            f"""
+            SELECT ia.id, ia.code, ia.name, ia.standard_account_id
+            FROM internal_accounts ia
+            WHERE {where}
+            ORDER BY ia.sort_order, ia.code
+            """,
+            params,
+        )
+        targets = cur.fetchall()
+
+        proposals: list[dict] = []
+        for ia_id, ia_code, ia_name, current_std_id in targets:
+            # 0순위: internal_code 가 standard_accounts.code 에 정확 매칭되면 즉시 채택
+            # (A3 seed 처럼 ledger 코드 기반으로 만들어진 internal_account 에 적용)
+            cur.execute(
+                """
+                SELECT id, code, name FROM standard_accounts
+                WHERE code = %s AND gaap_type = %s AND is_active = true
+                LIMIT 1
+                """,
+                [ia_code, gaap_type],
+            )
+            exact = cur.fetchone()
+            if exact:
+                proposals.append({
+                    "internal_id": ia_id, "internal_code": ia_code, "internal_name": ia_name,
+                    "current_std_id": current_std_id,
+                    "best": {"std_id": exact[0], "code": exact[1], "name": exact[2],
+                             "name_sim": 1.0, "kw_freq": 0.0},
+                    "confidence": 0.99,
+                    "alternatives": [],
+                    "accepted": True,
+                    "reason": "exact_code_match",
+                })
+                continue
+
+            # 1순위: name similarity
+            cur.execute(
+                """
+                SELECT id, code, name, similarity(name, %s) AS sim
+                FROM standard_accounts
+                WHERE gaap_type = %s AND is_active = true
+                  AND similarity(name, %s) > 0.2
+                ORDER BY sim DESC
+                LIMIT 3
+                """,
+                [ia_name, gaap_type, ia_name],
+            )
+            name_candidates = [
+                {"std_id": r[0], "code": r[1], "name": r[2], "name_sim": float(r[3])}
+                for r in cur.fetchall()
+            ]
+
+            # keyword freq — 이 internal_account 에 매핑된 transactions 의 counterparty
+            cur.execute(
+                """
+                SELECT sak.standard_account_id, COUNT(*) AS hits
+                FROM transactions t
+                JOIN standard_account_keywords sak
+                  ON t.counterparty ILIKE '%%' || sak.keyword || '%%'
+                JOIN standard_accounts sa
+                  ON sa.id = sak.standard_account_id
+                 AND sa.gaap_type = %s
+                WHERE t.entity_id = %s
+                  AND t.internal_account_id = %s
+                GROUP BY sak.standard_account_id
+                ORDER BY hits DESC
+                LIMIT 3
+                """,
+                [gaap_type, body.entity_id, ia_id],
+            )
+            kw_rows = cur.fetchall()
+            kw_total = sum(r[1] for r in kw_rows) or 1
+            kw_freq = {r[0]: r[1] / kw_total for r in kw_rows}
+
+            # 후보 score 계산: 두 신호 합산
+            score: dict[int, dict] = {}
+            for c in name_candidates:
+                score[c["std_id"]] = {
+                    "std_id": c["std_id"], "code": c["code"], "name": c["name"],
+                    "name_sim": c["name_sim"], "kw_freq": kw_freq.get(c["std_id"], 0.0),
+                }
+            for sid, freq in kw_freq.items():
+                if sid not in score:
+                    cur.execute(
+                        "SELECT code, name FROM standard_accounts WHERE id = %s",
+                        [sid],
+                    )
+                    r = cur.fetchone()
+                    if r:
+                        score[sid] = {
+                            "std_id": sid, "code": r[0], "name": r[1],
+                            "name_sim": 0.0, "kw_freq": freq,
+                        }
+            # 가중치 동적 조정: keyword 신호 있으면 두 신호 weighted, 없으면 name 단독
+            def _score(x: dict) -> float:
+                if kw_total > 1:    # 거래 데이터 충분
+                    return 0.4 * x["name_sim"] + 0.6 * x["kw_freq"]
+                return 0.9 * x["name_sim"]    # name_sim 단독 모드 (kw_total ≤ 1)
+
+            ranked = sorted(score.values(), key=lambda x: -_score(x))
+            best = ranked[0] if ranked else None
+            confidence = round(_score(best), 2) if best else 0.0
+
+            proposals.append({
+                "internal_id": ia_id,
+                "internal_code": ia_code,
+                "internal_name": ia_name,
+                "current_std_id": current_std_id,
+                "best": best,
+                "confidence": confidence,
+                "alternatives": ranked[1:3],
+                "accepted": bool(best and confidence >= body.min_confidence),
+                "reason": "name_sim+kw_freq" if kw_total > 1 else "name_sim_only",
+            })
+
+        # 3) apply
+        applied = 0
+        if body.apply:
+            for p in proposals:
+                if not p["accepted"]:
+                    continue
+                cur.execute(
+                    """
+                    UPDATE internal_accounts
+                       SET standard_account_id = %s, updated_at = NOW()
+                     WHERE id = %s
+                    """,
+                    [p["best"]["std_id"], p["internal_id"]],
+                )
+                applied += 1
+            conn.commit()
+
+        return {
+            "entity_id": body.entity_id,
+            "gaap_type": gaap_type,
+            "total_targets": len(targets),
+            "accepted": sum(1 for p in proposals if p["accepted"]),
+            "rejected_low_confidence": sum(1 for p in proposals if not p["accepted"]),
+            "applied": applied,
+            "preview": not body.apply,
+            "proposals": proposals,
+        }
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(500, f"표준계정 자동매핑 실패: {e}")
+    finally:
+        cur.close()
+
+
 @router.get("/internal/recommend-standard")
 def recommend_standard(
     entity_id: int = Query(...),

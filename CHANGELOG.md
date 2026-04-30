@@ -2,6 +2,31 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-04-30 — 표준계정 자동매핑 + 거래 자동매핑 옵션 + K-GAAP 14개 보강
+
+### Added
+- K-GAAP standard_accounts 14건 보강 (Alembic `p6q7r8s9t0u1`)
+  - 단기대여금 11400, 미수수익 11600, 선급비용 13300, 선수금 25900,
+    단기차입금 26000, 장기차입금 29300, 통신비 81400, 전력비 81600,
+    수선비 82000, 차량유지비 82200, 교육훈련비 82500, 도서인쇄비 82600,
+    건물관리비 83700, 이자비용 93100
+  - HOW seed 39 → 53 완성, keywords 18 → 매핑 가능
+- `POST /api/accounts/internal/auto-map-standard` — 표준계정 자동매핑 endpoint
+  - 매칭 0순위: internal_code = standard_code 정확 매칭 (confidence 0.99 즉시 채택)
+  - 1순위: name similarity (pg_trgm) + counterparty 빈도 통계 (2025 결산 keywords 학습)
+  - 가중치 동적 조정 — kw 신호 있으면 0.4 name + 0.6 kw, 없으면 0.9 name 단독
+  - preview/apply 모드 + only_unmapped 토글 + min_confidence 슬라이더
+  - reason 필드 (`exact_code_match` / `name_sim+kw_freq` / `name_sim_only`)
+- 내부계정 페이지 "표준계정 자동매핑" 버튼 + Dialog
+  - 미리보기에 entity GAAP/대상/채택/미달 + 후보별 reason/conf 표시 (최대 30건 스크롤)
+- 거래 페이지 "자동 매핑" 메뉴 두 갈래로 분리
+  - "비어있는 것만" — `only_unmapped=true`, 기존 매핑 보존
+  - "전체 재매핑" — 기존 동작 (manual/confirmed 빼곤 모두 갱신)
+
+### Changed
+- `POST /api/transactions/auto-map?only_unmapped=true|false` 쿼리 파라미터 추가
+  (default false — backward compat)
+
 ## [Unreleased] - 2026-04-30 — 2025 확정 결산자료 기반 standard_accounts/keywords/HOW seed
 
 ### Added

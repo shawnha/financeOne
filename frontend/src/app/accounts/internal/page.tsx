@@ -87,6 +87,28 @@ interface CopyResult {
   deactivated: number
 }
 
+interface AutoMapStdProposal {
+  internal_id: number
+  internal_code: string
+  internal_name: string
+  current_std_id: number | null
+  best: { std_id: number; code: string; name: string; name_sim: number; kw_freq: number } | null
+  confidence: number
+  accepted: boolean
+  reason: string
+}
+
+interface AutoMapStdResult {
+  entity_id: number
+  gaap_type: "K_GAAP" | "US_GAAP"
+  total_targets: number
+  accepted: number
+  rejected_low_confidence: number
+  applied: number
+  preview: boolean
+  proposals: AutoMapStdProposal[]
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -147,6 +169,13 @@ function InternalAccountsContent() {
   const [copyPreview, setCopyPreview] = useState<CopyResult | null>(null)
   const [copyRunning, setCopyRunning] = useState(false)
 
+  // Auto-map-standard state
+  const [stdMapDialogOpen, setStdMapDialogOpen] = useState(false)
+  const [stdMapOnlyUnmapped, setStdMapOnlyUnmapped] = useState(true)
+  const [stdMapMinConf, setStdMapMinConf] = useState(0.55)
+  const [stdMapPreview, setStdMapPreview] = useState<AutoMapStdResult | null>(null)
+  const [stdMapRunning, setStdMapRunning] = useState(false)
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -192,6 +221,40 @@ function InternalAccountsContent() {
     setCopyIncludeRecurring(true)
     setCopyIncludeMapping(true)
     setCopyPreview(null)
+  }
+
+  const resetStdMap = () => {
+    setStdMapDialogOpen(false)
+    setStdMapOnlyUnmapped(true)
+    setStdMapMinConf(0.55)
+    setStdMapPreview(null)
+  }
+
+  const runStdMap = async (apply: boolean) => {
+    if (!entityId) return
+    setStdMapRunning(true)
+    try {
+      const res = await fetchAPI<AutoMapStdResult>("/accounts/internal/auto-map-standard", {
+        method: "POST",
+        body: JSON.stringify({
+          entity_id: Number(entityId),
+          only_unmapped: stdMapOnlyUnmapped,
+          min_confidence: stdMapMinConf,
+          apply,
+        }),
+      })
+      if (apply) {
+        toast.success(`표준계정 매핑 적용 완료 — ${res.applied}건`)
+        resetStdMap()
+        await load()
+      } else {
+        setStdMapPreview(res)
+      }
+    } catch (e) {
+      toast.error(`표준계정 자동매핑 실패: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setStdMapRunning(false)
+    }
   }
 
   const runCopy = async (preview: boolean) => {
@@ -442,6 +505,17 @@ function InternalAccountsContent() {
               size="sm"
               variant="outline"
               onClick={() => {
+                setStdMapPreview(null)
+                setStdMapDialogOpen(true)
+              }}
+            >
+              <FolderTree className="mr-1.5 h-4 w-4" />
+              표준계정 자동매핑
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
                 setCopyPreview(null)
                 setCopyDialogOpen(true)
               }}
@@ -587,6 +661,104 @@ function InternalAccountsContent() {
             </Button>
             <Button onClick={handleSave} disabled={saving}>
               {saving ? "저장 중..." : editingId ? "수정" : "추가"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Auto-map standard accounts */}
+      <Dialog
+        open={stdMapDialogOpen}
+        onOpenChange={(open) => { if (!open) resetStdMap() }}
+      >
+        <DialogContent className="sm:max-w-[640px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FolderTree className="h-5 w-5" />
+              표준계정 자동매핑
+            </DialogTitle>
+            <DialogDescription>
+              내부계정의 표준계정(GAAP standard) 자동 매핑. 매칭 알고리즘:
+              ① internal code 가 standard code 와 정확히 일치 → 즉시 채택
+              ② 이름 유사도(pg_trgm) + 거래처 빈도 통계(2025 결산자료 학습)
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={stdMapOnlyUnmapped}
+                  onChange={(e) => { setStdMapOnlyUnmapped(e.target.checked); setStdMapPreview(null) }}
+                  className="h-4 w-4"
+                />
+                비어있는 매핑만 채우기 (기존 매핑 보존)
+              </label>
+              <div className="text-[11px] text-muted-foreground/70">
+                체크 해제 시 기존 매핑도 더 좋은 후보로 교체 시도
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <label className="text-sm">
+                최소 신뢰도 ({stdMapMinConf.toFixed(2)})
+              </label>
+              <input
+                type="range"
+                min={0.4} max={0.95} step={0.05}
+                value={stdMapMinConf}
+                onChange={(e) => { setStdMapMinConf(Number(e.target.value)); setStdMapPreview(null) }}
+                className="w-full"
+              />
+            </div>
+
+            {stdMapPreview && (
+              <div className="rounded-md border border-white/[0.06] bg-white/[0.02] p-3 text-xs space-y-2 max-h-72 overflow-auto">
+                <div className="font-medium text-foreground sticky top-0 bg-background/80 backdrop-blur py-1 -mx-3 px-3">
+                  {stdMapPreview.gaap_type} · 대상 {stdMapPreview.total_targets}건 ·
+                  채택 <span className="text-emerald-300">{stdMapPreview.accepted}</span> /
+                  미달 <span className="text-amber-300">{stdMapPreview.rejected_low_confidence}</span>
+                </div>
+                {stdMapPreview.proposals.slice(0, 30).map((p) => (
+                  <div key={p.internal_id} className="pl-2">
+                    <span className={p.accepted ? "text-emerald-300" : "text-amber-300"}>
+                      {p.accepted ? "✓" : "○"}
+                    </span>{" "}
+                    <span className="text-muted-foreground/80">{p.internal_code} {p.internal_name}</span>
+                    {p.best ? (
+                      <>
+                        {" → "}
+                        <span className="text-foreground">{p.best.code} {p.best.name}</span>
+                        <span className="text-muted-foreground/60"> · conf {p.confidence} · {p.reason}</span>
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground/60"> → 후보 없음</span>
+                    )}
+                  </div>
+                ))}
+                {stdMapPreview.proposals.length > 30 && (
+                  <div className="text-muted-foreground/60">... ({stdMapPreview.proposals.length - 30} more)</div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={resetStdMap} disabled={stdMapRunning}>
+              취소
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => runStdMap(false)}
+              disabled={stdMapRunning}
+            >
+              미리보기
+            </Button>
+            <Button
+              onClick={() => runStdMap(true)}
+              disabled={stdMapRunning || !stdMapPreview || stdMapPreview.accepted === 0}
+            >
+              실행 ({stdMapPreview?.accepted ?? 0}건 적용)
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -823,13 +823,16 @@ export default function TransactionsPage() {
 
   // 자동 매핑
   const [autoMapping, setAutoMapping] = useState(false)
-  const handleAutoMap = useCallback(async () => {
+  const handleAutoMap = useCallback(async (onlyUnmapped: boolean = false) => {
     if (!entityId) return
     setAutoMapping(true)
     try {
       const [y, m] = (filters.dateFrom && filters.dateTo && filters.dateFrom.slice(0, 7) === filters.dateTo.slice(0, 7)
         ? filters.dateFrom.slice(0, 7) : globalMonth).split("-").map(Number)
-      const result = await fetchAPI<{ new_mapped: number; updated: number; total_targets: number }>(`/transactions/auto-map?entity_id=${entityId}&year=${y}&month=${m}`, { method: "POST" })
+      const result = await fetchAPI<{ new_mapped: number; updated: number; total_targets: number }>(
+        `/transactions/auto-map?entity_id=${entityId}&year=${y}&month=${m}&only_unmapped=${onlyUnmapped}`,
+        { method: "POST" },
+      )
       const total = (result.new_mapped || 0) + (result.updated || 0)
       if (total > 0) {
         const parts = []
@@ -1079,10 +1082,14 @@ export default function TransactionsPage() {
                   <ChevronDown className="h-3.5 w-3.5" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48 rounded-2xl">
-                <DropdownMenuItem onClick={handleAutoMap} disabled={autoMapping} className="rounded-xl">
+              <DropdownMenuContent align="end" className="w-56 rounded-2xl">
+                <DropdownMenuItem onClick={() => handleAutoMap(true)} disabled={autoMapping} className="rounded-xl">
                   <Wand2 className="h-4 w-4 mr-2" />
-                  {autoMapping ? "매핑 중..." : "자동 매핑"}
+                  {autoMapping ? "매핑 중..." : "자동 매핑 (비어있는 것만)"}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleAutoMap(false)} disabled={autoMapping} className="rounded-xl">
+                  <Wand2 className="h-4 w-4 mr-2" />
+                  {autoMapping ? "매핑 중..." : "자동 매핑 (전체 재매핑)"}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={handleBulkConfirmAutoMapped}

@@ -285,6 +285,10 @@ def auto_map_unmapped(
     year: int = Query(None),
     month: int = Query(None),
     enable_ai: bool = Query(False),
+    only_unmapped: bool = Query(
+        False,
+        description="True 면 internal_account_id IS NULL 만 갱신 (기존 매핑 보존). False(기본) 면 manual/confirmed 빼고 모두 재매핑.",
+    ),
     conn: PgConnection = Depends(get_db),
 ):
     """자동 매핑: manual/confirmed 제외 거래에 5단계 캐스케이드 적용.
@@ -292,6 +296,10 @@ def auto_map_unmapped(
     year/month가 주어지면 해당 월만, 없으면 전체 대상.
     Slack 매칭이 확정된 거래는 item_description을 description에 합쳐서
     키워드/유사 매칭 정확도를 높인다.
+
+    only_unmapped=True 모드: 사용자가 직접 매핑한 결과는 절대 안 건드리고
+    아직 매핑이 비어있는 거래만 채움. mapping_source 가 무엇이든 internal_account_id
+    값만 NULL 이면 대상.
     """
     cur = conn.cursor()
     try:
@@ -301,6 +309,8 @@ def auto_map_unmapped(
         if year and month:
             month_filter = "AND date_trunc('month', t.date) = %s::date"
             params.append(f"{year}-{month:02d}-01")
+
+        unmapped_filter = "AND t.internal_account_id IS NULL" if only_unmapped else ""
 
         cur.execute(
             f"""
@@ -319,6 +329,7 @@ def auto_map_unmapped(
               AND (t.mapping_source IS NULL OR t.mapping_source NOT IN ('manual', 'confirmed'))
               AND t.is_duplicate = false
               {month_filter}
+              {unmapped_filter}
             """,
             params,
         )
