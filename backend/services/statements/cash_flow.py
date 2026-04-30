@@ -29,7 +29,7 @@ def generate_cash_flow_statement(
         WHERE je.entity_id = %s AND je.status = 'posted'
           AND je.entry_date < %s
           AND jel.standard_account_id = (
-              SELECT id FROM standard_accounts WHERE code = '10100'
+              SELECT id FROM standard_accounts WHERE code = '10100' AND gaap_type = 'K_GAAP'
           )
         """,
         [entity_id, start_date],
@@ -45,7 +45,7 @@ def generate_cash_flow_statement(
         WHERE je.entity_id = %s AND je.status = 'posted'
           AND je.entry_date >= %s AND je.entry_date <= %s
           AND jel.standard_account_id = (
-              SELECT id FROM standard_accounts WHERE code = '10100'
+              SELECT id FROM standard_accounts WHERE code = '10100' AND gaap_type = 'K_GAAP'
           )
         """,
         [entity_id, start_date, end_date],
@@ -61,7 +61,7 @@ def generate_cash_flow_statement(
         WHERE je.entity_id = %s AND je.status = 'posted'
           AND je.entry_date >= %s AND je.entry_date <= %s
           AND jel.standard_account_id = (
-              SELECT id FROM standard_accounts WHERE code = '10100'
+              SELECT id FROM standard_accounts WHERE code = '10100' AND gaap_type = 'K_GAAP'
           )
         """,
         [entity_id, start_date, end_date],
@@ -82,7 +82,7 @@ def generate_cash_flow_statement(
         WHERE je.entity_id = %s AND je.status = 'posted'
           AND je.entry_date <= %s
           AND jel.standard_account_id = (
-              SELECT id FROM standard_accounts WHERE code = '10100'
+              SELECT id FROM standard_accounts WHERE code = '10100' AND gaap_type = 'K_GAAP'
           )
         """,
         [entity_id, end_date],

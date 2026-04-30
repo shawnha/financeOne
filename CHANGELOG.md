@@ -2,6 +2,33 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-04-30 — standard_accounts GAAP 분리 (US-GAAP COA 추가)
+
+### Added
+- `standard_accounts.gaap_type` 컬럼 추가 (`K_GAAP` | `US_GAAP`, default `K_GAAP`)
+- US-GAAP COA 61건 seed (gaap_mapping 의 distinct us_gaap_code 추출)
+  - normal_side 휴리스틱: 1xxx/5xxx → debit, 그 외 → credit
+- `GET /api/accounts/standard?entity_id=X` 가 entity.type 기반 gaap_type 자동 필터
+  - `US_CORP` (HOI) → US_GAAP
+  - `KR_CORP` (HOK/HOR/HOW) → K_GAAP
+  - `?gaap_type=US_GAAP|K_GAAP` 명시 override 가능
+- 응답에 `gaap_type` 필드 노출
+
+### Changed
+- `code` UNIQUE 제약 → `(code, gaap_type)` 복합 UNIQUE (US/K-GAAP namespace 분리)
+- `parent_code` FK 제거 (단일 unique 깨짐 → application-level 트리)
+- 기존 `WHERE code = X` lookup 모두 `AND gaap_type = 'K_GAAP'` 명시
+  - `bookkeeping_engine._get_cash_account_id`, `_get_accounts_payable_id`
+  - `invoice_service._lookup_account_id`
+  - `salesone.py` sales_acc 조회
+  - `statements/cash_flow.py` 현금 잔액 4 곳 (10100)
+- `standard_account_recommender`: US_CORP entity 는 keyword_dict 단계 skip
+  (현재 keyword 사전이 K-GAAP 가정이라 잘못된 추천 방지)
+
+### Notes (다음 세션)
+- HOI 의 internal_accounts 40 건은 여전히 K-GAAP standard 를 가리킴 → 수동 재매핑 필요
+  (자동 매핑은 신뢰도 부족, 검토 후 진행)
+
 ## [Unreleased] - 2026-04-30 — 한아원홀세일(HOW) 법인 추가 + Codef 동적 법인 리스트
 
 ### Added

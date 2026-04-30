@@ -40,7 +40,11 @@ def _quantize(amount) -> Decimal:
 
 
 def _lookup_account_id(cur, code: str) -> int:
-    cur.execute("SELECT id FROM standard_accounts WHERE code = %s", [code])
+    # K-GAAP 코드 (한국 invoice). gaap_type 분리 후 ambiguous 방지.
+    cur.execute(
+        "SELECT id FROM standard_accounts WHERE code = %s AND gaap_type = 'K_GAAP'",
+        [code],
+    )
     row = cur.fetchone()
     if not row:
         raise RuntimeError(f"standard_account {code} not found")

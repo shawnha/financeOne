@@ -54,7 +54,12 @@ def recommend_standard_account(
             "matched_name": row[1],
         }
 
-    # 3. 일상어 사전 (standard_account_keywords)
+    # 3. 일상어 사전 (standard_account_keywords) — K-GAAP 키워드만 등록되어 있어
+    # US_CORP entity (HOI) 에는 적용하지 않는다 (잘못된 K-GAAP id 추천 방지).
+    cur.execute("SELECT type FROM entities WHERE id = %s", [entity_id])
+    ent = cur.fetchone()
+    if ent and ent[0] == "US_CORP":
+        return None
     cur.execute(
         """
         SELECT sak.standard_account_id, sak.confidence, sak.keyword

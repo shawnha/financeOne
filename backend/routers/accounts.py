@@ -247,14 +247,38 @@ class MappingRuleUpdate(BaseModel):
 @router.get("/standard")
 def list_standard_accounts(
     entity_id: Optional[int] = None,
+    gaap_type: Optional[str] = Query(None, description="K_GAAP | US_GAAP — 미지정시 entity type 기반 자동 결정"),
     conn: PgConnection = Depends(get_db),
 ):
+    """표준 계정과목 조회.
+
+    - entity_id 지정 + gaap_type 미지정 → entity.type 으로 자동 필터:
+        US_CORP (HOI) → gaap_type='US_GAAP'
+        KR_CORP (HOK/HOR/HOW) → gaap_type='K_GAAP'
+    - gaap_type 명시 시 그 값으로 필터
+    - 둘 다 미지정 → 모든 GAAP 반환 (관리/디버깅용)
+    """
     cur = conn.cursor()
+
+    # entity_id → gaap_type 자동 결정
+    resolved_gaap = gaap_type
+    if entity_id is not None and resolved_gaap is None:
+        cur.execute("SELECT type FROM entities WHERE id = %s", [entity_id])
+        ent_row = cur.fetchone()
+        if ent_row:
+            resolved_gaap = "US_GAAP" if ent_row[0] == "US_CORP" else "K_GAAP"
+
+    gaap_clause = "AND sa.gaap_type = %s" if resolved_gaap else ""
+    gaap_clause_simple = "AND gaap_type = %s" if resolved_gaap else ""
+
     if entity_id is not None:
+        params = [entity_id]
+        if resolved_gaap:
+            params.append(resolved_gaap)
         cur.execute(
-            """
+            f"""
             SELECT sa.id, sa.code, sa.name, sa.category, sa.subcategory,
-                   sa.normal_side, sa.sort_order, sa.description,
+                   sa.normal_side, sa.sort_order, sa.description, sa.gaap_type,
                    ia.id AS mapped_internal_id,
                    ia.name AS mapped_internal_name,
                    ia.code AS mapped_internal_code
@@ -264,14 +288,22 @@ def list_standard_accounts(
               AND ia.entity_id = %s
               AND ia.is_active = true
             WHERE sa.is_active = true
+              {gaap_clause}
             ORDER BY sa.sort_order, sa.code
             """,
-            [entity_id],
+            params,
         )
     else:
+        params = []
+        if resolved_gaap:
+            params.append(resolved_gaap)
         cur.execute(
-            "SELECT id, code, name, category, subcategory, normal_side, sort_order, description "
-            "FROM standard_accounts WHERE is_active = true ORDER BY sort_order, code"
+            f"""
+            SELECT id, code, name, category, subcategory, normal_side, sort_order, description, gaap_type
+            FROM standard_accounts WHERE is_active = true {gaap_clause_simple}
+            ORDER BY sort_order, code
+            """,
+            params,
         )
     rows = fetch_all(cur)
     cur.close()

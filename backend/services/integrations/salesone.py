@@ -201,8 +201,11 @@ def sync_orders_to_invoices(
     cur = conn.cursor()
     cur.execute("SET search_path TO financeone, public")
 
-    # standard_account_id lookup
-    cur.execute("SELECT id FROM standard_accounts WHERE code = %s", [sales_std_code])
+    # standard_account_id lookup — K-GAAP (sales 통합은 한국 법인용)
+    cur.execute(
+        "SELECT id FROM standard_accounts WHERE code = %s AND gaap_type = 'K_GAAP'",
+        [sales_std_code],
+    )
     row = cur.fetchone()
     if not row:
         cur.close()

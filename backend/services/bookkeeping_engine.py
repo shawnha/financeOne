@@ -60,7 +60,11 @@ def _get_cash_account_id(cur, source_type: str | None = None) -> int:
     code = DEFAULT_CASH_ACCOUNT_CODE
     if source_type and source_type in BANK_SOURCE_TYPES:
         code = DEFAULT_BANK_ACCOUNT_CODE
-    cur.execute("SELECT id FROM standard_accounts WHERE code = %s", [code])
+    # K-GAAP 코드 — gaap_type 분리 후 ambiguous 방지
+    cur.execute(
+        "SELECT id FROM standard_accounts WHERE code = %s AND gaap_type = 'K_GAAP'",
+        [code],
+    )
     row = cur.fetchone()
     if not row:
         raise RuntimeError(f"Cash account {code} not found in standard_accounts")
@@ -70,7 +74,7 @@ def _get_cash_account_id(cur, source_type: str | None = None) -> int:
 def _get_accounts_payable_id(cur) -> int:
     """미지급비용(26200) standard_account ID."""
     cur.execute(
-        "SELECT id FROM standard_accounts WHERE code = %s",
+        "SELECT id FROM standard_accounts WHERE code = %s AND gaap_type = 'K_GAAP'",
         [ACCOUNTS_PAYABLE_CODE],
     )
     row = cur.fetchone()
