@@ -2,6 +2,16 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-04-30 — 내부 계정과목 다른 회사 복사 기능
+
+### Added
+- 내부 계정과목 페이지에 "다른 회사에서 복사" 기능
+  - `POST /api/accounts/internal/copy` — source/target 법인 지정, depth 기반 정렬로 부모-자식 관계 보존
+  - 모드: `merge`(같은 code skip, 추천) / `replace`(기존 비활성화 후 복사)
+  - 옵션: 표준계정 매핑 / 고정설정(is_recurring) 포함 여부 토글
+  - `preview: true` 로 시뮬레이션 후 rollback — 실행 전 변경 건수 미리보기
+  - 단일 트랜잭션 원자성, code unique 충돌 자동 처리
+
 ## [Unreleased] - 2026-04-29 — Codef 자동 sync 마지막 실행 시각 노출 (Vercel 호환)
 
 ### Added

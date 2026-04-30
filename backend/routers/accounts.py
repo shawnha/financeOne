@@ -184,6 +184,15 @@ class InternalAccountUpdate(BaseModel):
     is_recurring: Optional[bool] = None
 
 
+class InternalAccountCopy(BaseModel):
+    source_entity_id: int
+    target_entity_id: int
+    mode: str = "merge"            # "merge" | "replace"
+    include_recurring: bool = True
+    include_standard_mapping: bool = True
+    preview: bool = False           # True 면 시뮬레이션 후 rollback
+
+
 def _normalize_card_number(raw: str) -> str:
     """멤버 카드번호를 '****XXXX' (뒤 4자리) 포맷으로 정규화.
 
@@ -364,6 +373,177 @@ def create_internal_account(
                 detail=f"Account code '{body.code}' already exists for entity {body.entity_id}",
             )
         raise HTTPException(status_code=400, detail=error_msg)
+    finally:
+        cur.close()
+
+
+@router.post("/internal/copy")
+def copy_internal_accounts(
+    body: InternalAccountCopy,
+    conn: PgConnection = Depends(get_db),
+):
+    """다른 법인의 내부 계정과목을 현재 법인으로 복사.
+
+    mode:
+      - "merge": 기존 계정 유지, source 의 같은 code 는 skip
+      - "replace": 기존 활성 계정 모두 비활성화 후 source 그대로 복사
+    preview=True 면 INSERT 시뮬레이션 후 rollback (UI 미리보기용).
+
+    부모-자식 관계는 source 의 parent_id 를 새 ID 로 remap 하여 보존.
+    """
+    if body.source_entity_id == body.target_entity_id:
+        raise HTTPException(400, "source 와 target 법인이 동일합니다")
+    if body.mode not in ("merge", "replace"):
+        raise HTTPException(400, "mode 는 'merge' 또는 'replace' 만 허용됩니다")
+
+    cur = conn.cursor()
+    try:
+        # 1) 두 법인 검증
+        cur.execute(
+            "SELECT id, name FROM entities WHERE id IN (%s, %s)",
+            [body.source_entity_id, body.target_entity_id],
+        )
+        ents = cur.fetchall()
+        if len(ents) != 2:
+            raise HTTPException(404, "법인을 찾을 수 없습니다")
+        ent_name = {r[0]: r[1] for r in ents}
+
+        # 2) source 계정 로드
+        cur.execute(
+            """
+            SELECT id, code, name, standard_account_id, parent_id,
+                   sort_order, is_recurring
+            FROM internal_accounts
+            WHERE entity_id = %s AND is_active = true
+            """,
+            [body.source_entity_id],
+        )
+        src_rows = cur.fetchall()
+        # tuple → dict 로 사용성 향상
+        src = [
+            {
+                "id": r[0], "code": r[1], "name": r[2],
+                "std_id": r[3], "parent_id": r[4],
+                "sort_order": r[5] or 0, "is_recurring": bool(r[6]),
+            }
+            for r in src_rows
+        ]
+        src_by_id = {r["id"]: r for r in src}
+
+        # 3) target 기존 active 계정
+        cur.execute(
+            "SELECT code FROM internal_accounts WHERE entity_id = %s AND is_active = true",
+            [body.target_entity_id],
+        )
+        target_before = [r[0] for r in cur.fetchall()]
+        existing_codes = set(target_before)
+
+        deactivated = 0
+        if body.mode == "replace":
+            cur.execute(
+                "UPDATE internal_accounts SET is_active = false, updated_at = NOW() "
+                "WHERE entity_id = %s AND is_active = true",
+                [body.target_entity_id],
+            )
+            deactivated = cur.rowcount or 0
+            existing_codes = set()
+
+        # 4) depth 계산 — 부모 먼저 INSERT 되도록 정렬
+        depth_cache: dict[int, int] = {}
+
+        def get_depth(rid: int, stack: set) -> int:
+            if rid in depth_cache:
+                return depth_cache[rid]
+            if rid in stack:           # cycle 방어
+                depth_cache[rid] = 0
+                return 0
+            row = src_by_id.get(rid)
+            if not row:
+                return 0
+            pid = row["parent_id"]
+            if pid is None or pid not in src_by_id:
+                depth_cache[rid] = 0
+            else:
+                stack.add(rid)
+                depth_cache[rid] = get_depth(pid, stack) + 1
+                stack.discard(rid)
+            return depth_cache[rid]
+
+        for r in src:
+            get_depth(r["id"], set())
+
+        src_sorted = sorted(
+            src,
+            key=lambda r: (depth_cache.get(r["id"], 0), r["sort_order"], r["id"]),
+        )
+
+        # 5) 순차 INSERT — old_id → new_id 맵 유지
+        id_map: dict[int, int] = {}
+        inserted = 0
+        skipped_existing = 0
+
+        for r in src_sorted:
+            if r["code"] in existing_codes:
+                skipped_existing += 1
+                continue
+            old_pid = r["parent_id"]
+            new_pid = id_map.get(old_pid) if old_pid else None
+            std_id = r["std_id"] if body.include_standard_mapping else None
+            is_rec = r["is_recurring"] if body.include_recurring else False
+
+            cur.execute(
+                """
+                INSERT INTO internal_accounts
+                    (entity_id, code, name, standard_account_id, parent_id,
+                     sort_order, is_recurring)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                [
+                    body.target_entity_id, r["code"], r["name"],
+                    std_id, new_pid, r["sort_order"], is_rec,
+                ],
+            )
+            new_id = cur.fetchone()[0]
+            id_map[r["id"]] = new_id
+            inserted += 1
+
+        cur.execute(
+            "SELECT COUNT(*) FROM internal_accounts WHERE entity_id = %s AND is_active = true",
+            [body.target_entity_id],
+        )
+        target_after = cur.fetchone()[0]
+
+        result = {
+            "source": {
+                "entity_id": body.source_entity_id,
+                "name": ent_name.get(body.source_entity_id),
+                "total": len(src),
+            },
+            "target": {
+                "entity_id": body.target_entity_id,
+                "name": ent_name.get(body.target_entity_id),
+                "before": len(target_before),
+                "after": target_after,
+            },
+            "mode": body.mode,
+            "preview": body.preview,
+            "inserted": inserted,
+            "skipped_existing": skipped_existing,
+            "deactivated": deactivated,
+        }
+
+        if body.preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        return result
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(500, f"복사 실패: {e}")
     finally:
         cur.close()
 

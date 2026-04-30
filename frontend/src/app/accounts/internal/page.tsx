@@ -33,7 +33,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
-import { AlertTriangle, FolderTree, Plus } from "lucide-react"
+import { AlertTriangle, FolderTree, Plus, Copy } from "lucide-react"
 import { TreeAccountItem, flattenTree, type TreeAccount } from "@/components/tree-account-item"
 
 // ---------------------------------------------------------------------------
@@ -69,6 +69,22 @@ const EMPTY_FORM: FormData = {
   name: "",
   standard_account_id: "",
   parent_id: "",
+}
+
+interface EntityOption {
+  id: number
+  name: string
+  code: string
+}
+
+interface CopyResult {
+  source: { entity_id: number; name: string; total: number }
+  target: { entity_id: number; name: string; before: number; after: number }
+  mode: "merge" | "replace"
+  preview: boolean
+  inserted: number
+  skipped_existing: number
+  deactivated: number
 }
 
 // ---------------------------------------------------------------------------
@@ -121,6 +137,16 @@ function InternalAccountsContent() {
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<RawAccount | null>(null)
 
+  // Copy-from-other-entity state
+  const [entities, setEntities] = useState<EntityOption[]>([])
+  const [copyDialogOpen, setCopyDialogOpen] = useState(false)
+  const [copySourceId, setCopySourceId] = useState<string>("")
+  const [copyMode, setCopyMode] = useState<"merge" | "replace">("merge")
+  const [copyIncludeRecurring, setCopyIncludeRecurring] = useState(true)
+  const [copyIncludeMapping, setCopyIncludeMapping] = useState(true)
+  const [copyPreview, setCopyPreview] = useState<CopyResult | null>(null)
+  const [copyRunning, setCopyRunning] = useState(false)
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -147,7 +173,63 @@ function InternalAccountsContent() {
       .catch(() => {})
   }, [])
 
+  useEffect(() => {
+    fetchAPI<EntityOption[]>("/entities")
+      .then(setEntities)
+      .catch(() => {})
+  }, [])
+
   useEffect(() => { load() }, [load])
+
+  // ---------------------------------------------------------------------------
+  // Copy from another entity
+  // ---------------------------------------------------------------------------
+
+  const resetCopyDialog = () => {
+    setCopyDialogOpen(false)
+    setCopySourceId("")
+    setCopyMode("merge")
+    setCopyIncludeRecurring(true)
+    setCopyIncludeMapping(true)
+    setCopyPreview(null)
+  }
+
+  const runCopy = async (preview: boolean) => {
+    if (!entityId) return
+    if (!copySourceId) {
+      toast.error("복사해 올 회사를 선택해주세요")
+      return
+    }
+    setCopyRunning(true)
+    try {
+      const res = await fetchAPI<CopyResult>("/accounts/internal/copy", {
+        method: "POST",
+        body: JSON.stringify({
+          source_entity_id: Number(copySourceId),
+          target_entity_id: Number(entityId),
+          mode: copyMode,
+          include_recurring: copyIncludeRecurring,
+          include_standard_mapping: copyIncludeMapping,
+          preview,
+        }),
+      })
+      if (preview) {
+        setCopyPreview(res)
+      } else {
+        toast.success(
+          `복사 완료 — 추가 ${res.inserted}건` +
+          (res.skipped_existing ? ` · 중복 ${res.skipped_existing}건 skip` : "") +
+          (res.deactivated ? ` · 기존 ${res.deactivated}건 비활성화` : ""),
+        )
+        resetCopyDialog()
+        await load()
+      }
+    } catch (e) {
+      toast.error(`복사 실패: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setCopyRunning(false)
+    }
+  }
 
   const handleToggleRecurring = async (account: TreeAccount) => {
     try {
@@ -356,6 +438,17 @@ function InternalAccountsContent() {
             내부 계정과목 ({accounts.length}건)
           </CardTitle>
           <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setCopyPreview(null)
+                setCopyDialogOpen(true)
+              }}
+            >
+              <Copy className="mr-1.5 h-4 w-4" />
+              다른 회사에서 복사
+            </Button>
             <Button size="sm" onClick={() => {
               setEditingId(null)
               setForm(EMPTY_FORM)
@@ -494,6 +587,129 @@ function InternalAccountsContent() {
             </Button>
             <Button onClick={handleSave} disabled={saving}>
               {saving ? "저장 중..." : editingId ? "수정" : "추가"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Copy from another entity */}
+      <Dialog
+        open={copyDialogOpen}
+        onOpenChange={(open) => { if (!open) resetCopyDialog() }}
+      >
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Copy className="h-5 w-5" />
+              다른 회사에서 내부계정 복사
+            </DialogTitle>
+            <DialogDescription>
+              선택한 회사의 내부계정과목 트리(부모-자식 관계 포함)를 현재 회사로 복사합니다.
+              표준계정 매핑과 고정설정도 함께 가져올 수 있습니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">복사해 올 회사</label>
+              <Select value={copySourceId} onValueChange={(v) => { setCopySourceId(v); setCopyPreview(null) }}>
+                <SelectTrigger>
+                  <SelectValue placeholder="회사 선택" />
+                </SelectTrigger>
+                <SelectContent>
+                  {entities
+                    .filter((e) => String(e.id) !== entityId)
+                    .map((e) => (
+                      <SelectItem key={e.id} value={String(e.id)}>
+                        {e.name} <span className="ml-2 text-xs text-muted-foreground">({e.code})</span>
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">모드</label>
+              <Select
+                value={copyMode}
+                onValueChange={(v) => { setCopyMode(v as "merge" | "replace"); setCopyPreview(null) }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="merge">병합 (추천) — 같은 코드는 skip, 새로운 계정만 추가</SelectItem>
+                  <SelectItem value="replace">덮어쓰기 — 기존 계정 모두 비활성화 후 복사</SelectItem>
+                </SelectContent>
+              </Select>
+              {copyMode === "replace" && (
+                <p className="text-[11px] text-amber-300/80">
+                  주의: 현재 회사의 모든 활성 계정을 비활성화합니다. 거래·예상 매핑이 끊길 수 있어요.
+                </p>
+              )}
+            </div>
+
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">옵션</label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={copyIncludeMapping}
+                  onChange={(e) => { setCopyIncludeMapping(e.target.checked); setCopyPreview(null) }}
+                  className="h-4 w-4"
+                />
+                표준계정 매핑 함께 복사
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={copyIncludeRecurring}
+                  onChange={(e) => { setCopyIncludeRecurring(e.target.checked); setCopyPreview(null) }}
+                  className="h-4 w-4"
+                />
+                고정설정(매월 반복) 함께 복사
+              </label>
+            </div>
+
+            {copyPreview && (
+              <div className="rounded-md border border-white/[0.06] bg-white/[0.02] p-3 text-xs space-y-1">
+                <div className="font-medium text-foreground">미리보기 결과</div>
+                <div className="text-muted-foreground">
+                  {copyPreview.source.name} · {copyPreview.source.total}건
+                  {" → "}
+                  {copyPreview.target.name} · {copyPreview.target.before}건
+                </div>
+                <div>
+                  추가 <span className="text-emerald-300">{copyPreview.inserted}</span>건
+                  {copyPreview.skipped_existing > 0 && (
+                    <> · 중복 skip <span className="text-amber-300">{copyPreview.skipped_existing}</span>건</>
+                  )}
+                  {copyPreview.deactivated > 0 && (
+                    <> · 기존 비활성화 <span className="text-red-300">{copyPreview.deactivated}</span>건</>
+                  )}
+                </div>
+                <div className="text-muted-foreground/70">
+                  실행 후 결과: 활성 계정 {copyPreview.target.before} → <span className="text-foreground">{copyPreview.target.after}</span>건
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={resetCopyDialog} disabled={copyRunning}>
+              취소
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => runCopy(true)}
+              disabled={copyRunning || !copySourceId}
+            >
+              {copyRunning && copyPreview === null ? "확인 중..." : "미리보기"}
+            </Button>
+            <Button
+              onClick={() => runCopy(false)}
+              disabled={copyRunning || !copySourceId || !copyPreview}
+            >
+              {copyRunning && copyPreview ? "복사 중..." : "실행"}
             </Button>
           </DialogFooter>
         </DialogContent>
