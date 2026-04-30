@@ -191,6 +191,7 @@ class InternalAccountCopy(BaseModel):
     include_recurring: bool = True
     include_standard_mapping: bool = True
     preview: bool = False           # True 면 시뮬레이션 후 rollback
+    fix_existing_parents: bool = True  # merge 시 같은 code 가 있으면 parent_id 만 source 트리 기준으로 갱신 (트리 깨짐 보정)
 
 
 def _normalize_card_number(raw: str) -> str:
@@ -475,7 +476,7 @@ def copy_internal_accounts(
         deactivated = 0
         if body.mode == "replace":
             cur.execute(
-                "UPDATE internal_accounts SET is_active = false, updated_at = NOW() "
+                "UPDATE internal_accounts SET is_active = false "
                 "WHERE entity_id = %s AND is_active = true",
                 [body.target_entity_id],
             )
@@ -516,15 +517,40 @@ def copy_internal_accounts(
         id_map: dict[int, int] = {}
         inserted = 0
         skipped_existing = 0
+        fixed_parents = 0
 
         for r in src_sorted:
             if r["code"] in existing_codes:
                 skipped_existing += 1
                 # 자식들이 이 부모를 참조할 수 있도록 target 의 같은 code id 를 id_map 에 등록
-                # (이게 빠지면 손자가 root 로 떨어짐 — 트리 깨짐 버그)
                 target_id = target_id_by_code.get(r["code"])
                 if target_id:
                     id_map[r["id"]] = target_id
+
+                # 트리 보정: source 의 parent_id 를 따라가서 target 의 같은 code 의 id 를
+                # 새 parent_id 로 UPDATE. 사용자가 이미 만든 매핑은 standard_account_id 로 보존,
+                # parent 만 source 트리에 맞게 갱신.
+                if body.fix_existing_parents and target_id:
+                    src_parent = src_by_id.get(r["parent_id"]) if r["parent_id"] else None
+                    desired_parent_id: int | None = None
+                    if src_parent:
+                        desired_parent_id = target_id_by_code.get(src_parent["code"])
+                        if desired_parent_id is None:
+                            # source 부모가 INSERT 된 신규일 수도 — id_map 에서 찾음
+                            desired_parent_id = id_map.get(src_parent["id"])
+                    # 현재 target row 의 parent_id 조회 후 다르면 UPDATE
+                    cur.execute(
+                        "SELECT parent_id FROM internal_accounts WHERE id = %s",
+                        [target_id],
+                    )
+                    cur_row = cur.fetchone()
+                    current_parent = cur_row[0] if cur_row else None
+                    if current_parent != desired_parent_id:
+                        cur.execute(
+                            "UPDATE internal_accounts SET parent_id = %s WHERE id = %s",
+                            [desired_parent_id, target_id],
+                        )
+                        fixed_parents += 1
                 continue
             old_pid = r["parent_id"]
             new_pid = id_map.get(old_pid) if old_pid else None
@@ -571,6 +597,7 @@ def copy_internal_accounts(
             "inserted": inserted,
             "skipped_existing": skipped_existing,
             "deactivated": deactivated,
+            "fixed_parents": fixed_parents,
         }
 
         if body.preview:

@@ -85,6 +85,7 @@ interface CopyResult {
   inserted: number
   skipped_existing: number
   deactivated: number
+  fixed_parents?: number
 }
 
 interface AutoMapStdProposal {
@@ -166,6 +167,7 @@ function InternalAccountsContent() {
   const [copyMode, setCopyMode] = useState<"merge" | "replace">("merge")
   const [copyIncludeRecurring, setCopyIncludeRecurring] = useState(true)
   const [copyIncludeMapping, setCopyIncludeMapping] = useState(true)
+  const [copyFixParents, setCopyFixParents] = useState(true)
   const [copyPreview, setCopyPreview] = useState<CopyResult | null>(null)
   const [copyRunning, setCopyRunning] = useState(false)
 
@@ -273,6 +275,7 @@ function InternalAccountsContent() {
           mode: copyMode,
           include_recurring: copyIncludeRecurring,
           include_standard_mapping: copyIncludeMapping,
+          fix_existing_parents: copyFixParents,
           preview,
         }),
       })
@@ -282,6 +285,7 @@ function InternalAccountsContent() {
         toast.success(
           `복사 완료 — 추가 ${res.inserted}건` +
           (res.skipped_existing ? ` · 중복 ${res.skipped_existing}건 skip` : "") +
+          (res.fixed_parents ? ` · 트리 보정 ${res.fixed_parents}건` : "") +
           (res.deactivated ? ` · 기존 ${res.deactivated}건 비활성화` : ""),
         )
         resetCopyDialog()
@@ -840,6 +844,20 @@ function InternalAccountsContent() {
                 />
                 고정설정(매월 반복) 함께 복사
               </label>
+              {copyMode === "merge" && (
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={copyFixParents}
+                    onChange={(e) => { setCopyFixParents(e.target.checked); setCopyPreview(null) }}
+                    className="h-4 w-4"
+                  />
+                  같은 코드가 있어도 부모-자식 트리 보정
+                  <span className="ml-1 text-[11px] text-muted-foreground/70">
+                    (이미 있는 계정의 parent 만 source 트리에 맞춰 갱신)
+                  </span>
+                </label>
+              )}
             </div>
 
             {copyPreview && (
@@ -854,6 +872,9 @@ function InternalAccountsContent() {
                   추가 <span className="text-emerald-300">{copyPreview.inserted}</span>건
                   {copyPreview.skipped_existing > 0 && (
                     <> · 중복 skip <span className="text-amber-300">{copyPreview.skipped_existing}</span>건</>
+                  )}
+                  {copyPreview.fixed_parents !== undefined && copyPreview.fixed_parents > 0 && (
+                    <> · 트리 보정 <span className="text-blue-300">{copyPreview.fixed_parents}</span>건</>
                   )}
                   {copyPreview.deactivated > 0 && (
                     <> · 기존 비활성화 <span className="text-red-300">{copyPreview.deactivated}</span>건</>
