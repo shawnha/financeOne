@@ -24,9 +24,11 @@ interface DashboardContextValue {
   scope: Scope
   currency: Currency
   gaap: Gaap
+  yearMonth: string // 'YYYY-MM'
   setScope: (s: Scope) => void
   setCurrency: (c: Currency) => void
   setGaap: (g: Gaap) => void
+  setYearMonth: (ym: string) => void
 
   // Data
   data: DashboardFullResponse | null
@@ -37,12 +39,18 @@ interface DashboardContextValue {
   refresh: () => void
 }
 
+function currentYearMonth(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+}
+
 const DashboardContext = createContext<DashboardContextValue | null>(null)
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
   const [scope, setScope] = useState<Scope>("group")
   const [currency, setCurrency] = useState<Currency>("USD")
   const [gaap, setGaap] = useState<Gaap>("K")
+  const [yearMonth, setYearMonth] = useState<string>(currentYearMonth)
 
   const [data, setData] = useState<DashboardFullResponse | null>(null)
   const [state, setState] = useState<LoadState>("loading")
@@ -57,6 +65,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       if (scope !== "group") params.set("entity_id", String(scope))
       params.set("currency", currency)
       params.set("gaap", gaap)
+      params.set("year_month", yearMonth)
 
       const result = await fetchAPI<DashboardFullResponse>(
         `/dashboard/full?${params.toString()}`,
@@ -70,7 +79,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       )
       setState("error")
     }
-  }, [scope, currency, gaap])
+  }, [scope, currency, gaap, yearMonth])
 
   // Initial + filter change
   useEffect(() => {
@@ -91,15 +100,17 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       scope,
       currency,
       gaap,
+      yearMonth,
       setScope,
       setCurrency,
       setGaap,
+      setYearMonth,
       data,
       state,
       errorMessage,
       refresh: fetchFull,
     }),
-    [scope, currency, gaap, data, state, errorMessage, fetchFull],
+    [scope, currency, gaap, yearMonth, data, state, errorMessage, fetchFull],
   )
 
   return (

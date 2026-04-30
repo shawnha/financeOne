@@ -146,6 +146,8 @@ def test_fetch_dashboard_full_all_sections_fail_returns_safe_defaults(monkeypatc
     monkeypatch.setattr(ds, "fetch_decision_queue", boom)
     monkeypatch.setattr(ds, "fetch_ai_activity", boom)
     monkeypatch.setattr(ds, "fetch_chart", boom)
+    # _fx_rate may be called inside savepoint or not, accept with/without args
+    monkeypatch.setattr(ds, "_fx_rate", lambda *a, **k: Decimal("1"))
 
     conn = MagicMock()
     cur = MagicMock()
@@ -170,8 +172,8 @@ def test_fetch_dashboard_full_partial_failure_other_sections_unaffected(monkeypa
         group_total_usd=Decimal("999"), eliminations_usd=Decimal(0),
         eliminations_count=0, entities=[],
     ))
-    monkeypatch.setattr(ds, "fetch_cash_kpi", lambda conn, eid: (_ for _ in ()).throw(RuntimeError("cash query fail")))
-    monkeypatch.setattr(ds, "fetch_accrual_kpi", lambda conn, eid: AccrualKPI(
+    monkeypatch.setattr(ds, "fetch_cash_kpi", lambda conn, eid, **kw: (_ for _ in ()).throw(RuntimeError("cash query fail")))
+    monkeypatch.setattr(ds, "fetch_accrual_kpi", lambda conn, eid, **kw: AccrualKPI(
         accuracy_status="accurate", accuracy_pass_count=19, accuracy_total_count=19,
         accuracy_threshold=18, revenue_cash=Decimal("100"), expense_cash=Decimal("50"),
     ))
@@ -180,7 +182,7 @@ def test_fetch_dashboard_full_partial_failure_other_sections_unaffected(monkeypa
         auto_mapped_today=10, review_needed=2, unusual=0, keyword_added_this_week=0,
         learning_impact=0, cascade=[],
     ))
-    monkeypatch.setattr(ds, "fetch_chart", lambda conn, eid: ChartData(months=[]))
+    monkeypatch.setattr(ds, "fetch_chart", lambda conn, eid, **kw: ChartData(months=[]))
 
     conn = MagicMock()
     cur = MagicMock()
@@ -202,11 +204,11 @@ def test_fetch_dashboard_full_passes_currency_and_gaap_through(monkeypatch):
     """currency/gaap query param 이 response 에 그대로 반영."""
     fb = BentoSummary(group_total_usd=Decimal(0), eliminations_usd=Decimal(0), eliminations_count=0, entities=[])
     monkeypatch.setattr(ds, "fetch_bento_summary", lambda conn, target_currency="USD": fb)
-    monkeypatch.setattr(ds, "fetch_cash_kpi", lambda conn, eid: CashKPI(total_balance=Decimal(0), monthly_income=Decimal(0), monthly_expense=Decimal(0)))
-    monkeypatch.setattr(ds, "fetch_accrual_kpi", lambda conn, eid: AccrualKPI(accuracy_status="cold_start", accuracy_pass_count=0, accuracy_total_count=19, accuracy_threshold=18, revenue_cash=Decimal(0), expense_cash=Decimal(0)))
+    monkeypatch.setattr(ds, "fetch_cash_kpi", lambda conn, eid, **kw: CashKPI(total_balance=Decimal(0), monthly_income=Decimal(0), monthly_expense=Decimal(0)))
+    monkeypatch.setattr(ds, "fetch_accrual_kpi", lambda conn, eid, **kw: AccrualKPI(accuracy_status="cold_start", accuracy_pass_count=0, accuracy_total_count=19, accuracy_threshold=18, revenue_cash=Decimal(0), expense_cash=Decimal(0)))
     monkeypatch.setattr(ds, "fetch_decision_queue", lambda conn, eid: DecisionQueueSection(items=[], total=0))
     monkeypatch.setattr(ds, "fetch_ai_activity", lambda conn, eid: AiActivity(auto_mapped_today=0, review_needed=0, unusual=0, keyword_added_this_week=0, learning_impact=0, cascade=[]))
-    monkeypatch.setattr(ds, "fetch_chart", lambda conn, eid: ChartData(months=[]))
+    monkeypatch.setattr(ds, "fetch_chart", lambda conn, eid, **kw: ChartData(months=[]))
 
     conn = MagicMock()
     cur = MagicMock()
@@ -220,11 +222,11 @@ def test_fetch_dashboard_full_passes_currency_and_gaap_through(monkeypatch):
 def test_fetch_dashboard_full_scope_is_entity_id_when_provided(monkeypatch):
     fb = BentoSummary(group_total_usd=Decimal(0), eliminations_usd=Decimal(0), eliminations_count=0, entities=[])
     monkeypatch.setattr(ds, "fetch_bento_summary", lambda conn, target_currency="USD": fb)
-    monkeypatch.setattr(ds, "fetch_cash_kpi", lambda conn, eid: CashKPI(total_balance=Decimal(0), monthly_income=Decimal(0), monthly_expense=Decimal(0)))
-    monkeypatch.setattr(ds, "fetch_accrual_kpi", lambda conn, eid: AccrualKPI(accuracy_status="accurate", accuracy_pass_count=19, accuracy_total_count=19, accuracy_threshold=18, revenue_cash=Decimal(0), expense_cash=Decimal(0)))
+    monkeypatch.setattr(ds, "fetch_cash_kpi", lambda conn, eid, **kw: CashKPI(total_balance=Decimal(0), monthly_income=Decimal(0), monthly_expense=Decimal(0)))
+    monkeypatch.setattr(ds, "fetch_accrual_kpi", lambda conn, eid, **kw: AccrualKPI(accuracy_status="accurate", accuracy_pass_count=19, accuracy_total_count=19, accuracy_threshold=18, revenue_cash=Decimal(0), expense_cash=Decimal(0)))
     monkeypatch.setattr(ds, "fetch_decision_queue", lambda conn, eid: DecisionQueueSection(items=[], total=0))
     monkeypatch.setattr(ds, "fetch_ai_activity", lambda conn, eid: AiActivity(auto_mapped_today=0, review_needed=0, unusual=0, keyword_added_this_week=0, learning_impact=0, cascade=[]))
-    monkeypatch.setattr(ds, "fetch_chart", lambda conn, eid: ChartData(months=[]))
+    monkeypatch.setattr(ds, "fetch_chart", lambda conn, eid, **kw: ChartData(months=[]))
 
     conn = MagicMock()
     cur = MagicMock()
@@ -247,11 +249,11 @@ def test_savepoint_isolation_via_with_savepoint(monkeypatch):
     fb = BentoSummary(group_total_usd=Decimal(0), eliminations_usd=Decimal(0), eliminations_count=0, entities=[])
     # fetcher 이 throw → savepoint rollback 실행되어야 함
     monkeypatch.setattr(ds, "fetch_bento_summary", lambda conn, target_currency="USD": (_ for _ in ()).throw(RuntimeError("fail")))
-    monkeypatch.setattr(ds, "fetch_cash_kpi", lambda conn, eid: CashKPI(total_balance=Decimal(0), monthly_income=Decimal(0), monthly_expense=Decimal(0)))
-    monkeypatch.setattr(ds, "fetch_accrual_kpi", lambda conn, eid: AccrualKPI(accuracy_status="cold_start", accuracy_pass_count=0, accuracy_total_count=19, accuracy_threshold=18, revenue_cash=Decimal(0), expense_cash=Decimal(0)))
+    monkeypatch.setattr(ds, "fetch_cash_kpi", lambda conn, eid, **kw: CashKPI(total_balance=Decimal(0), monthly_income=Decimal(0), monthly_expense=Decimal(0)))
+    monkeypatch.setattr(ds, "fetch_accrual_kpi", lambda conn, eid, **kw: AccrualKPI(accuracy_status="cold_start", accuracy_pass_count=0, accuracy_total_count=19, accuracy_threshold=18, revenue_cash=Decimal(0), expense_cash=Decimal(0)))
     monkeypatch.setattr(ds, "fetch_decision_queue", lambda conn, eid: DecisionQueueSection(items=[], total=0))
     monkeypatch.setattr(ds, "fetch_ai_activity", lambda conn, eid: AiActivity(auto_mapped_today=0, review_needed=0, unusual=0, keyword_added_this_week=0, learning_impact=0, cascade=[]))
-    monkeypatch.setattr(ds, "fetch_chart", lambda conn, eid: ChartData(months=[]))
+    monkeypatch.setattr(ds, "fetch_chart", lambda conn, eid, **kw: ChartData(months=[]))
 
     ds.fetch_dashboard_full(conn, entity_id=None)
 

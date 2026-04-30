@@ -26,15 +26,18 @@ def get_dashboard_full(
     entity_id: Optional[int] = Query(None, description="None = Group consolidated"),
     currency: Literal["USD", "KRW"] = Query("USD"),
     gaap: Literal["US", "K"] = Query("K"),
+    year_month: Optional[str] = Query(None, description="YYYY-MM (default: current month)"),
     conn: PgConnection = Depends(get_db),
 ):
     """6 widget data 한 번에 fetch.
 
     Bento 클릭 시 frontend 가 이 endpoint 1번 호출로 KPI/Queue/AI/Chart 모두 갱신.
     Connection pool 절약 + FCP 개선 (network round trip 6→1).
+
+    year_month: 'YYYY-MM' 으로 KPI/chart 의 reference month 지정 (default = 현재 달).
     """
     try:
-        return fetch_dashboard_full(conn, entity_id, currency, gaap)
+        return fetch_dashboard_full(conn, entity_id, currency, gaap, year_month)
     except HTTPException:
         raise
     except Exception as e:
