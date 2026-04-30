@@ -238,12 +238,18 @@ def fetch_cash_kpi(
 
     entity_id=None (Group): 모든 entity 의 native currency 잔고 + transactions 을
         target_currency 로 환산 후 합산. mixed currency raw sum 버그 fix.
-    entity_id=N: 해당 entity 의 native currency 그대로 (frontend 가 entity.currency 표시).
+    entity_id=N: 해당 entity 의 native currency → target_currency 환산
+        (사용자 USD/KRW 토글이 per-entity 에서도 동작하도록).
     """
     cur = conn.cursor()
 
     if entity_id is not None:
-        # 단일 entity: native currency
+        # 단일 entity: native currency → target_currency 환산
+        cur.execute("SELECT currency FROM financeone.entities WHERE id = %s", [entity_id])
+        src_row = cur.fetchone()
+        src_currency = src_row[0] if src_row else target_currency
+        fx = _fx_rate(conn, src_currency, target_currency)
+
         cur.execute("""
             SELECT COALESCE(SUM(balance), 0)
             FROM (
@@ -253,7 +259,7 @@ def fetch_cash_kpi(
                 ORDER BY entity_id, account_name, date DESC
             ) latest
         """, [entity_id])
-        total_balance = Decimal(cur.fetchone()[0] or 0)
+        total_balance = Decimal(cur.fetchone()[0] or 0) * fx
 
         cur.execute("""
             SELECT
@@ -264,7 +270,9 @@ def fetch_cash_kpi(
               AND (is_cancel IS NOT TRUE)
               AND entity_id = %s
         """, [month_start, month_end, entity_id])
-        monthly_income, monthly_expense = (Decimal(v) for v in cur.fetchone())
+        mi_raw, me_raw = (Decimal(v) for v in cur.fetchone())
+        monthly_income = mi_raw * fx
+        monthly_expense = me_raw * fx
 
         cur.execute("""
             SELECT
@@ -275,7 +283,9 @@ def fetch_cash_kpi(
               AND (is_cancel IS NOT TRUE)
               AND entity_id = %s
         """, [prev_start, prev_end, entity_id])
-        prev_income, prev_expense = (Decimal(v) for v in cur.fetchone())
+        pi_raw, pe_raw = (Decimal(v) for v in cur.fetchone())
+        prev_income = pi_raw * fx
+        prev_expense = pe_raw * fx
     else:
         # Group: per-entity 합산 + currency conversion (selected month)
         cur.execute("""
@@ -420,21 +430,21 @@ def fetch_accrual_kpi(
 
     params: list = [entity_id] if entity_id else []
 
-    # Revenue/Expense Cash — std_account.category 로 필터 (매출/비용 의미)
-    # 단순 type='in/out' 합계는 전체 cash flow (외상 회수, 자본 출자, 차입 등 포함)
-    # 매출 cash = type='in' AND std_account.category='수익'
-    # 비용 cash = type='out' AND std_account.category IN ('비용', '매출원가')
+    # Revenue/Expense Cash — 사용자 회계 의도: 통장 in/out 중 매출/비용 관련만
+    # 매출 cash = 직접 매출 입금 (수익 category) + 외상매출 회수 (10800 차감 입금)
+    # 비용 cash = 직접 비용 출금 (비용/매출원가) + 외상매입 결제 (25100) + 카드대금/미지급금 결제 (25200)
+    # 자본 출자, 차입 상환 등 비영업 cash 는 제외
     if entity_id is None:
         # Group: per-entity sum × FX rate, category 필터 적용
         cur.execute("""
             SELECT
                 e.currency,
                 COALESCE(SUM(CASE
-                    WHEN t.type='in' AND sa.category='수익' THEN t.amount
-                    ELSE 0 END), 0) AS rev,
+                    WHEN t.type='in' AND (sa.category='수익' OR sa.code='10800')
+                    THEN t.amount ELSE 0 END), 0) AS rev,
                 COALESCE(SUM(CASE
-                    WHEN t.type='out' AND sa.category IN ('비용', '매출원가') THEN t.amount
-                    ELSE 0 END), 0) AS exp
+                    WHEN t.type='out' AND (sa.category IN ('비용', '매출원가') OR sa.code IN ('25100','25200'))
+                    THEN t.amount ELSE 0 END), 0) AS exp
             FROM financeone.entities e
             LEFT JOIN financeone.transactions t
               ON t.entity_id = e.id
@@ -455,22 +465,30 @@ def fetch_accrual_kpi(
             revenue_cash += Decimal(rev) * r
             expense_cash += Decimal(exp) * r
     else:
+        # 단일 entity: native currency → target_currency 환산
+        cur.execute("SELECT currency FROM financeone.entities WHERE id = %s", [entity_id])
+        src_row = cur.fetchone()
+        src_currency = src_row[0] if src_row else target_currency
+        entity_fx = _fx_rate(conn, src_currency, target_currency)
+
         cash_params: list = [month_start, month_end, entity_id]
         cur.execute("""
             SELECT
                 COALESCE(SUM(CASE
-                    WHEN t.type='in' AND sa.category='수익' THEN t.amount
-                    ELSE 0 END), 0),
+                    WHEN t.type='in' AND (sa.category='수익' OR sa.code='10800')
+                    THEN t.amount ELSE 0 END), 0),
                 COALESCE(SUM(CASE
-                    WHEN t.type='out' AND sa.category IN ('비용', '매출원가') THEN t.amount
-                    ELSE 0 END), 0)
+                    WHEN t.type='out' AND (sa.category IN ('비용', '매출원가') OR sa.code IN ('25100','25200'))
+                    THEN t.amount ELSE 0 END), 0)
             FROM financeone.transactions t
             LEFT JOIN financeone.standard_accounts sa ON sa.id = t.standard_account_id
             WHERE t.date >= %s AND t.date < %s
               AND (t.is_cancel IS NOT TRUE)
               AND t.entity_id = %s
         """, cash_params)
-        revenue_cash, expense_cash = (Decimal(v) for v in cur.fetchone())
+        rc_raw, ec_raw = (Decimal(v) for v in cur.fetchone())
+        revenue_cash = rc_raw * entity_fx
+        expense_cash = ec_raw * entity_fx
     # Accrual side — 모든 상태에서 acc 표시 (in_progress 라도)
     # accuracy_status badge 가 정확도 진행 중임을 사용자에게 안내
     # (이전엔 in_progress 시 None 으로 hidden했지만 사용자 혼란 → 항상 표시)
@@ -519,7 +537,10 @@ def fetch_accrual_kpi(
             WHERE je.entry_date >= %s AND je.entry_date < %s
               AND je.entity_id = %s
         """, acc_params)
-        revenue_acc, expense_acc = (Decimal(v) for v in cur.fetchone())
+        ra_raw, ea_raw = (Decimal(v) for v in cur.fetchone())
+        # 같은 entity_fx 재사용 (cash 분기에서 이미 계산됨)
+        revenue_acc = ra_raw * entity_fx
+        expense_acc = ea_raw * entity_fx
 
     # diff breakdown (server computed)
     # ΔAR = 외상매출금 (10800) 증가분, Δdeferred = 선수금 (23xxx)
@@ -537,6 +558,13 @@ def fetch_accrual_kpi(
           {"AND je.entity_id = %s" if entity_id else ""}
     """, diff_params)
     ar_delta, deferred_delta, ap_delta, accrued_delta = (Decimal(v) for v in cur.fetchone())
+
+    # per-entity 분기에서는 entity_fx 로 환산 (group case 는 native sum, 별도 fix 필요)
+    if entity_id is not None:
+        ar_delta = ar_delta * entity_fx
+        deferred_delta = deferred_delta * entity_fx
+        ap_delta = ap_delta * entity_fx
+        accrued_delta = accrued_delta * entity_fx
 
     cur.close()
 
@@ -780,6 +808,12 @@ def fetch_chart(
             entry["out"] += Decimal(co) * r
         rows = [(ym, e["in"], e["out"]) for ym, e in sorted(per_month.items())]
     else:
+        # 단일 entity: native currency → target_currency 환산
+        cur.execute("SELECT currency FROM financeone.entities WHERE id = %s", [entity_id])
+        src_row = cur.fetchone()
+        src_currency = src_row[0] if src_row else target_currency
+        chart_fx = _fx_rate(conn, src_currency, target_currency)
+
         cur.execute("""
             SELECT
                 to_char(date_trunc('month', date), 'YYYY-MM') AS ym,
@@ -792,7 +826,7 @@ def fetch_chart(
             GROUP BY date_trunc('month', date)
             ORDER BY ym
         """, [chart_start, month_end, entity_id])
-        rows = cur.fetchall()
+        rows = [(ym, Decimal(ci) * chart_fx, Decimal(co) * chart_fx) for ym, ci, co in cur.fetchall()]
 
     # accrual revenue per month — Group 은 currency 환산, entity 는 native
     if entity_id is None:
@@ -826,7 +860,8 @@ def fetch_chart(
             GROUP BY date_trunc('month', je.entry_date)
             ORDER BY ym
         """, [chart_start, month_end, entity_id])
-        accrual_by_month = {ym: Decimal(rev) for ym, rev in cur.fetchall()}
+        # chart_fx 재사용 (cash 분기에서 이미 계산됨)
+        accrual_by_month = {ym: Decimal(rev) * chart_fx for ym, rev in cur.fetchall()}
 
     months = [
         ChartMonthPoint(

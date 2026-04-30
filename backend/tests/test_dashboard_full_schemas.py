@@ -161,6 +161,7 @@ def test_full_response_roundtrip():
         as_of=datetime.now(timezone.utc),
         bento=BentoSummary(
             group_total_usd=Decimal("634000"),
+            group_total_display=Decimal("634000"),
             eliminations_usd=Decimal("-15000"),
             eliminations_count=5,
             entities=[

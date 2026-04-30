@@ -100,8 +100,8 @@ def _stub_full(scope="group", currency="USD", gaap="K"):
         gaap=gaap,  # type: ignore
         as_of=datetime.now(timezone.utc),
         bento=BentoSummary(
-            group_total_usd=Decimal(0), eliminations_usd=Decimal(0),
-            eliminations_count=0, entities=[],
+            group_total_usd=Decimal(0), group_total_display=Decimal(0),
+            eliminations_usd=Decimal(0), eliminations_count=0, entities=[],
         ),
         cash_kpi=CashKPI(
             total_balance=Decimal(0), monthly_income=Decimal(0), monthly_expense=Decimal(0),
@@ -169,8 +169,8 @@ def test_fetch_dashboard_full_all_sections_fail_returns_safe_defaults(monkeypatc
 def test_fetch_dashboard_full_partial_failure_other_sections_unaffected(monkeypatch):
     """일부 sub-fetcher 실패 + 일부 성공 = 성공한 것만 정상 데이터, 실패한 것만 fallback."""
     monkeypatch.setattr(ds, "fetch_bento_summary", lambda conn, target_currency="USD": BentoSummary(
-        group_total_usd=Decimal("999"), eliminations_usd=Decimal(0),
-        eliminations_count=0, entities=[],
+        group_total_usd=Decimal("999"), group_total_display=Decimal("999"),
+        eliminations_usd=Decimal(0), eliminations_count=0, entities=[],
     ))
     monkeypatch.setattr(ds, "fetch_cash_kpi", lambda conn, eid, **kw: (_ for _ in ()).throw(RuntimeError("cash query fail")))
     monkeypatch.setattr(ds, "fetch_accrual_kpi", lambda conn, eid, **kw: AccrualKPI(
@@ -202,7 +202,7 @@ def test_fetch_dashboard_full_partial_failure_other_sections_unaffected(monkeypa
 
 def test_fetch_dashboard_full_passes_currency_and_gaap_through(monkeypatch):
     """currency/gaap query param 이 response 에 그대로 반영."""
-    fb = BentoSummary(group_total_usd=Decimal(0), eliminations_usd=Decimal(0), eliminations_count=0, entities=[])
+    fb = BentoSummary(group_total_usd=Decimal(0), group_total_display=Decimal(0), eliminations_usd=Decimal(0), eliminations_count=0, entities=[])
     monkeypatch.setattr(ds, "fetch_bento_summary", lambda conn, target_currency="USD": fb)
     monkeypatch.setattr(ds, "fetch_cash_kpi", lambda conn, eid, **kw: CashKPI(total_balance=Decimal(0), monthly_income=Decimal(0), monthly_expense=Decimal(0)))
     monkeypatch.setattr(ds, "fetch_accrual_kpi", lambda conn, eid, **kw: AccrualKPI(accuracy_status="cold_start", accuracy_pass_count=0, accuracy_total_count=19, accuracy_threshold=18, revenue_cash=Decimal(0), expense_cash=Decimal(0)))
@@ -220,7 +220,7 @@ def test_fetch_dashboard_full_passes_currency_and_gaap_through(monkeypatch):
 
 
 def test_fetch_dashboard_full_scope_is_entity_id_when_provided(monkeypatch):
-    fb = BentoSummary(group_total_usd=Decimal(0), eliminations_usd=Decimal(0), eliminations_count=0, entities=[])
+    fb = BentoSummary(group_total_usd=Decimal(0), group_total_display=Decimal(0), eliminations_usd=Decimal(0), eliminations_count=0, entities=[])
     monkeypatch.setattr(ds, "fetch_bento_summary", lambda conn, target_currency="USD": fb)
     monkeypatch.setattr(ds, "fetch_cash_kpi", lambda conn, eid, **kw: CashKPI(total_balance=Decimal(0), monthly_income=Decimal(0), monthly_expense=Decimal(0)))
     monkeypatch.setattr(ds, "fetch_accrual_kpi", lambda conn, eid, **kw: AccrualKPI(accuracy_status="accurate", accuracy_pass_count=19, accuracy_total_count=19, accuracy_threshold=18, revenue_cash=Decimal(0), expense_cash=Decimal(0)))
@@ -246,7 +246,7 @@ def test_savepoint_isolation_via_with_savepoint(monkeypatch):
     conn = MagicMock()
     conn.cursor.return_value = cur
 
-    fb = BentoSummary(group_total_usd=Decimal(0), eliminations_usd=Decimal(0), eliminations_count=0, entities=[])
+    fb = BentoSummary(group_total_usd=Decimal(0), group_total_display=Decimal(0), eliminations_usd=Decimal(0), eliminations_count=0, entities=[])
     # fetcher 이 throw → savepoint rollback 실행되어야 함
     monkeypatch.setattr(ds, "fetch_bento_summary", lambda conn, target_currency="USD": (_ for _ in ()).throw(RuntimeError("fail")))
     monkeypatch.setattr(ds, "fetch_cash_kpi", lambda conn, eid, **kw: CashKPI(total_balance=Decimal(0), monthly_income=Decimal(0), monthly_expense=Decimal(0)))
