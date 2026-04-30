@@ -459,10 +459,7 @@ def get_monthly_summary_data(
     first_year, first_mon = int(first_month[:4]), int(first_month[5:7])
     first_date = f"{first_year:04d}-{first_mon:02d}-01"
 
-    # Opening balance for the first month
-    opening = get_opening_balance(conn, entity_id, first_year, first_mon)
-
-    # Monthly aggregation — date >= first_date 로 변경 (sargable, 인덱스 사용)
+    # 월별 income/expense 집계 (sargable)
     cur.execute(
         """
         SELECT
@@ -480,32 +477,38 @@ def get_monthly_summary_data(
         """,
         [entity_id, first_date],
     )
+    inc_exp_by_month = {r[0]: (Decimal(str(r[1])), Decimal(str(r[2]))) for r in cur.fetchall()}
 
+    cur.close()
+
+    # 각 월의 opening 을 actual endpoint 와 동일하게 get_opening_balance 로 직접 조회
+    # (누적 방식은 거래 누락/중복 시 actual 과 mismatch — snapshot/predicted 우선)
     result_months = []
-    running = opening
-    for r in cur.fetchall():
-        month_str = r[0]
-        income = Decimal(str(r[1]))
-        expense = Decimal(str(r[2]))
+    first_opening = None
+    last_closing = None
+    for month_str in target_months:
+        y, m = int(month_str[:4]), int(month_str[5:7])
+        month_opening = get_opening_balance(conn, entity_id, y, m)
+        income, expense = inc_exp_by_month.get(month_str, (Decimal(0), Decimal(0)))
         net = income - expense
-        month_opening = running
-        running = running + net
+        month_closing = month_opening + net
+        if first_opening is None:
+            first_opening = month_opening
+        last_closing = month_closing
         result_months.append({
             "month": month_str,
             "opening_balance": float(month_opening),
             "income": float(income),
             "expense": float(expense),
             "net": float(net),
-            "closing_balance": float(running),
+            "closing_balance": float(month_closing),
         })
-
-    cur.close()
 
     return {
         "months": result_months,
         "available_months": available_months,
-        "period_start_balance": float(opening),
-        "period_end_balance": float(running) if result_months else float(opening),
+        "period_start_balance": float(first_opening) if first_opening is not None else 0.0,
+        "period_end_balance": float(last_closing) if last_closing is not None else 0.0,
     }
 
 
