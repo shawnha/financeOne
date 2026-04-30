@@ -49,20 +49,22 @@ ORG_CODES = {
     "ibk_bank": "0003",
     "shinhan_bank": "0088",   # SHB 은행 코드 (한국은행 표준). Codef 도 동일.
 
-    # 카드사 — Codef product 페이지가 SPA 라 권위 source 자동 추출 불가.
-    # 아래 매핑은 brute-force 검증 (CF-12803/CF-12800 응답 기준 routing 도달 확인됨)
-    # + git history (commit 75adbe3, fcf47c9 등 ) 의 정정 결과.
-    # 만약 카드사로부터 "아이디 오류 / 비밀번호 오류" 식 응답이 오면 routing 은 정확.
-    # 만약 "지원하지 않는 organization" 식 메시지면 코드가 틀린 것.
-    "kb_card": "0301",        # ← 0311(롯데) 에서 정정 (commit 75adbe3)
-    "bc_card": "0302",
+    # 카드사 — Codef 공식 표 (https://developer.codef.io/products/card/overview 법인카드 영역).
+    # 이전 매핑은 브루트포스 추정으로 4개가 잘못되어 있었음 — 공식 source 로 정정.
+    "kb_card": "0301",
+    "hyundai_card": "0302",   # ← 0305 에서 정정 (공식: 0302)
     "samsung_card": "0303",
-    "shinhan_card": "0304",   # 이전 0309 → 우리카드로 정정. 0304 가 신한 (검증: CF-12800 응답 = routing 정상).
-    "hyundai_card": "0305",
-    "nh_card": "0306",
-    "woori_card": "0309",     # 이전 0315 무효 → 0309 가 우리카드 (확정)
-    "lotte_card": "0311",     # ← 0301(KB) 에서 정정. CF-12803 재현 후 확인
+    "nh_card": "0304",        # ← 0306 에서 정정 (공식: 0304)
+    "bc_card": "0305",        # ← 0302 에서 정정 (공식: 0305)
+    "shinhan_card": "0306",   # ← 0304 에서 정정 (CF-12800 원인). 공식: 0306
+    "citi_card": "0307",      # 신규 추가 (씨티카드)
+    "woori_card": "0309",
+    "lotte_card": "0311",
     "hana_card": "0313",
+    "jeonbuk_card": "0315",   # 신규 추가 (전북카드)
+    "gwangju_card": "0316",   # 신규 추가 (광주카드)
+    "suhyup_card": "0320",    # 신규 추가 (수협카드)
+    "jeju_card": "0321",      # 신규 추가 (제주카드)
 
     "hometax": "0001",        # 국세청 홈택스 (전자세금계산서 통합 조회)
 }
@@ -72,22 +74,28 @@ ORG_LABELS = {
     "woori_bank": "우리은행",
     "ibk_bank": "IBK기업은행",
     "shinhan_bank": "신한은행",
-    "lotte_card": "롯데카드",
-    "bc_card": "BC카드",
-    "samsung_card": "삼성카드",
-    "shinhan_card": "신한카드",
-    "hyundai_card": "현대카드",
-    "nh_card": "NH농협카드",
-    "woori_card": "우리카드",
     "kb_card": "KB국민카드",
+    "hyundai_card": "현대카드",
+    "samsung_card": "삼성카드",
+    "nh_card": "NH농협카드",
+    "bc_card": "BC카드",
+    "shinhan_card": "신한카드",
+    "citi_card": "씨티카드",
+    "woori_card": "우리카드",
+    "lotte_card": "롯데카드",
     "hana_card": "하나카드",
+    "jeonbuk_card": "전북카드",
+    "gwangju_card": "광주카드",
+    "suhyup_card": "수협카드",
+    "jeju_card": "제주카드",
 }
 
 # 은행/카드 타입 → source_type (mapping rules와 일관성 유지)
 BANK_ORGS = {"woori_bank", "ibk_bank", "shinhan_bank"}
 CARD_ORGS = {
-    "lotte_card", "bc_card", "samsung_card", "shinhan_card",
-    "hyundai_card", "nh_card", "woori_card", "kb_card", "hana_card",
+    "kb_card", "hyundai_card", "samsung_card", "nh_card", "bc_card",
+    "shinhan_card", "citi_card", "woori_card", "lotte_card", "hana_card",
+    "jeonbuk_card", "gwangju_card", "suhyup_card", "jeju_card",
 }
 # 공공기관 (홈택스 등) — 세금계산서/사업자/세금신고 결과 등
 PUBLIC_ORGS = {"hometax"}

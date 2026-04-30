@@ -158,8 +158,9 @@ def mercury_sync(
 
 VALID_CODEF_ORGS = {
     "woori_bank", "ibk_bank", "shinhan_bank",
-    "lotte_card", "bc_card", "samsung_card", "shinhan_card",
-    "hyundai_card", "nh_card", "woori_card", "kb_card", "hana_card",
+    "kb_card", "hyundai_card", "samsung_card", "nh_card", "bc_card",
+    "shinhan_card", "citi_card", "woori_card", "lotte_card", "hana_card",
+    "jeonbuk_card", "gwangju_card", "suhyup_card", "jeju_card",
 }
 
 

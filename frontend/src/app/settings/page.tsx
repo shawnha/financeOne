@@ -144,29 +144,39 @@ type CodefOrg =
   | "woori_bank"
   | "ibk_bank"
   | "shinhan_bank"
-  | "lotte_card"
-  | "bc_card"
-  | "samsung_card"
-  | "shinhan_card"
-  | "hyundai_card"
-  | "nh_card"
-  | "woori_card"
   | "kb_card"
+  | "hyundai_card"
+  | "samsung_card"
+  | "nh_card"
+  | "bc_card"
+  | "shinhan_card"
+  | "citi_card"
+  | "woori_card"
+  | "lotte_card"
   | "hana_card"
+  | "jeonbuk_card"
+  | "gwangju_card"
+  | "suhyup_card"
+  | "jeju_card"
 
 const CODEF_ORG_LABELS: Record<CodefOrg, string> = {
   woori_bank: "우리은행",
   ibk_bank: "IBK기업은행",
   shinhan_bank: "신한은행",
-  lotte_card: "롯데카드",
-  bc_card: "BC카드",
-  samsung_card: "삼성카드",
-  shinhan_card: "신한카드",
-  hyundai_card: "현대카드",
-  nh_card: "NH농협카드",
-  woori_card: "우리카드",
   kb_card: "KB국민카드",
+  hyundai_card: "현대카드",
+  samsung_card: "삼성카드",
+  nh_card: "NH농협카드",
+  bc_card: "BC카드",
+  shinhan_card: "신한카드",
+  citi_card: "씨티카드",
+  woori_card: "우리카드",
+  lotte_card: "롯데카드",
   hana_card: "하나카드",
+  jeonbuk_card: "전북카드",
+  gwangju_card: "광주카드",
+  suhyup_card: "수협카드",
+  jeju_card: "제주카드",
 }
 
 // 사용자가 실 보유한 기관만 우선 노출 (나머지는 향후 확장)
