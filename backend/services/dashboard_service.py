@@ -9,7 +9,7 @@ Per design doc + plan-eng-review:
 - A8 cross-schema search_path (already set in connection.py)
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional, Union
 
@@ -29,10 +29,33 @@ from backend.routers.dashboard_schemas import (
     DecisionQueueItem,
     DecisionQueueSection,
 )
+from backend.services.exchange_rate_service import (
+    ExchangeRateNotFoundError,
+    get_closing_rate,
+)
 
 # Gating threshold (verify_bs_against_ledger PASS count cutoff)
 ACCRUAL_GATING_THRESHOLD = 18
 ACCRUAL_TOTAL_CHECKS = 19
+
+
+def _fx_rate(conn: PgConnection, from_curr: str, to_curr: str, as_of: date | None = None) -> Decimal:
+    """Real FX via exchange_rate_service. Fallback to 1.0 if rate missing (logs warn).
+
+    Used for cross-currency aggregation (Group view total). Per-entity values stay native.
+    """
+    if from_curr == to_curr:
+        return Decimal("1")
+    if as_of is None:
+        as_of = date.today()
+    try:
+        return get_closing_rate(conn, from_curr, to_curr, as_of)
+    except ExchangeRateNotFoundError:
+        import logging
+        logging.getLogger(__name__).warning(
+            "FX %s→%s missing as of %s, falling back to 1.0", from_curr, to_curr, as_of
+        )
+        return Decimal("1")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -80,12 +103,15 @@ def fetch_bento_summary(conn: PgConnection, target_currency: str = "USD") -> Ben
     cur = conn.cursor()
     has_accrual_col = _has_accrual_status_column(conn)
 
-    # 1) entity 목록 + accrual_data_status (optional) + 현재 잔고
+    # 1) entity 목록 + accrual_data_status (optional)
+    #    cash_balance: balance_snapshots 만 사용 (transactions 누적합은 opening balance
+    #    없으면 misleading — HOI 같이 Mercury 만 sync 된 entity 는 0 표시 + badge 로 안내)
     accrual_select = "e.accrual_data_status" if has_accrual_col else "'cold_start' AS accrual_data_status"
     cur.execute(f"""
         SELECT
             e.id, e.code, e.name, e.currency, {accrual_select},
-            COALESCE(b.cash_balance, 0) AS cash_balance
+            COALESCE(b.cash_balance, 0) AS cash_balance,
+            (b.cash_balance IS NULL) AS missing_snapshot
         FROM financeone.entities e
         LEFT JOIN (
             SELECT entity_id, SUM(balance) AS cash_balance
@@ -126,20 +152,26 @@ def fetch_bento_summary(conn: PgConnection, target_currency: str = "USD") -> Ben
     """)
     unconfirmed: dict[int, int] = {row[0]: row[1] for row in cur.fetchall()}
 
-    # 4) USD 환산 (Group sort/sum)
-    # 단순화: HOI USD = native, KR_CORP KRW → USD via simple FX
-    # TODO: production 은 exchange_rate_service 사용 (Phase 1A V2)
-    KRW_TO_USD = Decimal("0.00075")  # placeholder
+    # 4) Cross-currency 환산 — exchange_rate_service 의 실시간 환율 사용
+    krw_to_usd = _fx_rate(conn, "KRW", "USD")  # 예: ~0.000664 (= 1/1506.2)
+    krw_to_target = _fx_rate(conn, "KRW", target_currency)
+    usd_to_target = _fx_rate(conn, "USD", target_currency)
 
     entities = []
     group_total_usd = Decimal(0)
     for row in entity_rows:
-        entity_id, code, name, currency, accrual_status, cash_balance = row
+        entity_id, code, name, currency, accrual_status, cash_balance, missing_snapshot = row
         cash = Decimal(cash_balance)
-        cash_usd = cash if currency == "USD" else cash * KRW_TO_USD
+        cash_usd = cash if currency == "USD" else cash * krw_to_usd
 
         flag = "🇺🇸" if currency == "USD" else "🇰🇷"
-        badge = f"미확정 {unconfirmed[entity_id]}" if entity_id in unconfirmed else None
+        # badge 우선순위: 잔고 snapshot 누락 > 미확정 거래 수
+        if missing_snapshot:
+            badge = "잔고 sync 필요"
+        elif entity_id in unconfirmed:
+            badge = f"미확정 {unconfirmed[entity_id]}"
+        else:
+            badge = None
 
         entities.append(BentoEntity(
             entity_id=entity_id,
@@ -174,48 +206,119 @@ def fetch_bento_summary(conn: PgConnection, target_currency: str = "USD") -> Ben
 # Cash KPI — existing /dashboard pattern, adapted for batch endpoint
 # ─────────────────────────────────────────────────────────────
 
-def fetch_cash_kpi(conn: PgConnection, entity_id: Optional[int]) -> CashKPI:
+def fetch_cash_kpi(
+    conn: PgConnection,
+    entity_id: Optional[int],
+    target_currency: str = "USD",
+) -> CashKPI:
+    """Per-entity aggregation with currency conversion.
+
+    entity_id=None (Group): 모든 entity 의 native currency 잔고 + transactions 을
+        target_currency 로 환산 후 합산. mixed currency raw sum 버그 fix.
+    entity_id=N: 해당 entity 의 native currency 그대로 (frontend 가 entity.currency 표시).
+    """
     cur = conn.cursor()
-    params: list = [entity_id] if entity_id else []
 
-    # 총잔고
-    cur.execute(f"""
-        SELECT COALESCE(SUM(balance), 0)
-        FROM financeone.balance_snapshots
-        WHERE (entity_id, date, account_name) IN (
-            SELECT entity_id, MAX(date), account_name
-            FROM financeone.balance_snapshots
-            {"WHERE entity_id = %s" if entity_id else ""}
-            GROUP BY entity_id, account_name
-        )
-    """, params)
-    total_balance = Decimal(cur.fetchone()[0])
+    if entity_id is not None:
+        # 단일 entity: native currency
+        params = [entity_id]
 
-    # 이번달 수입/지출
-    cur.execute(f"""
-        SELECT
-            COALESCE(SUM(CASE WHEN type='in' THEN amount ELSE 0 END), 0),
-            COALESCE(SUM(CASE WHEN type='out' THEN amount ELSE 0 END), 0)
-        FROM financeone.transactions
-        WHERE date >= date_trunc('month', CURRENT_DATE)
-          AND date < date_trunc('month', CURRENT_DATE) + interval '1 month'
-          AND (is_cancel IS NOT TRUE)
-          {"AND entity_id = %s" if entity_id else ""}
-    """, params)
-    monthly_income, monthly_expense = (Decimal(v) for v in cur.fetchone())
+        cur.execute("""
+            SELECT COALESCE(SUM(balance), 0)
+            FROM (
+                SELECT DISTINCT ON (entity_id, account_name) entity_id, account_name, balance
+                FROM financeone.balance_snapshots
+                WHERE entity_id = %s
+                ORDER BY entity_id, account_name, date DESC
+            ) latest
+        """, [entity_id])
+        total_balance = Decimal(cur.fetchone()[0] or 0)
 
-    # 전월 (MoM)
-    cur.execute(f"""
-        SELECT
-            COALESCE(SUM(CASE WHEN type='in' THEN amount ELSE 0 END), 0),
-            COALESCE(SUM(CASE WHEN type='out' THEN amount ELSE 0 END), 0)
-        FROM financeone.transactions
-        WHERE date >= date_trunc('month', CURRENT_DATE) - interval '1 month'
-          AND date < date_trunc('month', CURRENT_DATE)
-          AND (is_cancel IS NOT TRUE)
-          {"AND entity_id = %s" if entity_id else ""}
-    """, params)
-    prev_income, prev_expense = (Decimal(v) for v in cur.fetchone())
+        cur.execute("""
+            SELECT
+                COALESCE(SUM(CASE WHEN type='in' THEN amount ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN type='out' THEN amount ELSE 0 END), 0)
+            FROM financeone.transactions
+            WHERE date >= date_trunc('month', CURRENT_DATE)
+              AND date < date_trunc('month', CURRENT_DATE) + interval '1 month'
+              AND (is_cancel IS NOT TRUE)
+              AND entity_id = %s
+        """, params)
+        monthly_income, monthly_expense = (Decimal(v) for v in cur.fetchone())
+
+        cur.execute("""
+            SELECT
+                COALESCE(SUM(CASE WHEN type='in' THEN amount ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN type='out' THEN amount ELSE 0 END), 0)
+            FROM financeone.transactions
+            WHERE date >= date_trunc('month', CURRENT_DATE) - interval '1 month'
+              AND date < date_trunc('month', CURRENT_DATE)
+              AND (is_cancel IS NOT TRUE)
+              AND entity_id = %s
+        """, params)
+        prev_income, prev_expense = (Decimal(v) for v in cur.fetchone())
+    else:
+        # Group: per-entity 합산 + currency conversion
+        cur.execute("""
+            SELECT
+                e.id, e.currency,
+                COALESCE(b.cash_balance, 0) AS cash_balance,
+                COALESCE(m.month_in, 0) AS month_in,
+                COALESCE(m.month_out, 0) AS month_out,
+                COALESCE(p.prev_in, 0) AS prev_in,
+                COALESCE(p.prev_out, 0) AS prev_out
+            FROM financeone.entities e
+            LEFT JOIN (
+                SELECT entity_id, SUM(balance) AS cash_balance
+                FROM (
+                    SELECT DISTINCT ON (entity_id, account_name) entity_id, account_name, balance
+                    FROM financeone.balance_snapshots
+                    ORDER BY entity_id, account_name, date DESC
+                ) latest
+                GROUP BY entity_id
+            ) b ON b.entity_id = e.id
+            LEFT JOIN (
+                SELECT entity_id,
+                       SUM(CASE WHEN type='in' THEN amount ELSE 0 END) AS month_in,
+                       SUM(CASE WHEN type='out' THEN amount ELSE 0 END) AS month_out
+                FROM financeone.transactions
+                WHERE date >= date_trunc('month', CURRENT_DATE)
+                  AND date < date_trunc('month', CURRENT_DATE) + interval '1 month'
+                  AND (is_cancel IS NOT TRUE)
+                GROUP BY entity_id
+            ) m ON m.entity_id = e.id
+            LEFT JOIN (
+                SELECT entity_id,
+                       SUM(CASE WHEN type='in' THEN amount ELSE 0 END) AS prev_in,
+                       SUM(CASE WHEN type='out' THEN amount ELSE 0 END) AS prev_out
+                FROM financeone.transactions
+                WHERE date >= date_trunc('month', CURRENT_DATE) - interval '1 month'
+                  AND date < date_trunc('month', CURRENT_DATE)
+                  AND (is_cancel IS NOT TRUE)
+                GROUP BY entity_id
+            ) p ON p.entity_id = e.id
+            WHERE e.is_active IS NOT FALSE
+        """)
+        rows = cur.fetchall()
+
+        # FX rate matrix (cache once, applied to every entity)
+        krw_rate = _fx_rate(conn, "KRW", target_currency)
+        usd_rate = _fx_rate(conn, "USD", target_currency)
+        rate_by_curr = {"KRW": krw_rate, "USD": usd_rate}
+
+        total_balance = Decimal(0)
+        monthly_income = Decimal(0)
+        monthly_expense = Decimal(0)
+        prev_income = Decimal(0)
+        prev_expense = Decimal(0)
+
+        for entity_id_, currency, cash, mi, mo, pi, po in rows:
+            r = rate_by_curr.get(currency, Decimal("1"))
+            total_balance += Decimal(cash) * r
+            monthly_income += Decimal(mi) * r
+            monthly_expense += Decimal(mo) * r
+            prev_income += Decimal(pi) * r
+            prev_expense += Decimal(po) * r
 
     def pct_change(current: Decimal, previous: Decimal) -> Optional[float]:
         if previous == 0:
@@ -325,15 +428,16 @@ def fetch_accrual_kpi(conn: PgConnection, entity_id: Optional[int]) -> AccrualKP
     cur.execute(f"""
         SELECT
             COALESCE(SUM(CASE
-                WHEN sa.category = '수익' THEN je.credit - je.debit
+                WHEN sa.category = '수익' THEN jel.credit_amount - jel.debit_amount
                 ELSE 0 END), 0) AS revenue_acc,
             COALESCE(SUM(CASE
-                WHEN sa.category IN ('비용', '매출원가') THEN je.debit - je.credit
+                WHEN sa.category IN ('비용', '매출원가') THEN jel.debit_amount - jel.credit_amount
                 ELSE 0 END), 0) AS expense_acc
         FROM financeone.journal_entries je
-        JOIN financeone.standard_accounts sa ON sa.id = je.standard_account_id
-        WHERE je.posted_at >= date_trunc('month', CURRENT_DATE)
-          AND je.posted_at < date_trunc('month', CURRENT_DATE) + interval '1 month'
+        JOIN financeone.journal_entry_lines jel ON jel.journal_entry_id = je.id
+        JOIN financeone.standard_accounts sa ON sa.id = jel.standard_account_id
+        WHERE je.entry_date >= date_trunc('month', CURRENT_DATE)
+          AND je.entry_date < date_trunc('month', CURRENT_DATE) + interval '1 month'
           {"AND je.entity_id = %s" if entity_id else ""}
     """, params)
     revenue_acc, expense_acc = (Decimal(v) for v in cur.fetchone())
@@ -342,14 +446,15 @@ def fetch_accrual_kpi(conn: PgConnection, entity_id: Optional[int]) -> AccrualKP
     # ΔAR = 외상매출금 (10800) 증가분, Δdeferred = 선수금 (23xxx)
     cur.execute(f"""
         SELECT
-            COALESCE(SUM(CASE WHEN sa.code='10800' THEN je.debit - je.credit ELSE 0 END), 0) AS ar_delta,
-            COALESCE(SUM(CASE WHEN sa.code LIKE '232%%' THEN je.credit - je.debit ELSE 0 END), 0) AS deferred_delta,
-            COALESCE(SUM(CASE WHEN sa.code='25100' THEN je.credit - je.debit ELSE 0 END), 0) AS ap_delta,
-            COALESCE(SUM(CASE WHEN sa.code='26200' THEN je.credit - je.debit ELSE 0 END), 0) AS accrued_delta
+            COALESCE(SUM(CASE WHEN sa.code='10800' THEN jel.debit_amount - jel.credit_amount ELSE 0 END), 0) AS ar_delta,
+            COALESCE(SUM(CASE WHEN sa.code LIKE '232%%' THEN jel.credit_amount - jel.debit_amount ELSE 0 END), 0) AS deferred_delta,
+            COALESCE(SUM(CASE WHEN sa.code='25100' THEN jel.credit_amount - jel.debit_amount ELSE 0 END), 0) AS ap_delta,
+            COALESCE(SUM(CASE WHEN sa.code='26200' THEN jel.credit_amount - jel.debit_amount ELSE 0 END), 0) AS accrued_delta
         FROM financeone.journal_entries je
-        JOIN financeone.standard_accounts sa ON sa.id = je.standard_account_id
-        WHERE je.posted_at >= date_trunc('month', CURRENT_DATE)
-          AND je.posted_at < date_trunc('month', CURRENT_DATE) + interval '1 month'
+        JOIN financeone.journal_entry_lines jel ON jel.journal_entry_id = je.id
+        JOIN financeone.standard_accounts sa ON sa.id = jel.standard_account_id
+        WHERE je.entry_date >= date_trunc('month', CURRENT_DATE)
+          AND je.entry_date < date_trunc('month', CURRENT_DATE) + interval '1 month'
           {"AND je.entity_id = %s" if entity_id else ""}
     """, params)
     ar_delta, deferred_delta, ap_delta, accrued_delta = (Decimal(v) for v in cur.fetchone())
@@ -418,7 +523,8 @@ def fetch_decision_queue(conn: PgConnection, entity_id: Optional[int]) -> Decisi
             severity="info", deep_link=f"/transactions?is_confirmed=false{eid_q}",
         ))
 
-    # 3) intercompany 미매칭 (intercompany_pairs)
+    # 3) intercompany 미매칭 (intercompany_pairs) — sub-savepoint to isolate schema errors
+    cur.execute("SAVEPOINT dq_ic")
     try:
         cur.execute(f"""
             SELECT COUNT(*)
@@ -427,17 +533,18 @@ def fetch_decision_queue(conn: PgConnection, entity_id: Optional[int]) -> Decisi
               {"AND (entity_a_id = %s OR entity_b_id = %s)" if entity_id else ""}
         """, [entity_id, entity_id] if entity_id else [])
         ic_unmatched = cur.fetchone()[0]
+        cur.execute("RELEASE SAVEPOINT dq_ic")
         if ic_unmatched > 0:
             items.append(DecisionQueueItem(
                 icon="⚖️", text="intercompany 미매칭", count=ic_unmatched,
                 severity="warn", deep_link="/intercompany",
             ))
     except Exception:
-        # intercompany_pairs 테이블 부재 가능성
-        pass
+        cur.execute("ROLLBACK TO SAVEPOINT dq_ic")
 
     # 4) ExpenseOne 미매칭 (entity_id=2 한아원코리아 only)
     if entity_id is None or entity_id == 2:
+        cur.execute("SAVEPOINT dq_eo")
         try:
             cur.execute("""
                 SELECT COUNT(*) FROM financeone.transactions
@@ -446,6 +553,7 @@ def fetch_decision_queue(conn: PgConnection, entity_id: Optional[int]) -> Decisi
                   AND internal_account_id IS NULL
             """)
             eo_unmatched = cur.fetchone()[0]
+            cur.execute("RELEASE SAVEPOINT dq_eo")
             if eo_unmatched > 0:
                 items.append(DecisionQueueItem(
                     icon="📨", text="ExpenseOne 미매칭", count=eo_unmatched,
@@ -453,7 +561,7 @@ def fetch_decision_queue(conn: PgConnection, entity_id: Optional[int]) -> Decisi
                     deep_link="/transactions?entity=2&source_type=expenseone_card,expenseone_deposit&unconfirmed=true",
                 ))
         except Exception:
-            pass
+            cur.execute("ROLLBACK TO SAVEPOINT dq_eo")
 
     cur.close()
 
@@ -485,6 +593,7 @@ def fetch_ai_activity(conn: PgConnection, entity_id: Optional[int]) -> AiActivit
     auto_mapped, review_needed, unusual = cur.fetchone()
 
     # learning signal: 이번 주 keyword 추가 수
+    cur.execute("SAVEPOINT ai_kw")
     try:
         cur.execute("""
             SELECT COUNT(*)
@@ -492,11 +601,14 @@ def fetch_ai_activity(conn: PgConnection, entity_id: Optional[int]) -> AiActivit
             WHERE created_at >= date_trunc('week', CURRENT_DATE)
         """)
         keyword_added = cur.fetchone()[0]
+        cur.execute("RELEASE SAVEPOINT ai_kw")
     except Exception:
+        cur.execute("ROLLBACK TO SAVEPOINT ai_kw")
         keyword_added = 0
 
     # cascade 통계 (mapping_source 분포)
     cascade: list[AiCascadeStat] = []
+    cur.execute("SAVEPOINT ai_cascade")
     try:
         cur.execute(f"""
             SELECT
@@ -509,6 +621,7 @@ def fetch_ai_activity(conn: PgConnection, entity_id: Optional[int]) -> AiActivit
             GROUP BY mapping_source
         """, params)
         rows = cur.fetchall()
+        cur.execute("RELEASE SAVEPOINT ai_cascade")
         total = sum(r[1] for r in rows) or 1
         for source, cnt in rows:
             # source 'rule_exact', 'similar_trgm', 'entity_keyword', 'global_keyword', 'ai'
@@ -523,6 +636,7 @@ def fetch_ai_activity(conn: PgConnection, entity_id: Optional[int]) -> AiActivit
             step = step_map.get(source, 'ai')
             cascade.append(AiCascadeStat(step=step, pct=round(cnt / total * 100, 1)))
     except Exception:
+        cur.execute("ROLLBACK TO SAVEPOINT ai_cascade")
         cascade = []
 
     cur.close()
@@ -562,13 +676,14 @@ def fetch_chart(conn: PgConnection, entity_id: Optional[int]) -> ChartData:
     # accrual revenue per month
     cur.execute(f"""
         SELECT
-            to_char(date_trunc('month', je.posted_at), 'YYYY-MM') AS ym,
-            COALESCE(SUM(CASE WHEN sa.category = '수익' THEN je.credit - je.debit ELSE 0 END), 0) AS rev
+            to_char(date_trunc('month', je.entry_date), 'YYYY-MM') AS ym,
+            COALESCE(SUM(CASE WHEN sa.category = '수익' THEN jel.credit_amount - jel.debit_amount ELSE 0 END), 0) AS rev
         FROM financeone.journal_entries je
-        JOIN financeone.standard_accounts sa ON sa.id = je.standard_account_id
-        WHERE je.posted_at >= date_trunc('month', CURRENT_DATE) - interval '5 months'
+        JOIN financeone.journal_entry_lines jel ON jel.journal_entry_id = je.id
+        JOIN financeone.standard_accounts sa ON sa.id = jel.standard_account_id
+        WHERE je.entry_date >= date_trunc('month', CURRENT_DATE) - interval '5 months'
           {"AND je.entity_id = %s" if entity_id else ""}
-        GROUP BY date_trunc('month', je.posted_at)
+        GROUP BY date_trunc('month', je.entry_date)
         ORDER BY ym
     """, params)
     accrual_by_month: dict[str, Decimal] = {ym: Decimal(rev) for ym, rev in cur.fetchall()}
@@ -653,7 +768,7 @@ def fetch_dashboard_full(
         gaap=gaap,  # type: ignore
         as_of=datetime.now(timezone.utc),
         bento=_safe("bento", lambda: with_savepoint(lambda: fetch_bento_summary(conn, target_currency=currency)), fallback_bento),
-        cash_kpi=_safe("cash_kpi", lambda: with_savepoint(lambda: fetch_cash_kpi(conn, entity_id)), fallback_cash),
+        cash_kpi=_safe("cash_kpi", lambda: with_savepoint(lambda: fetch_cash_kpi(conn, entity_id, target_currency=currency)), fallback_cash),
         accrual_kpi=_safe("accrual_kpi", lambda: with_savepoint(lambda: fetch_accrual_kpi(conn, entity_id)), fallback_accrual),
         decision_queue=_safe("decision_queue", lambda: with_savepoint(lambda: fetch_decision_queue(conn, entity_id)), DecisionQueueSection(items=[], total=0)),
         ai_activity=_safe("ai_activity", lambda: with_savepoint(lambda: fetch_ai_activity(conn, entity_id)), AiActivity(auto_mapped_today=0, review_needed=0, unusual=0, keyword_added_this_week=0, learning_impact=0, cascade=[])),
