@@ -74,13 +74,15 @@ class TestSimilarMatch:
 
 class TestKeywordMatch:
     def test_returns_match_when_keyword_found_in_description(self):
+        """P4-B: 통합 SQL 1번 호출 → 5-tuple (internal, std, conf, match_type, keyword)"""
         from backend.services.mapping_service import keyword_match
         cur = MagicMock()
-        cur.fetchone.side_effect = [(10, 0.75), (20,)]
+        cur.fetchone.return_value = (10, 20, 0.75, "keyword", "회식")
         result = keyword_match(cur, entity_id=2, counterparty=None, description="회식비 결제")
         assert result is not None
         assert result["internal_account_id"] == 10
         assert result["match_type"] == "keyword"
+        assert result["matched_keyword"] == "회식"
 
     def test_returns_none_when_no_keyword_matches(self):
         from backend.services.mapping_service import keyword_match
@@ -97,11 +99,23 @@ class TestKeywordMatch:
         cur.execute.assert_not_called()
 
     def test_searches_counterparty_too(self):
+        """P4-B: 통합 SQL 1번 호출 → 5-tuple"""
         from backend.services.mapping_service import keyword_match
         cur = MagicMock()
-        cur.fetchone.side_effect = [(10, 0.75), (20,)]
+        cur.fetchone.return_value = (10, 20, 0.75, "keyword", "택시")
         result = keyword_match(cur, entity_id=2, counterparty="택시비", description=None)
         assert result is not None
+        assert result["match_type"] == "keyword"
+
+    def test_global_keyword_match_returns_global_type(self):
+        """P4-B: standard_account_keywords 매칭 시 match_type='global_keyword'."""
+        from backend.services.mapping_service import keyword_match
+        cur = MagicMock()
+        cur.fetchone.return_value = (None, 30, 0.85, "global_keyword", "Adobe Creative Cloud")
+        result = keyword_match(cur, entity_id=2, counterparty="Adobe Creative Cloud", description=None)
+        assert result["match_type"] == "global_keyword"
+        assert result["internal_account_id"] is None
+        assert result["standard_account_id"] == 30
 
 
 # ── ai_match ──────────────────────────────────────────────────
@@ -174,7 +188,8 @@ class TestCascade:
         cur = MagicMock()
         # exact_match query returns a hit
         cur.fetchone.return_value = (10, 20, 0.9)
-        result = auto_map_transaction(cur, entity_id=2, counterparty="OPENAI", description="구독")
+        # description 없으면 exact (description 있으면 exact_contextual)
+        result = auto_map_transaction(cur, entity_id=2, counterparty="OPENAI", description=None)
         assert result is not None
         assert result["match_type"] == "exact"
 
@@ -190,13 +205,13 @@ class TestCascade:
         assert result["match_type"] == "similar"
 
     def test_falls_through_to_keyword(self):
+        """P4-B: keyword_match 가 통합 SQL 1번 호출 → 5-tuple."""
         from backend.services.mapping_service import auto_map_transaction
         cur = MagicMock()
         cur.fetchone.side_effect = [
             # exact_match skipped (counterparty=None)
-            None,         # similar miss
-            (10, 0.75),   # keyword hit
-            (20,),        # standard_account_id lookup
+            None,                                     # similar miss
+            (10, 20, 0.75, "keyword", "회식"),         # keyword hit (5-tuple)
         ]
         result = auto_map_transaction(cur, entity_id=2, counterparty=None, description="회식비 결제")
         assert result is not None
