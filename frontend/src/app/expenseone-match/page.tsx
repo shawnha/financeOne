@@ -165,6 +165,8 @@ function sourceLabel(source: string): string {
     codef_citi_card: "씨티카드",
     woori_bank: "우리은행",
     shinhan_bank: "신한은행",
+    mercury_api: "Mercury",
+    mercury: "Mercury",
     codef_woori_bank: "우리은행",
     codef_ibk_bank: "기업은행",
     codef_shinhan_bank: "신한은행",

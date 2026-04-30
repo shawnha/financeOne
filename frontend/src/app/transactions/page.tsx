@@ -172,6 +172,8 @@ const SOURCE_LABELS: Record<string, string> = {
   ibk_bank: "IBK기업은행",
   shinhan_bank: "신한은행",
   shinhan_card: "신한카드",
+  mercury_api: "Mercury",
+  mercury: "Mercury",
   // Codef API pull (출처는 같은 기관이므로 동일 라벨)
   codef_woori_bank: "우리은행",
   codef_ibk_bank: "IBK기업은행",
@@ -204,6 +206,8 @@ const SOURCE_BADGE_CLASSES: Record<string, string> = {
   ibk_bank: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",        // IBK = 초록
   shinhan_bank: "bg-slate-500/15 text-slate-300 border-slate-500/30",          // 신한은행 = 회청
   shinhan_card: "bg-fuchsia-500/15 text-fuchsia-400 border-fuchsia-500/30",    // 신한카드 = 푹시아 (장미보라)
+  mercury_api: "bg-amber-500/15 text-amber-400 border-amber-500/30",           // Mercury = amber (HOI USD)
+  mercury: "bg-amber-500/15 text-amber-400 border-amber-500/30",
   codef_woori_bank: "bg-cyan-500/15 text-cyan-400 border-cyan-500/30",
   codef_ibk_bank: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
   codef_shinhan_bank: "bg-slate-500/15 text-slate-300 border-slate-500/30",
@@ -1180,6 +1184,7 @@ export default function TransactionsPage() {
                 { value: "woori_bank", label: "우리은행" },
                 { value: "shinhan_bank", label: "신한은행" },
                 { value: "shinhan_card", label: "신한카드" },
+                { value: "mercury_api", label: "Mercury" },
                 { value: "expenseone_card", label: "ExpenseOne 법카" },
                 { value: "expenseone_deposit", label: "ExpenseOne 입금" },
               ]}
