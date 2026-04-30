@@ -462,8 +462,11 @@ class CodefClient:
         auto_mapped = 0
 
         # 잔고 추적 (Excel 파서와 동일 — balance_snapshots 자동 갱신)
+        # daily_balance: 일자별 EOD 잔고 = orderBy="0"(오래된순)이라 같은 date 의 마지막 거래의 balance_after.
+        # 모든 일자 EOD snapshot 을 INSERT 해야 cashflow 의 월말/기초잔고가 정확.
         latest_balance = None
         latest_balance_date = None
+        daily_balance: dict = {}
 
         # 자동 매핑 (lazy import — 순환 회피)
         from backend.services.mapping_service import auto_map_transaction
@@ -477,6 +480,8 @@ class CodefClient:
             if tx.get("balance_after") is not None:
                 latest_balance = tx["balance_after"]
                 latest_balance_date = tx["date"]
+                # 같은 date 내에서는 마지막 거래의 balance_after = EOD (이 루프가 그 값을 덮어씀)
+                daily_balance[tx["date"]] = tx["balance_after"]
 
             if _is_duplicate(cur, entity_id, tx, source_type):
                 duplicates += 1
@@ -545,20 +550,25 @@ class CodefClient:
                 )
             synced += 1
 
-        # balance_snapshots 자동 저장 (Excel 업로드와 동일한 후속 작업)
+        # balance_snapshots 자동 저장 — sync 한 모든 일자의 EOD 잔고 upsert
+        # 이전 코드는 가장 최근 1건만 저장 → cashflow 의 월말/기초잔고가 부정확.
+        # 이제 일자별 EOD snapshot 모두 INSERT → get_opening_balance 가 정확한 월초 잔고 조회 가능.
         balance_saved = False
-        if latest_balance is not None and latest_balance_date is not None:
+        snapshots_upserted = 0
+        if daily_balance:
             account_name = f"{ORG_LABELS.get(org, org)} 법인통장"
-            cur.execute(
-                """
-                INSERT INTO balance_snapshots
-                    (entity_id, date, account_name, account_type, balance, currency, source)
-                VALUES (%s, %s, %s, 'bank', %s, 'KRW', 'codef_api')
-                ON CONFLICT (entity_id, date, account_name)
-                DO UPDATE SET balance = EXCLUDED.balance, source = 'codef_api'
-                """,
-                [entity_id, latest_balance_date, account_name, latest_balance],
-            )
+            for d, bal in daily_balance.items():
+                cur.execute(
+                    """
+                    INSERT INTO balance_snapshots
+                        (entity_id, date, account_name, account_type, balance, currency, source)
+                    VALUES (%s, %s, %s, 'bank', %s, 'KRW', 'codef_api')
+                    ON CONFLICT (entity_id, date, account_name)
+                    DO UPDATE SET balance = EXCLUDED.balance, source = 'codef_api'
+                    """,
+                    [entity_id, d, account_name, bal],
+                )
+                snapshots_upserted += 1
             balance_saved = True
 
         cur.close()
@@ -576,6 +586,7 @@ class CodefClient:
             "account": account,
             "balance_snapshot": {
                 "saved": balance_saved,
+                "snapshots_upserted": snapshots_upserted,
                 "balance": float(latest_balance) if latest_balance else None,
                 "date": str(latest_balance_date) if latest_balance_date else None,
             },

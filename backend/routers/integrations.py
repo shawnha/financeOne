@@ -205,6 +205,12 @@ def mercury_sync_all(
         except Exception as e:
             logger.warning("balance snapshot upsert failed (non-fatal): %s", e)
             balance_result = {"error": str(e)}
+        # historical reconstruction (transactions + current → 일별 EOD 잔고)
+        try:
+            historical_result = client.sync_historical_balances(conn)
+        except Exception as e:
+            logger.warning("historical reconstruction failed (non-fatal): %s", e)
+            historical_result = {"error": str(e)}
         conn.commit()
         return {
             "accounts_processed": len(per_account),
@@ -212,6 +218,7 @@ def mercury_sync_all(
             "total_duplicates": total_dupes,
             "total_fetched": total_fetched,
             "balance_snapshot": balance_result,
+            "historical_balance": historical_result,
             "per_account": per_account,
         }
     except Exception:

@@ -5,7 +5,8 @@ Mercury Dashboard > Settings > API > Read-only 토큰 발급
 
 import logging
 import os
-from datetime import date
+from collections import defaultdict
+from datetime import date, timedelta
 from decimal import Decimal
 
 import httpx
@@ -61,6 +62,136 @@ class MercuryClient:
         resp.raise_for_status()
         data = resp.json()
         return data.get("transactions", [])
+
+    def sync_historical_balances(self, conn: PgConnection) -> dict:
+        """Mercury 거래 + 현재 잔고 → 일별 historical balance_snapshots 자동 reconstruction.
+
+        Mercury API 는 historical balance metadata 를 제공 안 함. 그러나:
+          anchor_balance(가장 오래된 거래 직전) = current_balance - Σ signed_transactions
+          → 일별 누적으로 매 일자 EOD 잔고 자동 계산.
+
+        가정: HOI 의 mercury_api 거래 = 잔고 최대인 primary account (보통 Checking).
+        다른 account 가 0 잔고 + 거래 없으면 안전. (multi-account 분리는 향후)
+        """
+        accounts = self.get_accounts()
+        cur = conn.cursor()
+
+        # 잔고 최대 account = primary
+        def acc_balance(acc):
+            v = acc.get("currentBalance")
+            if v is None:
+                v = acc.get("availableBalance")
+            return Decimal(str(v or 0))
+
+        if not accounts:
+            cur.close()
+            return {"snapshots_upserted": 0, "primary_account": None}
+
+        primary = max(accounts, key=acc_balance)
+        primary_name = primary.get("name") or primary.get("nickname") or primary.get("id", "Mercury Primary")
+        current = acc_balance(primary)
+        primary_kind = primary.get("kind") or primary.get("type") or "checking"
+
+        # 모든 mercury_api 거래 (DB sync 된 것)
+        cur.execute(
+            """
+            SELECT date, type, amount FROM financeone.transactions
+            WHERE entity_id = %s
+              AND source_type = 'mercury_api'
+              AND (is_cancel IS NOT TRUE)
+            ORDER BY date, id
+            """,
+            [HOI_ENTITY_ID],
+        )
+        rows = cur.fetchall()
+
+        upserted = 0
+
+        if not rows:
+            # 거래 없으면 오늘 잔고만 upsert
+            cur.execute(
+                """
+                INSERT INTO financeone.balance_snapshots
+                    (entity_id, date, account_name, account_type, balance, currency, source)
+                VALUES (%s, %s, %s, %s, %s, 'USD', 'mercury_api')
+                ON CONFLICT (entity_id, date, account_name) DO UPDATE
+                  SET balance = EXCLUDED.balance, source = 'mercury_api'
+                """,
+                [HOI_ENTITY_ID, date.today(), primary_name, primary_kind, float(current)],
+            )
+            cur.close()
+            return {"snapshots_upserted": 1, "primary_account": primary_name, "current_balance": float(current)}
+
+        # 일별 net 합산
+        daily_net: dict = defaultdict(lambda: Decimal(0))
+        for d, t, a in rows:
+            sign = Decimal(1) if t == 'in' else Decimal(-1)
+            daily_net[d] += Decimal(str(a)) * sign
+
+        total_signed = sum(daily_net.values(), Decimal(0))
+        anchor_balance = current - total_signed
+        earliest = min(daily_net.keys())
+        anchor_date = earliest - timedelta(days=1)
+
+        # 일별 closing balance: anchor → 누적
+        sorted_dates = sorted(daily_net.keys())
+        running = anchor_balance
+
+        # anchor_date 잔고 INSERT (가장 오래된 거래 직전 잔고)
+        cur.execute(
+            """
+            INSERT INTO financeone.balance_snapshots
+                (entity_id, date, account_name, account_type, balance, currency, source)
+            VALUES (%s, %s, %s, %s, %s, 'USD', 'mercury_api_historical')
+            ON CONFLICT (entity_id, date, account_name) DO UPDATE
+              SET balance = EXCLUDED.balance, source = 'mercury_api_historical'
+            """,
+            [HOI_ENTITY_ID, anchor_date, primary_name, primary_kind, float(anchor_balance)],
+        )
+        upserted += 1
+
+        for d in sorted_dates:
+            running += daily_net[d]
+            cur.execute(
+                """
+                INSERT INTO financeone.balance_snapshots
+                    (entity_id, date, account_name, account_type, balance, currency, source)
+                VALUES (%s, %s, %s, %s, %s, 'USD', 'mercury_api_historical')
+                ON CONFLICT (entity_id, date, account_name) DO UPDATE
+                  SET balance = EXCLUDED.balance, source = 'mercury_api_historical'
+                """,
+                [HOI_ENTITY_ID, d, primary_name, primary_kind, float(running)],
+            )
+            upserted += 1
+
+        # 오늘 잔고 = current (anchor + total_signed 와 동치, 검증)
+        today = date.today()
+        if today not in daily_net:
+            cur.execute(
+                """
+                INSERT INTO financeone.balance_snapshots
+                    (entity_id, date, account_name, account_type, balance, currency, source)
+                VALUES (%s, %s, %s, %s, %s, 'USD', 'mercury_api')
+                ON CONFLICT (entity_id, date, account_name) DO UPDATE
+                  SET balance = EXCLUDED.balance, source = 'mercury_api'
+                """,
+                [HOI_ENTITY_ID, today, primary_name, primary_kind, float(current)],
+            )
+            upserted += 1
+
+        cur.close()
+        logger.info(
+            "Mercury historical: account=%s upserted=%d anchor=%s anchor_bal=%s current=%s diff=%s",
+            primary_name, upserted, anchor_date, anchor_balance, current, running - current,
+        )
+        return {
+            "snapshots_upserted": upserted,
+            "primary_account": primary_name,
+            "anchor_date": str(anchor_date),
+            "anchor_balance": float(anchor_balance),
+            "current_balance": float(current),
+            "reconstruction_drift": float(running - current),  # 0 이어야 정확
+        }
 
     def sync_balance_snapshot(self, conn: PgConnection) -> dict:
         """Mercury accounts API → balance_snapshots 오늘 날짜 upsert.
