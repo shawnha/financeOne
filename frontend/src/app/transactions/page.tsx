@@ -202,17 +202,17 @@ const SOURCE_BADGE_CLASSES: Record<string, string> = {
   woori_card: "bg-sky-500/15 text-sky-400 border-sky-500/30",                  // 우리카드 = 하늘
   woori_bank: "bg-cyan-500/15 text-cyan-400 border-cyan-500/30",               // 우리은행 = 청록
   ibk_bank: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",        // IBK = 초록
-  shinhan_bank: "bg-blue-500/15 text-blue-400 border-blue-500/30",             // 신한은행 = 신한 브랜드 파랑
+  shinhan_bank: "bg-slate-500/15 text-slate-300 border-slate-500/30",          // 신한은행 = 슬레이트 (우리 cyan/sky 와 분리)
   shinhan_card: "bg-fuchsia-500/15 text-fuchsia-400 border-fuchsia-500/30",    // 신한카드 = 푹시아 (장미보라)
   codef_woori_bank: "bg-cyan-500/15 text-cyan-400 border-cyan-500/30",
   codef_ibk_bank: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  codef_shinhan_bank: "bg-blue-500/15 text-blue-400 border-blue-500/30",
+  codef_shinhan_bank: "bg-slate-500/15 text-slate-300 border-slate-500/30",
   codef_lotte_card: "bg-red-500/15 text-red-400 border-red-500/30",
   codef_woori_card: "bg-sky-500/15 text-sky-400 border-sky-500/30",
   codef_shinhan_card: "bg-fuchsia-500/15 text-fuchsia-400 border-fuchsia-500/30",
   codef_kb_card: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",      // KB = 노랑
   codef_hyundai_card: "bg-orange-500/15 text-orange-400 border-orange-500/30", // 현대 = 주황
-  codef_samsung_card: "bg-violet-500/15 text-violet-400 border-violet-500/30", // 삼성 = 보라 (신한은행 blue 와 충돌 회피)
+  codef_samsung_card: "bg-violet-500/15 text-violet-400 border-violet-500/30", // 삼성 = 보라
   codef_nh_card: "bg-lime-500/15 text-lime-400 border-lime-500/30",            // NH = 라임 (IBK 초록과 구분)
   codef_bc_card: "bg-pink-500/15 text-pink-400 border-pink-500/30",            // BC = 핑크
   codef_hana_card: "bg-teal-500/15 text-teal-400 border-teal-500/30",          // 하나 = 청록2
