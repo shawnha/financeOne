@@ -287,10 +287,119 @@ def save_metric(metric: dict) -> Path:
     return out
 
 
+# ──── Track A — Obsidian writer ────────────────────────────────
+
+
+def write_obsidian_learning_note(
+    conn,
+    metric_diff: dict,
+    candidates: list[dict],
+    inserted: int,
+    dry_run: bool,
+) -> Path | None:
+    """월별 학습 결과 → Obsidian wiki/매핑학습/YYYY-MM.md 자동 생성.
+
+    Track A Stage 3: financeOne + salesOne 통합 호환을 위해
+    OBSIDIAN_VAULT_PATH 환경변수 사용 (기본: ~/Documents/hanahone-vault).
+
+    NotebookLM 이 GitHub repo 또는 vault 자체를 source 로 등록하면 자동 sync.
+    """
+    vault_path = Path(os.environ.get(
+        "OBSIDIAN_VAULT_PATH",
+        os.path.expanduser("~/Documents/hanahone-vault"),
+    ))
+    if not vault_path.exists():
+        print(f"[Obsidian writer] vault 경로 없음, skip: {vault_path}")
+        return None
+
+    target_dir = vault_path / "wiki" / "매핑학습"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    today = date.today()
+    fname = f"{today.year}-{today.month:02d}.md"
+    note_path = target_dir / fname
+
+    before = metric_diff.get("before", {})
+    after = metric_diff.get("after", {})
+
+    # 후보 top 20 + standard_account 정보 결합
+    enriched: list[tuple[dict, str, str]] = []
+    cur = conn.cursor()
+    cur.execute("SET search_path TO financeone, public")
+    for c in candidates[:30]:
+        cur.execute("SELECT code, name FROM standard_accounts WHERE id = %s", [c["standard_account_id"]])
+        row = cur.fetchone()
+        sa_code, sa_name = (row[0], row[1]) if row else ("?", "?")
+        enriched.append((c, sa_code, sa_name))
+    cur.close()
+
+    # Frontmatter
+    tags = ["매핑학습", "AI학습", f"{today.year}-{today.month:02d}", "financeone"]
+    fm = (
+        "---\n"
+        f"title: {today.year}년 {today.month}월 매핑 학습 결과\n"
+        f"date: {today.isoformat()}\n"
+        f"tags: [{', '.join(tags)}]\n"
+        "entity: 그룹 (HOI/HOK/HOR)\n"
+        f"keywords_before: {before.get('standard_account_keywords', '?')}\n"
+        f"keywords_after: {after.get('standard_account_keywords', '?')}\n"
+        f"inserted: {inserted}\n"
+        f"dry_run: {dry_run}\n"
+        "---\n\n"
+    )
+
+    body = [
+        f"# {today.year}년 {today.month}월 매핑 학습 결과\n",
+        f"> 자동 생성 ({today.isoformat()}) by `scripts/learn_keywords_from_confirmed.py`\n\n",
+        "## 요약\n",
+        f"- **신규 등록 키워드**: {inserted}건",
+        f"- **DB 키워드 사전**: {before.get('standard_account_keywords', '?')} → {after.get('standard_account_keywords', '?')}",
+        f"- **모드**: {'DRY-RUN (등록 안함)' if dry_run else '실제 INSERT'}\n\n",
+        "## 매핑 정확도 (BEFORE / AFTER)\n",
+        "| Entity | Total | Std (Before %) | Std (After %) | Int (Before %) | Int (After %) | 미매핑 |",
+        "|--------|------:|--------------:|--------------:|--------------:|--------------:|------:|",
+    ]
+    for eid, eid_name in [(1, "HOI"), (2, "한아원코리아"), (3, "한아원리테일")]:
+        b = before.get("entities", {}).get(eid, {}) or before.get("entities", {}).get(str(eid), {})
+        a = after.get("entities", {}).get(eid, {}) or after.get("entities", {}).get(str(eid), {})
+        body.append(
+            f"| [[{eid_name}]] | {a.get('total', '?')} | {b.get('coverage_std_pct', '?')}% | "
+            f"{a.get('coverage_std_pct', '?')}% | {b.get('coverage_int_pct', '?')}% | "
+            f"{a.get('coverage_int_pct', '?')}% | {a.get('unmapped', '?')} |"
+        )
+
+    body.append("\n## 신규 학습 키워드 (top 30)\n")
+    body.append("| Keyword | Standard Account | Hit | Purity | Confidence |")
+    body.append("|---------|------------------|----:|-------:|----------:|")
+    for c, sa_code, sa_name in enriched:
+        body.append(
+            f"| `{c['keyword']}` | [[{sa_code} {sa_name}]] | {c['hit_count']} | "
+            f"{c['purity']:.2f} | {c['confidence']} |"
+        )
+    if len(candidates) > 30:
+        body.append(f"\n*... ({len(candidates) - 30}건 더 — metric JSON 참고)*\n")
+
+    body.append("\n## NotebookLM Query 예시\n")
+    body.append("> 이 노트가 NotebookLM source 에 동기화되면 다음 query 가능:")
+    body.append("- *\"이번 달 가장 hit 많은 키워드는?\"*")
+    body.append("- *\"미매핑 거래수가 늘어난 entity 가 있나?\"*")
+    body.append("- *\"지난 3개월 매핑 정확도 추세 그래프\"*\n")
+
+    body.append("\n## 관련 자료\n")
+    body.append(f"- Metric JSON: `.claude-tmp/mapping-metric-{today.isoformat()}.json`")
+    body.append("- 학습 스크립트: `backend/scripts/learn_keywords_from_confirmed.py`")
+    body.append("- cascade 통합: `backend/services/mapping_service.py:keyword_match`")
+    body.append("- Phase 4 design: `docs/phase4-design-doc.md`\n")
+
+    note_path.write_text(fm + "\n".join(body), encoding="utf-8")
+    return note_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="P4-C 키워드 학습 루프")
     parser.add_argument("--dry-run", action="store_true", help="INSERT 안 함, 후보만 출력")
     parser.add_argument("--metric-only", action="store_true", help="학습 안 함, metric 만 측정")
+    parser.add_argument("--no-obsidian", action="store_true", help="Obsidian 노트 생성 skip")
     args = parser.parse_args()
 
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
@@ -339,6 +448,12 @@ def main() -> None:
         }
         out = save_metric(diff)
         print(f"\nmetric snapshot: {out}")
+
+        # Track A: Obsidian 자동 노트 생성
+        if not args.no_obsidian:
+            note = write_obsidian_learning_note(conn, diff, candidates, inserted, args.dry_run)
+            if note:
+                print(f"obsidian note:  {note}")
 
     finally:
         conn.close()
