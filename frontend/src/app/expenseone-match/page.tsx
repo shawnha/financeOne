@@ -45,6 +45,7 @@ interface ExpenseMatchInfo {
   is_manual: boolean
   is_confirmed: boolean
   reasoning: string | null
+  count?: number   // N:M — 같은 expense 가 매칭된 transaction 개수 (1 = 단일, 2+ = 분할)
 }
 
 interface ExpenseIgnoredInfo {
@@ -179,17 +180,18 @@ function matchStatusBadge(match: ExpenseMatchInfo | null) {
       </Badge>
     )
   }
+  const splitTag = (match.count ?? 1) > 1 ? ` (분할 ${match.count})` : ""
   if (match.is_confirmed) {
     return (
       <Badge variant="outline" className="gap-1 border-emerald-500/40 text-emerald-300 text-xs">
-        <Check className="h-3 w-3" /> 확정
+        <Check className="h-3 w-3" /> 확정{splitTag}
       </Badge>
     )
   }
   const conf = match.confidence ? Math.round(match.confidence * 100) : null
   return (
     <Badge variant="outline" className="gap-1 border-blue-500/40 text-blue-300 text-xs">
-      <Link2 className="h-3 w-3" /> 자동 {conf !== null ? `${conf}%` : ""}
+      <Link2 className="h-3 w-3" /> 자동 {conf !== null ? `${conf}%` : ""}{splitTag}
     </Badge>
   )
 }
@@ -331,6 +333,11 @@ function CandidatePanel({
   const [amountTolerance, setAmountTolerance] = useState<0 | 1 | 3>(0)
   const [dateWindow, setDateWindow] = useState<number>(10)
 
+  // 분할/합산 매칭: 여러 후보 선택 → 합계 = expense.amount 가 되어야 함
+  const [splitMode, setSplitMode] = useState(false)
+  const [selectedTxIds, setSelectedTxIds] = useState<Set<number>>(new Set())
+  const [busySplit, setBusySplit] = useState(false)
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -354,12 +361,53 @@ function CandidatePanel({
     load()
   }, [load])
 
+  // 후보 새로 로드되면 선택 리셋
+  useEffect(() => { setSelectedTxIds(new Set()) }, [cands])
+
+  const toggleSelected = (txId: number, blocked: boolean) => {
+    if (blocked) return
+    setSelectedTxIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(txId)) next.delete(txId)
+      else next.add(txId)
+      return next
+    })
+  }
+
+  const selectedSum = useMemo(
+    () => cands.filter((c) => selectedTxIds.has(c.transaction_id))
+      .reduce((s, c) => s + (c.amount || 0), 0),
+    [cands, selectedTxIds],
+  )
+  const sumDiff = selectedSum - expense.amount
+  const sumExact = selectedSum > 0 && sumDiff === 0
+
   const doConfirm = async (txId: number) => {
     setBusyTxId(txId)
     try {
       await onConfirm(expense.expense_id, txId)
     } finally {
       setBusyTxId(null)
+    }
+  }
+
+  const doSplitConfirm = async () => {
+    if (selectedTxIds.size < 2) return
+    setBusySplit(true)
+    try {
+      await fetchAPI(`/expenseone-match/expenses/${expense.expense_id}/confirm`, {
+        method: "POST",
+        body: JSON.stringify({
+          transaction_ids: Array.from(selectedTxIds),
+          replace_existing: true,
+        }),
+      })
+      toast.success(`${selectedTxIds.size}개 거래 분할 매칭 완료`)
+      onClose()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "분할 매칭 실패")
+    } finally {
+      setBusySplit(false)
     }
   }
 
@@ -480,6 +528,15 @@ function CandidatePanel({
           />
           <span>법인 무시</span>
         </label>
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={splitMode}
+            onChange={(e) => { setSplitMode(e.target.checked); setSelectedTxIds(new Set()) }}
+            className="accent-accent"
+          />
+          <span>분할 매칭</span>
+        </label>
       </div>
 
       {/* 후보 리스트 */}
@@ -501,9 +558,25 @@ function CandidatePanel({
             {cands.map((c) => {
               const blocked = Boolean(c.already_linked_expense)
               const isBusy = busyTxId === c.transaction_id
+              const checked = selectedTxIds.has(c.transaction_id)
               return (
-                <li key={c.transaction_id} className="px-4 py-3 hover:bg-white/[0.02]">
+                <li
+                  key={c.transaction_id}
+                  className={cn(
+                    "px-4 py-3 hover:bg-white/[0.02]",
+                    splitMode && checked && "bg-accent/[0.06]",
+                  )}
+                >
                   <div className="flex items-start justify-between gap-3">
+                    {splitMode && (
+                      <input
+                        type="checkbox"
+                        className="mt-1 accent-accent shrink-0"
+                        checked={checked}
+                        disabled={blocked}
+                        onChange={() => toggleSelected(c.transaction_id, blocked)}
+                      />
+                    )}
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 text-xs mb-1">
                         <Badge variant="outline" className="text-[10px]">{sourceLabel(c.source_type)}</Badge>
@@ -553,20 +626,22 @@ function CandidatePanel({
                         </div>
                       )}
                     </div>
-                    <Button
-                      size="sm"
-                      variant={blocked ? "outline" : "default"}
-                      disabled={blocked || isBusy}
-                      onClick={() => doConfirm(c.transaction_id)}
-                      className="shrink-0"
-                    >
-                      {isBusy ? (
-                        <RefreshCw className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <Link2 className="h-3 w-3 mr-1" />
-                      )}
-                      매칭
-                    </Button>
+                    {!splitMode && (
+                      <Button
+                        size="sm"
+                        variant={blocked ? "outline" : "default"}
+                        disabled={blocked || isBusy}
+                        onClick={() => doConfirm(c.transaction_id)}
+                        className="shrink-0"
+                      >
+                        {isBusy ? (
+                          <RefreshCw className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Link2 className="h-3 w-3 mr-1" />
+                        )}
+                        매칭
+                      </Button>
+                    )}
                   </div>
                 </li>
               )
@@ -574,6 +649,43 @@ function CandidatePanel({
           </ul>
         )}
       </CardContent>
+
+      {splitMode && (
+        <div className="border-t border-white/[0.05] px-4 py-3 bg-white/[0.02] flex items-center justify-between gap-3">
+          <div className="text-xs space-y-0.5">
+            <div>
+              선택 <span className="font-mono text-foreground">{selectedTxIds.size}</span>건 ·
+              합계 <span className={cn("font-mono", sumExact ? "text-emerald-300" : "text-foreground")}>
+                {formatKRW(selectedSum)}
+              </span>
+              <span className="text-muted-foreground"> / </span>
+              <span className="font-mono text-muted-foreground">{formatKRW(expense.amount)}</span>
+              {sumDiff !== 0 && selectedTxIds.size > 0 && (
+                <span className="ml-2 text-amber-300/80 font-mono">
+                  ({sumDiff > 0 ? "+" : "−"}{formatKRW(Math.abs(sumDiff))})
+                </span>
+              )}
+              {sumExact && <span className="ml-2 text-emerald-300">정확 일치 ✓</span>}
+            </div>
+            <div className="text-[11px] text-muted-foreground/70">
+              ※ 합계가 expense 금액과 정확히 같지 않아도 매칭 가능 (수수료/환차익 등) — 확인 후 진행
+            </div>
+          </div>
+          <Button
+            size="sm"
+            disabled={busySplit || selectedTxIds.size < 2}
+            onClick={doSplitConfirm}
+            className="shrink-0"
+          >
+            {busySplit ? (
+              <RefreshCw className="h-3 w-3 animate-spin mr-1" />
+            ) : (
+              <Link2 className="h-3 w-3 mr-1" />
+            )}
+            {selectedTxIds.size}개 합산 매칭
+          </Button>
+        </div>
+      )}
     </Card>
   )
 }

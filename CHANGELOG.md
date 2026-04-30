@@ -2,6 +2,31 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-04-30 — ExpenseOne 매칭 N:M 지원 (분할/합산)
+
+### Added
+- `transaction_expenseone_match` 1:1 → N:M (Alembic `r8s9t0u1v2w3`)
+  - 기존 `expense_id` UNIQUE 제거 → 복합 `(expense_id, transaction_id)` UNIQUE
+  - 1 expense ↔ N transactions (분할 결제) 또는 N expenses ↔ 1 transaction (집합 입금) 가능
+- `POST /expenseone-match/expenses/{expense_id}/confirm` body 확장
+  - `transaction_ids: list[int]` 받아 분할 매칭
+  - `replace_existing: bool` (default true) — 기존 매칭 정리 후 재등록
+  - 자동 method `manual_split` 라벨링 + reasoning 자동 생성
+- `POST /expenseone-match/transactions/{transaction_id}/match-group` 신규 endpoint
+  - 여러 expense 를 단일 transaction 에 일괄 매칭 (N → 1)
+- list_expenses 응답에 `match.count` 노출 — 분할 매칭 건수
+- 거래내역 페이지 `matchStatusBadge` 에 `(분할 N)` 라벨
+
+### Changed
+- 매칭 후보 패널 ("분할 매칭" 체크박스 토글)
+  - ON 시 각 후보 행에 체크박스 등장
+  - footer 에 선택 N건 합계 + expense.amount 비교 (정확 일치 ✓ 표시)
+  - "{N}개 합산 매칭" 버튼 — 2건 이상 선택 시 활성화
+
+### Notes (다음 세션)
+- Reverse UX (N expense → 1 transaction UI) 는 backend endpoint 만 준비됨
+- expense list 다중선택 + tx ID 검색 UI 후속 작업
+
 ## [Unreleased] - 2026-04-30 — 표준계정 자동매핑 + 거래 자동매핑 옵션 + K-GAAP 14개 보강
 
 ### Added

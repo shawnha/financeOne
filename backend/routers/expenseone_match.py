@@ -59,6 +59,7 @@ def _expense_row(r: dict) -> dict:
                 "is_manual": bool(r.get("match_is_manual")),
                 "is_confirmed": bool(r.get("match_is_confirmed")),
                 "reasoning": r.get("match_reasoning"),
+                "count": int(r.get("match_count") or 1),  # N:M 분할 매칭 건수
             }
             if r.get("match_id")
             else None
@@ -169,6 +170,8 @@ def list_expenses(
         where.append("ent.entity_id = %s")
         params.append(entity_id)
 
+    # N:M 후 한 expense가 여러 match row 를 가질 수 있으므로 LATERAL 로
+    # 대표 match 1건만 추출 (confirmed 우선, 가장 최근). match_count 별도.
     sql = f"""
         SELECT
             e.id, e.type, e.status, e.title, e.description, e.amount, e.category,
@@ -185,6 +188,7 @@ def list_expenses(
             m.is_manual AS match_is_manual,
             m.is_confirmed AS match_is_confirmed,
             m.ai_reasoning AS match_reasoning,
+            mc.match_count,
             ig.id AS ignored_id,
             ig.reason AS ignored_reason,
             ig.ignored_at AS ignored_at
@@ -192,7 +196,19 @@ def list_expenses(
         LEFT JOIN expenseone.users u ON e.submitted_by_id = u.id
         LEFT JOIN expenseone.companies c ON e.company_id = c.id
         {_company_to_entity_sql()}
-        LEFT JOIN transaction_expenseone_match m ON m.expense_id = e.id
+        LEFT JOIN LATERAL (
+            SELECT id, transaction_id, match_confidence, match_method,
+                   is_manual, is_confirmed, ai_reasoning
+            FROM transaction_expenseone_match
+            WHERE expense_id = e.id
+            ORDER BY is_confirmed DESC, updated_at DESC
+            LIMIT 1
+        ) m ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*) AS match_count
+            FROM transaction_expenseone_match
+            WHERE expense_id = e.id
+        ) mc ON TRUE
         LEFT JOIN financeone.expenseone_ignored ig ON ig.expense_id = e.id
         WHERE {' AND '.join(where)} {having}
         ORDER BY e.approved_at DESC NULLS LAST, e.id DESC
@@ -417,8 +433,16 @@ def get_candidates(
 
 
 class ConfirmMatchBody(BaseModel):
-    transaction_id: int
+    """단일 매칭 (1:1) 또는 분할/합산 매칭 (N:M).
+
+    transaction_id 또는 transaction_ids 둘 중 하나 사용.
+    transaction_ids 가 길이 2 이상이면 분할 매칭 (1 expense ↔ N transactions).
+    replace_existing=True 면 기존 매칭 모두 풀고 새로 등록 (재매칭).
+    """
+    transaction_id: Optional[int] = None
+    transaction_ids: Optional[list[int]] = None
     note: Optional[str] = None
+    replace_existing: bool = True
 
 
 @router.post("/expenses/{expense_id}/confirm")
@@ -427,13 +451,31 @@ def confirm_match(
     body: ConfirmMatchBody,
     conn: PgConnection = Depends(get_db),
 ):
-    """수동 매칭 확정 — join 테이블에 INSERT/UPSERT + is_manual + is_confirmed."""
+    """수동 매칭 확정 — N:M 지원 (1 expense ↔ N transactions 또는 N ↔ 1).
+
+    같은 expense+tx 페어는 복합 UNIQUE 라 ON CONFLICT 로 중복 INSERT 방지.
+    한 transaction 이 여러 expense 에 걸려있어도 허용 (N:M migration r8s9t0u1v2w3).
+    """
     cur = conn.cursor()
     try:
-        # 대상 거래 검증
-        cur.execute("SELECT id FROM transactions WHERE id = %s", [body.transaction_id])
-        if not cur.fetchone():
-            raise HTTPException(404, "transaction not found")
+        # 대상 transaction id 결정
+        tx_ids: list[int] = []
+        if body.transaction_ids:
+            tx_ids = list(dict.fromkeys(body.transaction_ids))  # dedup, 순서 보존
+        elif body.transaction_id is not None:
+            tx_ids = [body.transaction_id]
+        if not tx_ids:
+            raise HTTPException(400, "transaction_id 또는 transaction_ids 중 하나 필요")
+
+        # 거래 존재 검증
+        cur.execute(
+            "SELECT id FROM transactions WHERE id = ANY(%s)",
+            [tx_ids],
+        )
+        found = {r[0] for r in cur.fetchall()}
+        missing = [tid for tid in tx_ids if tid not in found]
+        if missing:
+            raise HTTPException(404, f"transactions not found: {missing}")
 
         # expense 존재 검증
         cur.execute("SELECT id, type FROM expenseone.expenses WHERE id = %s", [expense_id])
@@ -442,51 +484,48 @@ def confirm_match(
             raise HTTPException(404, "expense not found")
         exp_type = row[1] or ""
 
-        # 해당 거래에 이미 다른 expense가 걸려있으면 거부 (1:1 unique는 expense_id에만 있음)
-        cur.execute(
-            """
-            SELECT id, expense_id FROM transaction_expenseone_match
-            WHERE transaction_id = %s AND expense_id != %s
-            """,
-            [body.transaction_id, expense_id],
-        )
-        existing = cur.fetchone()
-        if existing:
-            raise HTTPException(
-                409,
-                f"transaction {body.transaction_id} already matched to expense {existing[1]}",
+        # replace_existing=True: 이 expense 의 기존 매칭 모두 정리 후 새로 등록
+        if body.replace_existing:
+            cur.execute(
+                "DELETE FROM transaction_expenseone_match WHERE expense_id = %s",
+                [expense_id],
             )
 
-        cur.execute(
-            """
-            INSERT INTO transaction_expenseone_match
-                (transaction_id, expense_id, expense_type, match_confidence,
-                 match_method, is_manual, is_confirmed, ai_reasoning, note,
-                 created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, TRUE, TRUE, %s, %s, NOW(), NOW())
-            ON CONFLICT (expense_id) DO UPDATE SET
-                transaction_id = EXCLUDED.transaction_id,
-                match_method = EXCLUDED.match_method,
-                is_manual = TRUE,
-                is_confirmed = TRUE,
-                ai_reasoning = EXCLUDED.ai_reasoning,
-                note = COALESCE(EXCLUDED.note, transaction_expenseone_match.note),
-                updated_at = NOW()
-            RETURNING id
-            """,
-            [
-                body.transaction_id,
-                expense_id,
-                exp_type,
-                1.0,
-                "manual",
-                "수동 매칭",
-                body.note,
-            ],
+        is_split = len(tx_ids) > 1
+        method = "manual_split" if is_split else "manual"
+        reasoning = (
+            f"수동 매칭 (분할 — {len(tx_ids)}개 거래 합산)" if is_split else "수동 매칭"
         )
-        match_id = cur.fetchone()[0]
+
+        match_ids: list[int] = []
+        for tid in tx_ids:
+            cur.execute(
+                """
+                INSERT INTO transaction_expenseone_match
+                    (transaction_id, expense_id, expense_type, match_confidence,
+                     match_method, is_manual, is_confirmed, ai_reasoning, note,
+                     created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, TRUE, TRUE, %s, %s, NOW(), NOW())
+                ON CONFLICT (expense_id, transaction_id) DO UPDATE SET
+                    match_method = EXCLUDED.match_method,
+                    is_manual = TRUE,
+                    is_confirmed = TRUE,
+                    ai_reasoning = EXCLUDED.ai_reasoning,
+                    note = COALESCE(EXCLUDED.note, transaction_expenseone_match.note),
+                    updated_at = NOW()
+                RETURNING id
+                """,
+                [tid, expense_id, exp_type, 1.0, method, reasoning, body.note],
+            )
+            match_ids.append(cur.fetchone()[0])
+
         conn.commit()
-        return {"ok": True, "match_id": match_id, "transaction_id": body.transaction_id}
+        return {
+            "ok": True,
+            "match_ids": match_ids,
+            "transaction_ids": tx_ids,
+            "split": is_split,
+        }
     except HTTPException:
         conn.rollback()
         raise
@@ -494,6 +533,104 @@ def confirm_match(
         conn.rollback()
         logger.exception("confirm_match failed")
         raise HTTPException(500, "confirm failed")
+    finally:
+        cur.close()
+
+
+class ConfirmGroupMatchBody(BaseModel):
+    """N expense ↔ 1 transaction 합산 매칭 (역방향).
+
+    여러 expense 를 한 transaction 에 일괄 매칭. 예: 입금요청 3건을 합쳐 1건의 입금이
+    들어온 케이스.
+    """
+    transaction_id: int
+    expense_ids: list[str]
+    note: Optional[str] = None
+    replace_existing: bool = True
+
+
+@router.post("/transactions/{transaction_id}/match-group")
+def match_group_to_transaction(
+    transaction_id: int,
+    body: ConfirmGroupMatchBody,
+    conn: PgConnection = Depends(get_db),
+):
+    """여러 expense 를 단일 transaction 에 일괄 매칭 (집합 입금 케이스)."""
+    if transaction_id != body.transaction_id:
+        raise HTTPException(400, "transaction_id mismatch")
+    if not body.expense_ids:
+        raise HTTPException(400, "expense_ids 비어있음")
+
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id FROM transactions WHERE id = %s", [transaction_id])
+        if not cur.fetchone():
+            raise HTTPException(404, "transaction not found")
+
+        # 모든 expense 검증 + type 조회
+        eids = list(dict.fromkeys(body.expense_ids))
+        cur.execute(
+            "SELECT id, type FROM expenseone.expenses WHERE id = ANY(%s)",
+            [eids],
+        )
+        type_by_eid = {str(r[0]): (r[1] or "") for r in cur.fetchall()}
+        missing = [e for e in eids if e not in type_by_eid]
+        if missing:
+            raise HTTPException(404, f"expenses not found: {missing}")
+
+        if body.replace_existing:
+            cur.execute(
+                "DELETE FROM transaction_expenseone_match WHERE expense_id = ANY(%s)",
+                [eids],
+            )
+
+        is_group = len(eids) > 1
+        method = "manual_group" if is_group else "manual"
+        reasoning = (
+            f"수동 매칭 (합산 — {len(eids)}개 expense → 1개 거래)"
+            if is_group else "수동 매칭"
+        )
+
+        match_ids: list[int] = []
+        for eid in eids:
+            cur.execute(
+                """
+                INSERT INTO transaction_expenseone_match
+                    (transaction_id, expense_id, expense_type, match_confidence,
+                     match_method, is_manual, is_confirmed, ai_reasoning, note,
+                     created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, TRUE, TRUE, %s, %s, NOW(), NOW())
+                ON CONFLICT (expense_id, transaction_id) DO UPDATE SET
+                    match_method = EXCLUDED.match_method,
+                    is_manual = TRUE,
+                    is_confirmed = TRUE,
+                    ai_reasoning = EXCLUDED.ai_reasoning,
+                    note = COALESCE(EXCLUDED.note, transaction_expenseone_match.note),
+                    updated_at = NOW()
+                RETURNING id
+                """,
+                [
+                    transaction_id, eid, type_by_eid[eid], 1.0,
+                    method, reasoning, body.note,
+                ],
+            )
+            match_ids.append(cur.fetchone()[0])
+
+        conn.commit()
+        return {
+            "ok": True,
+            "match_ids": match_ids,
+            "expense_ids": eids,
+            "transaction_id": transaction_id,
+            "group": is_group,
+        }
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception:
+        conn.rollback()
+        logger.exception("match_group_to_transaction failed")
+        raise HTTPException(500, "match-group failed")
     finally:
         cur.close()
 
