@@ -155,9 +155,18 @@ function sourceLabel(source: string): string {
     codef_lotte_card: "롯데카드",
     codef_woori_card: "우리카드",
     codef_shinhan_card: "신한카드",
+    codef_kb_card: "KB국민카드",
+    codef_hyundai_card: "현대카드",
+    codef_samsung_card: "삼성카드",
+    codef_nh_card: "NH농협카드",
+    codef_bc_card: "BC카드",
+    codef_hana_card: "하나카드",
+    codef_citi_card: "씨티카드",
     woori_bank: "우리은행",
+    shinhan_bank: "신한은행",
     codef_woori_bank: "우리은행",
     codef_ibk_bank: "기업은행",
+    codef_shinhan_bank: "신한은행",
   }
   return map[source] || source
 }
