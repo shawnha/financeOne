@@ -217,6 +217,7 @@ function SettingsContent() {
   const [mercuryStatus, setMercuryStatus] = useState<ConnectionStatus | null>(null)
   const [codefStatus, setCodefStatus] = useState<CodefStatus | null>(null)
   const [codefEntityId, setCodefEntityId] = useState(2)
+  const [krEntities, setKrEntities] = useState<Array<{ id: number; name: string; code: string }>>([])
   const [codefConnectOrg, setCodefConnectOrg] = useState<CodefOrg | null>(null)
   const [codefAuthMode, setCodefAuthMode] = useState<"idpw" | "cert">("idpw")
   const [codefLoginId, setCodefLoginId] = useState("")
@@ -353,6 +354,14 @@ function SettingsContent() {
 
   // Codef 초기 status 로드
   useEffect(() => {
+    // 한국 법인 목록 — Codef 는 KR_CORP 만 (HOI/US_CORP 는 QBO 사용)
+    fetchAPI<Array<{ id: number; name: string; code: string; type: string; is_active: boolean }>>("/entities")
+      .then((all) => {
+        const kr = all.filter((e) => e.type === "KR_CORP" && e.is_active)
+        setKrEntities(kr.map((e) => ({ id: e.id, name: e.name, code: e.code })))
+      })
+      .catch(() => {})
+
     fetchAPI<CodefStatus>(`/integrations/codef/status?entity_id=${codefEntityId}`)
       .then(setCodefStatus)
       .catch((err) =>
@@ -793,10 +802,7 @@ function SettingsContent() {
           <div className="flex gap-2 items-center">
             <label className="text-xs text-muted-foreground">법인</label>
             <div className="flex rounded-md overflow-hidden border border-border">
-              {[
-                { id: 2, name: "한아원코리아" },
-                { id: 3, name: "한아원리테일" },
-              ].map((e) => (
+              {krEntities.map((e) => (
                 <button
                   key={e.id}
                   onClick={() => setCodefEntityId(e.id)}
@@ -806,7 +812,7 @@ function SettingsContent() {
                       : "bg-transparent text-muted-foreground hover:bg-secondary/50"
                   }`}
                 >
-                  {e.name}
+                  {e.name.replace(/^주식회사\s*/, "")}
                 </button>
               ))}
             </div>
@@ -824,7 +830,7 @@ function SettingsContent() {
             </Button>
           </div>
           <p className="text-xs text-muted-foreground/70 -mt-2">
-            법인별로 은행·카드 연결이 독립적이에요 — 한아원코리아와 한아원리테일은 각자 별도 연결.
+            법인별로 은행·카드 연결이 독립적이에요 — 각 한국 법인이 각자 별도로 connected_id 를 등록합니다.
           </p>
 
           {codefStatus && !codefStatus.configured && (

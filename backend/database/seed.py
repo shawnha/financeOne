@@ -26,13 +26,14 @@ def seed():
     cur.execute("SET search_path TO financeone, public")
 
     # --------------------------------------------------
-    # 1. entities — 3개 법인
+    # 1. entities — 4개 법인 (HOI 모회사 → HOK/HOR/HOW 한국 자회사)
     # --------------------------------------------------
     cur.execute("""
         INSERT INTO entities (code, name, type, currency, parent_id) VALUES
           ('HOI', 'HOI Inc.', 'US_CORP', 'USD', NULL),
           ('HOK', '주식회사 한아원코리아', 'KR_CORP', 'KRW', 1),
-          ('HOR', '주식회사 한아원리테일', 'KR_CORP', 'KRW', 2)
+          ('HOR', '주식회사 한아원리테일', 'KR_CORP', 'KRW', 2),
+          ('HOW', '주식회사 한아원홀세일',  'KR_CORP', 'KRW', 2)
         ON CONFLICT (code) DO NOTHING
     """)
 
@@ -325,7 +326,7 @@ def seed():
     conn.commit()
     cur.close()
     conn.close()
-    print("Seed complete: 3 entities, K-GAAP accounts, US GAAP mappings, settings, internal accounts")
+    print("Seed complete: 4 entities, K-GAAP accounts, US GAAP mappings, settings, internal accounts")
 
 
 if __name__ == "__main__":

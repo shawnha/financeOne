@@ -2,6 +2,19 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-04-30 — 한아원홀세일(HOW) 법인 추가 + Codef 동적 법인 리스트
+
+### Added
+- 4번째 법인 `HOW` (주식회사 한아원홀세일) 추가
+  - Alembic 마이그레이션: `n4o5p6q7r8s9_add_how_entity.py` (ON CONFLICT idempotent)
+  - `seed.py`: 4 entities 로 업데이트
+  - 그룹 구조: HOI(US 모회사) → HOK / HOR / HOW (한국 자회사 3개)
+
+### Changed
+- 설정 페이지 Codef 법인 선택을 entities API 기반 동적 리스트로 전환
+  - 기존 hardcoded `[{id:2}, {id:3}]` → `KR_CORP` + `is_active` 필터링된 entities
+  - 향후 한국 법인 추가 시 코드 수정 없이 자동 등장
+
 ## [Unreleased] - 2026-04-30 — 내부 계정과목 다른 회사 복사 기능
 
 ### Added
