@@ -557,12 +557,21 @@ def copy_internal_accounts(
             std_id = r["std_id"] if body.include_standard_mapping else None
             is_rec = r["is_recurring"] if body.include_recurring else False
 
+            # replace 모드: 옛 비활성 row 가 (entity_id, code) UNIQUE 를 차지하고 있을 수 있음
+            # → ON CONFLICT 로 그 row 를 새 데이터로 UPDATE + is_active=true 로 복원.
             cur.execute(
                 """
                 INSERT INTO internal_accounts
                     (entity_id, code, name, standard_account_id, parent_id,
-                     sort_order, is_recurring)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                     sort_order, is_recurring, is_active)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, true)
+                ON CONFLICT (entity_id, code) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    standard_account_id = EXCLUDED.standard_account_id,
+                    parent_id = EXCLUDED.parent_id,
+                    sort_order = EXCLUDED.sort_order,
+                    is_recurring = EXCLUDED.is_recurring,
+                    is_active = true
                 RETURNING id
                 """,
                 [
