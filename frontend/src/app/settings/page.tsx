@@ -143,6 +143,7 @@ function formatRelativeTime(iso: string | null | undefined): string {
 type CodefOrg =
   | "woori_bank"
   | "ibk_bank"
+  | "shinhan_bank"
   | "lotte_card"
   | "bc_card"
   | "samsung_card"
@@ -156,6 +157,7 @@ type CodefOrg =
 const CODEF_ORG_LABELS: Record<CodefOrg, string> = {
   woori_bank: "우리은행",
   ibk_bank: "IBK기업은행",
+  shinhan_bank: "신한은행",
   lotte_card: "롯데카드",
   bc_card: "BC카드",
   samsung_card: "삼성카드",
@@ -171,12 +173,13 @@ const CODEF_ORG_LABELS: Record<CodefOrg, string> = {
 const CODEF_ORG_ORDER: CodefOrg[] = [
   "woori_bank",
   "ibk_bank",
+  "shinhan_bank",
   "lotte_card",
   "woori_card",
   "shinhan_card",
 ]
 
-const CODEF_BANK_ORGS = new Set<CodefOrg>(["woori_bank", "ibk_bank"])
+const CODEF_BANK_ORGS = new Set<CodefOrg>(["woori_bank", "ibk_bank", "shinhan_bank"])
 
 interface GowidStatus {
   configured: boolean
@@ -558,7 +561,7 @@ function SettingsContent() {
     setCodefError(null)
     setCodefErrorDetail(null)
     try {
-      const isBank = codefConnectOrg === "woori_bank"
+      const isBank = codefConnectOrg ? CODEF_BANK_ORGS.has(codefConnectOrg) : false
       const account: Record<string, unknown> = {
         organization: codefConnectOrg,
         business_type: isBank ? "BK" : "CD",
@@ -620,7 +623,7 @@ function SettingsContent() {
     setCodefErrorDetail(null)
     setCodefSyncResult(null)
     try {
-      if (org === "woori_bank") {
+      if (CODEF_BANK_ORGS.has(org)) {
         const result = await fetchAPI<CodefBankSyncResult>("/integrations/codef/sync-bank", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -628,6 +631,7 @@ function SettingsContent() {
             entity_id: codefEntityId,
             start_date: codefSyncStart,
             end_date: codefSyncEnd,
+            organization: org,
           }),
         })
         setCodefSyncResult(

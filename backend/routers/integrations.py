@@ -157,7 +157,7 @@ def mercury_sync(
 # --- Codef ---
 
 VALID_CODEF_ORGS = {
-    "woori_bank", "ibk_bank",
+    "woori_bank", "ibk_bank", "shinhan_bank",
     "lotte_card", "bc_card", "samsung_card", "shinhan_card",
     "hyundai_card", "nh_card", "woori_card", "kb_card", "hana_card",
 }
@@ -168,6 +168,7 @@ class CodefSyncRequest(BaseModel):
     start_date: str  # YYYYMMDD
     end_date: str
     connected_id: Optional[str] = None  # None이면 settings에서 조회
+    organization: Optional[str] = None  # 은행 sync 용. 미지정 시 woori_bank (backward compat)
 
     @field_validator("start_date", "end_date")
     @classmethod
@@ -593,22 +594,28 @@ def codef_sync_bank(
     body: CodefSyncRequest,
     conn: PgConnection = Depends(get_db),
 ):
-    """Codef 우리은행 거래 동기화."""
-    from backend.services.integrations.codef import CodefError, set_last_sync
-    connected_id = _resolve_connected_id(conn, body.entity_id, "woori_bank", body.connected_id)
+    """Codef 은행 거래 동기화 (woori/ibk/shinhan).
+
+    body.organization 미지정 시 woori_bank (backward compat).
+    """
+    from backend.services.integrations.codef import CodefError, set_last_sync, BANK_ORGS
+    org = body.organization or "woori_bank"
+    if org not in BANK_ORGS:
+        raise HTTPException(400, f"organization must be one of {sorted(BANK_ORGS)}")
+    connected_id = _resolve_connected_id(conn, body.entity_id, org, body.connected_id)
     client = _get_codef_client()
     try:
         result = client.sync_bank_transactions(
             conn, body.entity_id, connected_id,
-            body.start_date, body.end_date,
+            body.start_date, body.end_date, org=org,
         )
-        set_last_sync(conn, body.entity_id, "woori_bank")
+        set_last_sync(conn, body.entity_id, org)
         conn.commit()
         _sync_forecast_actuals_after_import(conn, body.entity_id)
         return result
     except CodefError as e:
         conn.rollback()
-        log_id = _log_codef_error(conn, body.entity_id, "woori_bank", e)
+        log_id = _log_codef_error(conn, body.entity_id, org, e)
         raise HTTPException(400, _codef_error_detail(e, log_id))
     except Exception as e:
         conn.rollback()

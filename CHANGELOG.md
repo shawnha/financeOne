@@ -2,6 +2,29 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-04-30 — Codef 신한은행 지원 (한아원홀세일 등)
+
+### Added
+- Codef BANK_ORGS 에 `shinhan_bank` (신한은행 BizBank) 추가
+  - ORG_CODES: `0088` (Codef 표준 신한은행 코드)
+  - ORG_LABELS: "신한은행"
+  - VALID_CODEF_ORGS allowlist 도 갱신
+- frontend `CodefOrg` type + `CODEF_ORG_LABELS` + `CODEF_ORG_ORDER` + `CODEF_BANK_ORGS` 에 신한은행 등록
+
+### Changed
+- `CodefClient.get_bank_account_list / get_bank_transactions / sync_bank_transactions`
+  에 `org` 파라미터 추가 (default `"woori_bank"` — backward compat)
+  - source_type 동적 결정 (`codef_woori_bank` / `codef_ibk_bank` / `codef_shinhan_bank`)
+  - balance_snapshots account_name 도 org 기반 동적 ("우리은행 법인통장" / "신한은행 법인통장" 등)
+  - 체크카드 cross-dedup ('체크우리') 은 woori_bank 한정으로 제한
+- `POST /api/integrations/codef/sync-bank` 가 `organization` 필드 받아 동적 sync (미지정 시 woori_bank)
+- scheduler `codef_sync_job` 이 `org` 인자를 sync_bank_transactions 에 전달
+- frontend `syncCodefOrg`: 은행 판정을 `CODEF_BANK_ORGS.has(org)` 로 일반화 + organization 필드 POST body 에 포함
+
+### Notes
+- 한아원홀세일에서 신한은행 BizBank 인증서로 connected_id 등록 후 정상 sync 가능 예정
+  (Codef 응답 구조는 우리은행과 동일 가정 — 첫 sync 후 검증 필요)
+
 ## [Unreleased] - 2026-04-30 — standard_accounts GAAP 분리 (US-GAAP COA 추가)
 
 ### Added

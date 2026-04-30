@@ -46,6 +46,7 @@ CODEF_TOKEN_URL = "https://oauth.codef.io/oauth/token"
 ORG_CODES = {
     "woori_bank": "0020",
     "ibk_bank": "0003",
+    "shinhan_bank": "0088",   # 신한은행 BizBank — 한아원홀세일 등에서 사용
     "lotte_card": "0311",     # ← 0301 (KB) 에서 정정. 롯데 CF-12803 재현 원인
     "bc_card": "0302",
     "samsung_card": "0303",
@@ -62,6 +63,7 @@ ORG_CODES = {
 ORG_LABELS = {
     "woori_bank": "우리은행",
     "ibk_bank": "IBK기업은행",
+    "shinhan_bank": "신한은행",
     "lotte_card": "롯데카드",
     "bc_card": "BC카드",
     "samsung_card": "삼성카드",
@@ -74,7 +76,7 @@ ORG_LABELS = {
 }
 
 # 은행/카드 타입 → source_type (mapping rules와 일관성 유지)
-BANK_ORGS = {"woori_bank", "ibk_bank"}
+BANK_ORGS = {"woori_bank", "ibk_bank", "shinhan_bank"}
 CARD_ORGS = {
     "lotte_card", "bc_card", "samsung_card", "shinhan_card",
     "hyundai_card", "nh_card", "woori_card", "kb_card", "hana_card",
@@ -357,11 +359,16 @@ class CodefClient:
         return connected_id
 
     # ── 은행 ────────────────────────────────────────────────
-    def get_bank_account_list(self, connected_id: str) -> dict:
-        """우리은행 보유계좌 조회. 첫 호출로 계좌번호 확보 후 거래내역 조회 가능."""
+    def get_bank_account_list(self, connected_id: str, org: str = "woori_bank") -> dict:
+        """은행 보유계좌 조회. 첫 호출로 계좌번호 확보 후 거래내역 조회 가능.
+
+        org: BANK_ORGS 중 하나 — woori_bank | ibk_bank | shinhan_bank
+        """
+        if org not in BANK_ORGS:
+            raise CodefError(f"unsupported bank org: {org}")
         return self._request(
             "/v1/kr/bank/b/account/account-list",
-            {"connectedId": connected_id, "organization": ORG_CODES["woori_bank"]},
+            {"connectedId": connected_id, "organization": ORG_CODES[org]},
         )
 
     def get_bank_transactions(
@@ -372,19 +379,23 @@ class CodefClient:
         account: str,
         order_by: str = "0",
         inquiry_type: str = "1",
+        org: str = "woori_bank",
     ) -> list[dict]:
-        """우리은행 법인 거래내역 조회 (YYYYMMDD).
+        """법인 은행 거래내역 조회 (YYYYMMDD).
 
         Args:
             account: 계좌번호 (하이픈 제거 13자리)
             order_by: '0'=오래된순, '1'=최신순
             inquiry_type: '1'=일반조회 (default)
+            org: 은행 식별자 (BANK_ORGS)
         """
+        if org not in BANK_ORGS:
+            raise CodefError(f"unsupported bank org: {org}")
         return self._request(
             "/v1/kr/bank/b/account/transaction-list",
             {
                 "connectedId": connected_id,
-                "organization": ORG_CODES["woori_bank"],
+                "organization": ORG_CODES[org],
                 "account": account,
                 "startDate": start_date,
                 "endDate": end_date,
@@ -401,20 +412,25 @@ class CodefClient:
         start_date: str,
         end_date: str,
         account: Optional[str] = None,
+        org: str = "woori_bank",
     ) -> dict:
-        """우리은행 거래를 transactions 테이블에 동기화.
+        """은행 거래를 transactions 테이블에 동기화.
 
         account 미지정 시 계좌목록 조회 후 첫 KRW 입출금 계좌 자동 사용.
+        org 별로 source_type='codef_{org}' (woori/ibk/shinhan).
         """
+        if org not in BANK_ORGS:
+            raise CodefError(f"unsupported bank org: {org}")
+        source_type = f"codef_{org}"
         if not account:
-            acct_list = self.get_bank_account_list(connected_id)
+            acct_list = self.get_bank_account_list(connected_id, org=org)
             deposit = acct_list.get("resDepositTrust", [])
             if not deposit:
                 raise CodefError("등록된 입출금 계좌 없음")
             account = deposit[0]["resAccount"]
 
         raw_list = self.get_bank_transactions(
-            connected_id, start_date, end_date, account=account,
+            connected_id, start_date, end_date, account=account, org=org,
         )
         cur = conn.cursor()
         synced = 0
@@ -438,15 +454,13 @@ class CodefClient:
                 latest_balance = tx["balance_after"]
                 latest_balance_date = tx["date"]
 
-            if _is_duplicate(cur, entity_id, tx, "codef_woori_bank"):
+            if _is_duplicate(cur, entity_id, tx, source_type):
                 duplicates += 1
                 continue
 
-            is_check_card_memo = tx.get("memo") == "체크우리"
-
-            # 체크카드 cross-dedup: 우리은행 '체크우리' 항목은 우리카드 거래와
-            # 매핑되므로 같은 (date, amount)의 우리카드(코덱 또는 Excel) 거래가
-            # 있으면 은행쪽은 INSERT 스킵 (Excel 업로더와 동일 정책).
+            # 체크카드 cross-dedup: 우리은행 '체크우리' 메모는 우리카드 결제와 매핑되어
+            # Excel 업로드 정책상 은행쪽 row 를 skip. 신한/IBK 는 해당 패턴 없음 (현재까진).
+            is_check_card_memo = (org == "woori_bank" and tx.get("memo") == "체크우리")
             if is_check_card_memo:
                 cur.execute(
                     """
@@ -478,12 +492,13 @@ class CodefClient:
                          counterparty, source_type, is_confirmed, is_cancel, note,
                          internal_account_id, standard_account_id,
                          mapping_confidence, mapping_source)
-                    VALUES (%s, %s, %s, 'KRW', %s, %s, %s, 'codef_woori_bank', FALSE, FALSE, %s,
+                    VALUES (%s, %s, %s, 'KRW', %s, %s, %s, %s, FALSE, FALSE, %s,
                             %s, %s, %s, %s)
                     """,
                     [
                         entity_id, tx["date"], float(tx["amount"]),
                         tx["type"], tx["description"], tx["counterparty"],
+                        source_type,
                         "체크카드" if is_check_card_memo else None,
                         mapping["internal_account_id"], mapping.get("standard_account_id"),
                         mapping.get("confidence"), mapping.get("match_type"),
@@ -495,11 +510,12 @@ class CodefClient:
                     INSERT INTO transactions
                         (entity_id, date, amount, currency, type, description,
                          counterparty, source_type, is_confirmed, is_cancel, note)
-                    VALUES (%s, %s, %s, 'KRW', %s, %s, %s, 'codef_woori_bank', FALSE, FALSE, %s)
+                    VALUES (%s, %s, %s, 'KRW', %s, %s, %s, %s, FALSE, FALSE, %s)
                     """,
                     [
                         entity_id, tx["date"], float(tx["amount"]),
                         tx["type"], tx["description"], tx["counterparty"],
+                        source_type,
                         "체크카드" if is_check_card_memo else None,
                     ],
                 )
@@ -508,6 +524,7 @@ class CodefClient:
         # balance_snapshots 자동 저장 (Excel 업로드와 동일한 후속 작업)
         balance_saved = False
         if latest_balance is not None and latest_balance_date is not None:
+            account_name = f"{ORG_LABELS.get(org, org)} 법인통장"
             cur.execute(
                 """
                 INSERT INTO balance_snapshots
@@ -516,7 +533,7 @@ class CodefClient:
                 ON CONFLICT (entity_id, date, account_name)
                 DO UPDATE SET balance = EXCLUDED.balance, source = 'codef_api'
                 """,
-                [entity_id, latest_balance_date, "우리은행 법인통장", latest_balance],
+                [entity_id, latest_balance_date, account_name, latest_balance],
             )
             balance_saved = True
 

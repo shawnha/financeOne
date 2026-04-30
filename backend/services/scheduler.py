@@ -169,7 +169,7 @@ def _sync_one_sync(entity_id: int, org: str) -> dict:
             try:
                 if org in BANK_ORGS:
                     result = client.sync_bank_transactions(
-                        conn, entity_id, connected_id, start, end,
+                        conn, entity_id, connected_id, start, end, org=org,
                     )
                 elif org in CARD_ORGS:
                     result = client.sync_card_approvals(
