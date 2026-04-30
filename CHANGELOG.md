@@ -2,6 +2,24 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-04-30 — 2025 확정 결산자료 기반 standard_accounts/keywords/HOW seed
+
+### Added
+- HOI 실제 운영 COA 85건으로 교체 (`backend/scripts/import_hoi_finalized_coa.py` + `seed_data/hoi_coa_2025.py`)
+  - source: `BS_123125_Finalized_032026.pdf` + `PL_123125_Finalized_031926.pdf`
+  - 코드 체계: `HOI-BS-####` / `HOI-PL-####` (parent 33 + leaf 52)
+  - 기존 generic US-GAAP placeholder 61건 비활성화 (data 보존)
+- K-GAAP `standard_account_keywords` 1593 신규 (`backend/scripts/import_kgaap_ledger_keywords.py`)
+  - source: 한아원코리아 25년 + 도팜인 24·25년 = 3년치 142시트 36,440건
+  - vendor 별 최빈 standard_code 매핑, confidence = 빈도 비율 보정
+- HOW(한아원홀세일) `internal_accounts` 39건 seed (`backend/scripts/seed_how_from_dopamin_25.py`)
+  - source: 도팜인 25년 ledger 시트명 53개
+  - 14건은 K-GAAP standard_accounts 누락 코드(통신비 81400 등)로 skip — follow-up
+
+### Notes (다음 세션)
+- K-GAAP standard_accounts 14개 누락 코드 보강 필요 (단기대여금 11400, 미수수익 11600, 선급비용 13300, 선수금 25900, 단기차입금 26000, 장기차입금 29300, 통신비 81400, 전력비 81600, 수선비 82000, 차량유지비 82200, 교육훈련비 82500, 도서인쇄비 82600, 건물관리비 83700, 이자비용 93100)
+- 위 보강 후 `seed_how_from_dopamin_25 --apply` 재실행 시 39 → 53 완성
+
 ## [Unreleased] - 2026-04-30 — Codef 신한은행 지원 (한아원홀세일 등)
 
 ### Added
