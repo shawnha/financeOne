@@ -129,7 +129,18 @@ def similar_match(
     }
 
 
-# ── 3. 키워드 규칙 ───────────────────────────────────────────
+# ── 3. 키워드 규칙 (entity ∪ global 통합 cascade) ────────────
+#
+# Stage 3 Eng Review 결정:
+#   D1: 통합 SQL — keyword_mapping_rules (entity-level) UNION
+#       standard_account_keywords (global). length × confidence 정렬.
+#   D2: global 매칭 시 entity 의 standard_account 매핑된 internal_account
+#       자동 추론. 없으면 internal_account_id=NULL 반환.
+#
+# 매칭 우선순위:
+#   1. 더 긴 keyword (구체적인 매칭)
+#   2. 더 높은 confidence
+#   3. entity-level 우선 (source priority: entity=0 < global=1)
 
 
 def keyword_match(
@@ -139,38 +150,93 @@ def keyword_match(
     counterparty: str | None,
     description: str | None,
 ) -> dict | None:
-    """keyword_mapping_rules 테이블에서 키워드 패턴 매칭."""
+    """entity_keyword (keyword_mapping_rules) ∪ global_keyword (standard_account_keywords).
+
+    통합 SQL 한 번으로 두 테이블 모두 검색, length × confidence 정렬, 1건 반환.
+
+    return dict 의 match_type:
+      - 'keyword' (기존, entity-level)
+      - 'global_keyword' (P4-B 신규, 전역)
+    """
     search_text = " ".join(filter(None, [counterparty, description]))
     if not search_text:
         return None
 
+    # 통합 SQL: entity-level + global 양쪽 검색
+    # source_priority: entity=0 (우선), global=1 (fallback)
+    #
+    # 안전성 보장 (Code Reviewer P0/P1 반영):
+    #   - entity-level: ia.entity_id = k.entity_id 검증 (cross-entity leak 차단)
+    #   - is_active 필터 (entity 와 global 양쪽)
+    #   - standard_accounts.is_active 검증
+    #   - ILIKE ESCAPE '\' 로 메타문자 false-match 차단
     cur.execute(
-        """
-        SELECT k.internal_account_id, k.confidence
-        FROM keyword_mapping_rules k
-        WHERE k.entity_id = %s
-          AND %s ILIKE '%%' || k.keyword || '%%'
-        ORDER BY length(k.keyword) DESC, k.confidence DESC
+        r"""
+        SELECT internal_account_id,
+               standard_account_id,
+               confidence,
+               match_type,
+               keyword
+        FROM (
+            -- entity-level: keyword_mapping_rules
+            SELECT k.internal_account_id,
+                   ia.standard_account_id,
+                   k.confidence,
+                   length(k.keyword) AS w,
+                   0 AS source_priority,
+                   'keyword' AS match_type,
+                   k.keyword
+            FROM keyword_mapping_rules k
+            JOIN internal_accounts ia
+              ON k.internal_account_id = ia.id
+             AND ia.entity_id = k.entity_id
+             AND ia.is_active = TRUE
+            WHERE k.entity_id = %s
+              AND %s ILIKE '%%' || k.keyword || '%%' ESCAPE '\'
+
+            UNION ALL
+
+            -- global: standard_account_keywords (P4-B)
+            -- D2: entity 의 internal_account 자동 추론 (있으면)
+            SELECT (
+                       SELECT id FROM internal_accounts ia2
+                       WHERE ia2.entity_id = %s
+                         AND ia2.standard_account_id = sak.standard_account_id
+                         AND ia2.is_active = TRUE
+                       ORDER BY ia2.sort_order
+                       LIMIT 1
+                   ) AS internal_account_id,
+                   sak.standard_account_id,
+                   sak.confidence,
+                   length(sak.keyword) AS w,
+                   1 AS source_priority,
+                   'global_keyword' AS match_type,
+                   sak.keyword
+            FROM standard_account_keywords sak
+            JOIN standard_accounts sa
+              ON sak.standard_account_id = sa.id
+             AND sa.is_active = TRUE
+            WHERE %s ILIKE '%%' || sak.keyword || '%%' ESCAPE '\'
+        ) merged
+        -- entity 가 항상 global 보다 우선 (P2-6: docstring 일치)
+        -- 그 다음 length 우선 (구체적 매칭), confidence 우선
+        ORDER BY source_priority ASC, w DESC, confidence DESC
         LIMIT 1
         """,
-        [entity_id, search_text],
+        [entity_id, search_text, entity_id, search_text],
     )
     row = cur.fetchone()
     if not row:
         return None
 
-    # Fetch standard_account_id from internal_accounts
-    cur.execute(
-        "SELECT standard_account_id FROM internal_accounts WHERE id = %s",
-        [row[0]],
-    )
-    std_row = cur.fetchone()
+    internal_id, standard_id, confidence, match_type, matched_kw = row
 
     return {
-        "internal_account_id": row[0],
-        "standard_account_id": std_row[0] if std_row else None,
-        "confidence": float(row[1]),
-        "match_type": "keyword",
+        "internal_account_id": internal_id,
+        "standard_account_id": standard_id,
+        "confidence": float(confidence),
+        "match_type": match_type,
+        "matched_keyword": matched_kw,
     }
 
 
