@@ -174,62 +174,6 @@ def keyword_match(
     }
 
 
-# ── 3b. 글로벌 도메인 키워드 (standard_account_keywords) ─────
-
-
-def global_keyword_match(
-    cur,
-    *,
-    entity_id: int,
-    counterparty: str | None,
-    description: str | None,
-) -> dict | None:
-    """standard_account_keywords (entity 무관 도메인 사전) 매칭.
-
-    keyword_mapping_rules 와 달리 entity 별 학습이 아닌 글로벌 사전.
-    standard_account_id 만 결정 가능. internal_account_id 는 entity 의 동일
-    standard_account 매핑 internal_accounts 에서 추론.
-    """
-    search_text = " ".join(filter(None, [counterparty, description]))
-    if not search_text:
-        return None
-
-    cur.execute(
-        """
-        SELECT k.standard_account_id, k.confidence, k.keyword
-        FROM standard_account_keywords k
-        WHERE %s ILIKE '%%' || k.keyword || '%%'
-        ORDER BY length(k.keyword) DESC, k.confidence DESC
-        LIMIT 1
-        """,
-        [search_text],
-    )
-    row = cur.fetchone()
-    if not row:
-        return None
-
-    std_id, conf, keyword = row
-
-    # entity 의 internal_accounts 중 같은 standard_account 매핑 추론 (있으면)
-    cur.execute(
-        """
-        SELECT id FROM internal_accounts
-        WHERE entity_id = %s AND standard_account_id = %s AND is_active = TRUE
-        ORDER BY sort_order LIMIT 1
-        """,
-        [entity_id, std_id],
-    )
-    int_row = cur.fetchone()
-
-    return {
-        "internal_account_id": int_row[0] if int_row else None,
-        "standard_account_id": std_id,
-        "confidence": float(conf),
-        "match_type": "global_keyword",
-        "matched_keyword": keyword,
-    }
-
-
 # ── 4. Claude AI fallback ────────────────────────────────────
 
 
@@ -337,8 +281,7 @@ def auto_map_transaction(
     description: str | None = None,
     enable_ai: bool = False,
 ) -> dict | None:
-    """6단계 캐스케이드 매칭:
-    exact → similar → entity_keyword → global_keyword → AI → None.
+    """5단계 캐스케이드 매칭: exact → similar → keyword → AI → None.
 
     Returns dict with keys: internal_account_id, standard_account_id, confidence, match_type
     or None if all stages fail.
@@ -356,13 +299,8 @@ def auto_map_transaction(
     if result:
         return result
 
-    # 3a. entity 별 키워드 규칙 (keyword_mapping_rules)
+    # 3. 키워드 규칙
     result = keyword_match(cur, entity_id=entity_id, counterparty=counterparty, description=description)
-    if result:
-        return result
-
-    # 3b. 글로벌 도메인 키워드 (standard_account_keywords)
-    result = global_keyword_match(cur, entity_id=entity_id, counterparty=counterparty, description=description)
     if result:
         return result
 
