@@ -294,6 +294,7 @@ def get_opening_balance(
 
     # 전월 종료 OR fallback: balance_snapshots 기반
     cur = conn.cursor()
+    target_start = date(year, month, 1)
     cur.execute(
         """
         SELECT COALESCE(SUM(balance), 0)
@@ -302,15 +303,69 @@ def get_opening_balance(
             SELECT entity_id, MAX(date), account_name
             FROM balance_snapshots
             WHERE entity_id = %s
-              AND date <= make_date(%s, %s, 1)
+              AND date <= %s
             GROUP BY entity_id, account_name
         )
         """,
-        [entity_id, year, month],
+        [entity_id, target_start],
     )
-    result = Decimal(str(cur.fetchone()[0]))
+    snapshot_total = Decimal(str(cur.fetchone()[0]))
+
+    # 월초 이전 snapshot 이 존재하면 그대로 사용
+    cur.execute(
+        "SELECT COUNT(*) FROM balance_snapshots WHERE entity_id = %s AND date <= %s",
+        [entity_id, target_start],
+    )
+    has_pre_snapshot = (cur.fetchone()[0] or 0) > 0
+
+    if has_pre_snapshot:
+        cur.close()
+        return snapshot_total
+
+    # Fallback: 월초 이전 snapshot 부재 → 가장 최근 snapshot (월초 이후) 에서 거래 역산
+    # current_balance(at latest snapshot) = opening(month_start) + Σ signed_tx(month_start..latest)
+    # → opening(month_start) = current_balance - Σ signed_tx(month_start..latest)
+    cur.execute(
+        "SELECT MAX(date) FROM balance_snapshots WHERE entity_id = %s",
+        [entity_id],
+    )
+    latest_after = cur.fetchone()[0]
+    if latest_after is None:
+        cur.close()
+        return Decimal(0)
+
+    cur.execute(
+        """
+        SELECT COALESCE(SUM(balance), 0)
+        FROM (
+            SELECT DISTINCT ON (account_name) account_name, balance
+            FROM balance_snapshots
+            WHERE entity_id = %s AND date <= %s
+            ORDER BY account_name, date DESC
+        ) latest
+        """,
+        [entity_id, latest_after],
+    )
+    current_balance = Decimal(str(cur.fetchone()[0]))
+
+    cur.execute(
+        """
+        SELECT COALESCE(SUM(CASE WHEN type='in' THEN amount ELSE -amount END), 0)
+        FROM transactions
+        WHERE entity_id = %s
+          AND date >= %s AND date <= %s
+          AND (is_cancel IS NOT TRUE)
+          AND (is_duplicate IS NOT TRUE)
+          AND source_type IN ('woori_bank', 'codef_woori_bank', 'codef_ibk_bank',
+                              'shinhan_bank', 'codef_shinhan_bank', 'ibk_bank',
+                              'mercury_api', 'manual')
+        """,
+        [entity_id, target_start, latest_after],
+    )
+    signed_delta = Decimal(str(cur.fetchone()[0]))
+
     cur.close()
-    return result
+    return current_balance - signed_delta
 
 
 def get_bank_transactions(conn: PgConnection, entity_id: int, year: int, month: int) -> list[dict]:

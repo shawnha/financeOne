@@ -135,7 +135,7 @@ def mercury_sync(
     body: MercurySyncRequest,
     conn: PgConnection = Depends(get_db),
 ):
-    """Mercury 거래 동기화."""
+    """Mercury 거래 동기화 + 잔고 snapshot 갱신."""
     token = _get_mercury_token(conn)
     from backend.services.integrations.mercury import MercuryClient
     client = MercuryClient(token)
@@ -145,6 +145,13 @@ def mercury_sync(
             start_date=getattr(body, "start_date", None),
             end_date=getattr(body, "end_date", None),
         )
+        # 거래 sync 후 잔고 snapshot upsert (cashflow 기초/기말 계산 의존)
+        try:
+            balance_result = client.sync_balance_snapshot(conn)
+            result["balance_snapshot"] = balance_result
+        except Exception as e:
+            logger.warning("balance snapshot upsert failed (non-fatal): %s", e)
+            result["balance_snapshot"] = {"error": str(e)}
         conn.commit()
         return result
     except Exception:

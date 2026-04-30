@@ -62,6 +62,54 @@ class MercuryClient:
         data = resp.json()
         return data.get("transactions", [])
 
+    def sync_balance_snapshot(self, conn: PgConnection) -> dict:
+        """Mercury accounts API → balance_snapshots 오늘 날짜 upsert.
+
+        cashflow 의 기초잔고 / 기말잔고 계산이 balance_snapshots 를 의존하므로
+        Mercury sync 시 매번 갱신해야 정확. 가장 자주 갱신되는 entity_id=HOI 의
+        잔고가 stale 이 되는 것을 막음.
+
+        Returns:
+            {"upserted": int, "accounts": [{"name": ..., "balance": ...}]}
+        """
+        accounts = self.get_accounts()
+        cur = conn.cursor()
+        upserted = 0
+        snapshots = []
+        snapshot_date = date.today()
+
+        for acc in accounts:
+            name = acc.get("name") or acc.get("nickname") or acc.get("id", "Unknown")
+            # Mercury API: currentBalance (settled) / availableBalance (settled - pending)
+            balance = acc.get("currentBalance")
+            if balance is None:
+                balance = acc.get("availableBalance")
+            if balance is None:
+                continue
+
+            cur.execute(
+                """
+                INSERT INTO balance_snapshots
+                    (entity_id, date, account_name, account_type, balance, currency, source)
+                VALUES (%s, %s, %s, %s, %s, 'USD', 'mercury_api')
+                ON CONFLICT (entity_id, date, account_name) DO UPDATE
+                    SET balance = EXCLUDED.balance,
+                        source = 'mercury_api',
+                        account_type = EXCLUDED.account_type
+                """,
+                [
+                    HOI_ENTITY_ID, snapshot_date, name,
+                    acc.get("kind") or acc.get("type") or "checking",
+                    float(Decimal(str(balance))),
+                ],
+            )
+            upserted += 1
+            snapshots.append({"name": name, "balance": float(Decimal(str(balance)))})
+
+        cur.close()
+        logger.info("Mercury balance snapshot: upserted=%d accounts=%s", upserted, [s["name"] for s in snapshots])
+        return {"upserted": upserted, "accounts": snapshots, "date": str(snapshot_date)}
+
     def sync_transactions(
         self,
         conn: PgConnection,
