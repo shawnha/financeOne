@@ -1,17 +1,48 @@
-"""대시보드 API -- KPI cards, cash flow chart, recent transactions"""
+"""대시보드 API -- KPI cards, cash flow chart, recent transactions
+
+Phase 1A 신규 (2026-04-30): /full batch endpoint (Approach C + Option 2 Bento Selector).
+Design doc: ~/.gstack/projects/shawnha-financeOne/admin-main-design-20260430-215309.md
+"""
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException
-from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import Literal, Optional
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
+from backend.routers.dashboard_schemas import DashboardFullResponse
+from backend.services.dashboard_service import fetch_dashboard_full
 from backend.utils.db import fetch_all
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
+
+# ── Phase 1A: Batch endpoint (plan-eng-review A1) ─────────────
+
+@router.get("/full", response_model=DashboardFullResponse)
+def get_dashboard_full(
+    entity_id: Optional[int] = Query(None, description="None = Group consolidated"),
+    currency: Literal["USD", "KRW"] = Query("USD"),
+    gaap: Literal["US", "K"] = Query("K"),
+    conn: PgConnection = Depends(get_db),
+):
+    """6 widget data 한 번에 fetch.
+
+    Bento 클릭 시 frontend 가 이 endpoint 1번 호출로 KPI/Queue/AI/Chart 모두 갱신.
+    Connection pool 절약 + FCP 개선 (network round trip 6→1).
+    """
+    try:
+        return fetch_dashboard_full(conn, entity_id, currency, gaap)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Dashboard /full error: %s", e, exc_info=True)
+        raise HTTPException(500, detail=f"dashboard /full failed: {e}")
+
+
+# ── Legacy endpoint (V0 dashboard) ─────────────────────────────
 
 @router.get("")
 def get_dashboard(
