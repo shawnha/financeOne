@@ -42,7 +42,7 @@ export function BentoEntitySelector({ loading = false }: BentoEntitySelectorProp
         gaap={gaap}
         onCurrencyChange={setCurrency}
         onGaapChange={setGaap}
-        groupTotalUsd={data.bento.group_total_usd}
+        groupTotalDisplay={data.bento.group_total_display}
         eliminationsUsd={data.bento.eliminations_usd}
         eliminationsCount={data.bento.eliminations_count}
       />
@@ -67,7 +67,7 @@ function GroupCard({
   gaap,
   onCurrencyChange,
   onGaapChange,
-  groupTotalUsd,
+  groupTotalDisplay,
   eliminationsUsd,
   eliminationsCount,
 }: {
@@ -77,11 +77,11 @@ function GroupCard({
   gaap: Gaap
   onCurrencyChange: (c: Currency) => void
   onGaapChange: (g: Gaap) => void
-  groupTotalUsd: string
+  groupTotalDisplay: string
   eliminationsUsd: string
   eliminationsCount: number
 }) {
-  const total = Number(groupTotalUsd)
+  const total = Number(groupTotalDisplay)
   const elimAmt = Number(eliminationsUsd)
 
   return (

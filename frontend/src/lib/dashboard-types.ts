@@ -28,6 +28,7 @@ export interface BentoEntity {
 
 export interface BentoSummary {
   group_total_usd: string
+  group_total_display: string  // 사용자 선택 currency 환산
   eliminations_usd: string
   eliminations_count: number
   entities: BentoEntity[]

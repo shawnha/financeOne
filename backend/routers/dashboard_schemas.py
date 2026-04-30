@@ -28,6 +28,7 @@ class BentoEntity(BaseModel):
 
 class BentoSummary(BaseModel):
     group_total_usd: Decimal
+    group_total_display: Decimal              # 사용자 선택 currency 로 환산된 값
     eliminations_usd: Decimal
     eliminations_count: int
     entities: List[BentoEntity]

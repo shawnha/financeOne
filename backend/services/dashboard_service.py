@@ -159,10 +159,17 @@ def fetch_bento_summary(conn: PgConnection, target_currency: str = "USD") -> Ben
 
     entities = []
     group_total_usd = Decimal(0)
+    group_total_display = Decimal(0)
     for row in entity_rows:
         entity_id, code, name, currency, accrual_status, cash_balance, missing_snapshot = row
         cash = Decimal(cash_balance)
         cash_usd = cash if currency == "USD" else cash * krw_to_usd
+        # display currency 환산
+        rate_to_target = (
+            Decimal("1") if currency == target_currency
+            else (krw_to_target if currency == "KRW" else usd_to_target)
+        )
+        group_total_display += cash * rate_to_target
 
         flag = "🇺🇸" if currency == "USD" else "🇰🇷"
         # badge 우선순위: 잔고 snapshot 누락 > 미확정 거래 수
@@ -196,6 +203,7 @@ def fetch_bento_summary(conn: PgConnection, target_currency: str = "USD") -> Ben
 
     return BentoSummary(
         group_total_usd=group_total_usd,
+        group_total_display=group_total_display,
         eliminations_usd=eliminations_usd,
         eliminations_count=eliminations_count,
         entities=entities,
@@ -906,7 +914,8 @@ def fetch_dashboard_full(
             cur.close()
 
     fallback_bento = BentoSummary(
-        group_total_usd=Decimal(0), eliminations_usd=Decimal(0),
+        group_total_usd=Decimal(0), group_total_display=Decimal(0),
+        eliminations_usd=Decimal(0),
         eliminations_count=0, entities=[],
     )
     fallback_cash = CashKPI(
