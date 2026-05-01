@@ -293,8 +293,8 @@ def sync_orders_to_invoices(
                 direction="sales",
                 counterparty=counterparty[:200],
                 issue_date=issue_date,
-                amount=supply,  # 공급가액 (부가세 제외)
-                vat=vat,         # 부가세 (TAXATION 이면 total/11, ELSE 0)
+                amount=supply,
+                vat=vat,
                 total=total,
                 document_no=external_no,
                 description=f"{o['external_source']} order {external_no}",
@@ -307,6 +307,7 @@ def sync_orders_to_invoices(
                     "commission_amount": str(o.get("commission_amount") or 0),
                     "refund_amount": str(o.get("refund_amount") or 0),
                 },
+                source_kind="platform_sales",
             )
             created += 1
         except Exception as e:

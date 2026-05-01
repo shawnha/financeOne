@@ -956,8 +956,8 @@ class CodefClient:
                         entity_id, direction, counterparty, counterparty_biz_no,
                         issue_date, due_date, document_no,
                         amount, vat, total, currency,
-                        description, status, raw_data
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'KRW', %s, 'open', %s)
+                        description, status, raw_data, source_kind
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'KRW', %s, 'open', %s, 'tax_invoice')
                     """,
                     [
                         entity_id, norm["direction"], norm["counterparty"],

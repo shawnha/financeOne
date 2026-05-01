@@ -70,10 +70,17 @@ def create_invoice(
     standard_account_id: Optional[int] = None,
     note: Optional[str] = None,
     raw_data: Optional[dict] = None,
+    source_kind: str = "tax_invoice",   # 'tax_invoice' | 'platform_sales' | 'manual'
 ) -> int:
-    """invoice INSERT. total NULL 이면 amount + vat 자동 계산."""
+    """invoice INSERT. total NULL 이면 amount + vat 자동 계산.
+
+    source_kind: 세금계산서 화면 분리용 — tax_invoice 만 그쪽에 노출.
+    SalesOne 통합 (NAVER 등) 호출 시 'platform_sales' 명시 필수.
+    """
     if direction not in ("sales", "purchase"):
         raise ValueError(f"invalid direction: {direction}")
+    if source_kind not in ("tax_invoice", "platform_sales", "manual"):
+        raise ValueError(f"invalid source_kind: {source_kind}")
 
     amount_q = _quantize(amount)
     vat_q = _quantize(vat)
@@ -88,8 +95,9 @@ def create_invoice(
             entity_id, direction, counterparty, counterparty_biz_no,
             issue_date, due_date, document_no, description,
             amount, vat, total, currency,
-            internal_account_id, standard_account_id, status, note, raw_data
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'open', %s, %s)
+            internal_account_id, standard_account_id, status, note, raw_data,
+            source_kind
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'open', %s, %s, %s)
         RETURNING id
         """,
         [
@@ -98,6 +106,7 @@ def create_invoice(
             float(amount_q), float(vat_q), float(total_q), currency,
             internal_account_id, standard_account_id, note,
             None if raw_data is None else __import__("json").dumps(raw_data, ensure_ascii=False),
+            source_kind,
         ],
     )
     invoice_id = cur.fetchone()[0]
@@ -244,6 +253,7 @@ def list_invoices(
     counterparty: Optional[str] = None,
     issue_date_from: Optional[date] = None,
     issue_date_to: Optional[date] = None,
+    source_kind: Optional[str] = None,   # tax_invoice | platform_sales | manual
     limit: int = 100,
     offset: int = 0,
 ) -> list[dict]:
@@ -265,6 +275,9 @@ def list_invoices(
     if issue_date_to:
         where.append("i.issue_date <= %s")
         params.append(issue_date_to)
+    if source_kind:
+        where.append("i.source_kind = %s")
+        params.append(source_kind)
 
     where_sql = " AND ".join(where)
     cur = conn.cursor()
@@ -274,6 +287,7 @@ def list_invoices(
                i.issue_date, i.due_date, i.document_no, i.description,
                i.amount, i.vat, i.total, i.currency,
                i.internal_account_id, i.standard_account_id, i.status,
+               i.source_kind,
                COALESCE((SELECT SUM(p.amount) FROM invoice_payments p
                          WHERE p.invoice_id = i.id), 0) AS paid_amount,
                i.created_at

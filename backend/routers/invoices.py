@@ -130,6 +130,11 @@ def get_invoices(
     counterparty: Optional[str] = Query(None),
     issue_date_from: Optional[date] = Query(None),
     issue_date_to: Optional[date] = Query(None),
+    source_kind: Optional[str] = Query(
+        None,
+        pattern="^(tax_invoice|platform_sales|manual)$",
+        description="tax_invoice: 홈택스 통합조회 / platform_sales: NAVER 등 / manual: 수동",
+    ),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     conn: PgConnection = Depends(get_db),
@@ -143,6 +148,7 @@ def get_invoices(
             counterparty=counterparty,
             issue_date_from=issue_date_from,
             issue_date_to=issue_date_to,
+            source_kind=source_kind,
             limit=limit,
             offset=offset,
         )

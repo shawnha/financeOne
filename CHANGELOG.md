@@ -2,6 +2,26 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-05-01 — 세금계산서 ↔ 플랫폼 매출 분리 (Phase 1)
+
+### Added
+- `invoices.source_kind` 컬럼 (Alembic `s9t0u1v2w3x4`)
+  - `'tax_invoice'` (홈택스/직접) / `'platform_sales'` (NAVER/Shopify 등) / `'manual'`
+  - `(entity_id, source_kind)` 인덱스
+  - backfill: `note LIKE 'salesone:%'` + NAVER/SHOPIFY/AMAZON/TIKTOK counterparty → `'platform_sales'`
+- `GET /api/invoices?source_kind=tax_invoice|platform_sales|manual` 필터
+- list_invoices 응답에 `source_kind` 노출
+
+### Changed
+- `create_invoice` 함수에 `source_kind` 파라미터 추가 (default `'tax_invoice'`)
+- `salesone.sync_orders_to_invoices` 가 `source_kind='platform_sales'` 명시
+- `codef.sync_tax_invoices` 가 `source_kind='tax_invoice'` 명시 (홈택스 통합조회)
+- frontend 세금계산서 페이지가 `source_kind=tax_invoice` 만 호출 — NAVER 등 플랫폼 매출 제외
+
+### Verified (production DB after backfill)
+- HOK invoices 269건 → tax_invoice 44 + platform_sales 225 분리
+- 세금계산서 화면 = 진짜 세금계산서 44건만 (이전 269건 모두 표시 → 정정)
+
 ## [Unreleased] - 2026-04-30 — ExpenseOne 매칭 N:M 지원 (분할/합산)
 
 ### Added

@@ -144,7 +144,11 @@ function InvoicesInner() {
     if (!entityId) return
     setLoading(true)
     try {
-      const params = new URLSearchParams({ entity_id: String(entityId), limit: "200" })
+      const params = new URLSearchParams({
+        entity_id: String(entityId),
+        limit: "200",
+        source_kind: "tax_invoice",   // 세금계산서 화면 — 진짜 세금계산서만 (NAVER 등 platform_sales 제외)
+      })
       if (direction) params.set("direction", direction)
       if (status) params.set("status", status)
       if (search) params.set("counterparty", search)
