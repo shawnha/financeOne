@@ -658,6 +658,70 @@ class CodefClient:
             return data.get("resApprovalList", [])
         return []
 
+    # ── 공공기관 (사업자번호 / 국세) ───────────────────────────
+    def check_business_status(self, biz_no: str) -> dict:
+        """사업자등록 휴폐업 상태 조회 (Codef 공식: 공공기관-국세청).
+
+        Args:
+            biz_no: 사업자번호 (10자리, 하이픈 무관 → digits 만 사용)
+        Returns:
+            { biz_no, status: '계속사업자' | '폐업자' | '비사업자' | ...,
+              tax_type, status_date, status_code }
+        """
+        digits = "".join(c for c in str(biz_no) if c.isdigit())
+        if len(digits) != 10:
+            raise CodefError("사업자번호는 10자리여야 합니다")
+        data = self._request(
+            "/v1/kr/public/nt/business/status",
+            {
+                "organization": ORG_CODES["hometax"],
+                "type": "0",
+                "businessList": [{"bno": digits}],
+            },
+        )
+        # 응답: data 가 dict 또는 list
+        item = data[0] if isinstance(data, list) and data else (data or {})
+        return {
+            "biz_no": digits,
+            "status_code": item.get("resBusinessStatus") or item.get("resBusinessStatusCode"),
+            "status": item.get("resBusinessStatusName") or item.get("resBusinessStatus"),
+            "tax_type": item.get("resTaxTypeName") or item.get("resTaxType"),
+            "status_date": item.get("resStatusDate") or item.get("resStatusChangeDate"),
+            "trade_name": item.get("resTradeName"),
+            "raw": item,
+        }
+
+    def get_tax_payment_list(
+        self,
+        connected_id: str,
+        start_date: str,
+        end_date: str,
+        tax_type: str = "all",
+    ) -> list[dict]:
+        """국세 납부내역 조회 (부가세/법인세/원천세 포함).
+
+        Codef endpoint: /v1/kr/public/nt/payment/payment-list
+        tax_type: 'all' | 'vat' | 'income' | 'corporate' (Codef 의 inquiryType 매핑)
+        """
+        # Codef 의 inquiryType 매핑 — '0'=전체, '1'=부가세, '2'=법인세, '3'=원천세
+        inquiry_map = {"all": "0", "vat": "1", "corporate": "2", "income": "3"}
+        inquiry_type = inquiry_map.get(tax_type, "0")
+        data = self._request(
+            "/v1/kr/public/nt/payment/payment-list",
+            {
+                "connectedId": connected_id,
+                "organization": ORG_CODES["hometax"],
+                "inquiryType": inquiry_type,
+                "startDate": start_date,
+                "endDate": end_date,
+            },
+        )
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return data.get("resPaymentList") or data.get("resTaxPaymentList") or []
+        return []
+
     def get_card_billings(
         self,
         connected_id: str,

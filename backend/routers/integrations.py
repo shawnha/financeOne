@@ -798,6 +798,85 @@ def codef_sync_card_billing(
         client.close()
 
 
+class BizStatusRequest(BaseModel):
+    biz_no: str
+
+    @field_validator("biz_no")
+    @classmethod
+    def validate_biz_no(cls, v: str) -> str:
+        digits = "".join(c for c in str(v) if c.isdigit())
+        if len(digits) != 10:
+            raise ValueError("biz_no must be 10 digits")
+        return digits
+
+
+@router.post("/codef/business-status")
+def codef_business_status(body: BizStatusRequest):
+    """사업자번호 휴폐업 상태 조회 (Codef 공식: 국세청 공공기관)."""
+    from backend.services.integrations.codef import CodefError
+    client = _get_codef_client()
+    try:
+        result = client.check_business_status(body.biz_no)
+        return result
+    except CodefError as e:
+        raise HTTPException(400, _codef_error_detail(e))
+    except Exception as e:
+        logger.exception("business-status failed")
+        raise HTTPException(500, f"내부 오류: {type(e).__name__}")
+    finally:
+        client.close()
+
+
+class TaxPaymentRequest(CodefSyncRequest):
+    tax_type: str = "all"  # all | vat | corporate | income
+
+    @field_validator("tax_type")
+    @classmethod
+    def validate_tax_type(cls, v: str) -> str:
+        if v not in ("all", "vat", "corporate", "income"):
+            raise ValueError("tax_type must be one of: all, vat, corporate, income")
+        return v
+
+
+@router.post("/codef/tax-payments")
+def codef_tax_payments(
+    body: TaxPaymentRequest,
+    conn: PgConnection = Depends(get_db),
+):
+    """국세 납부내역 조회 (홈택스 — 부가세/법인세/원천세).
+
+    DB 저장은 안 함 — 조회용. raw list 반환.
+    홈택스 connected_id 사전 등록 필요.
+    """
+    from backend.services.integrations.codef import CodefError
+    connected_id = _resolve_connected_id(conn, body.entity_id, "hometax", body.connected_id)
+    client = _get_codef_client()
+    try:
+        items = client.get_tax_payment_list(
+            connected_id, body.start_date, body.end_date, body.tax_type,
+        )
+        # 정규화 — 공통 필드만 노출
+        out: list[dict] = []
+        for r in items:
+            out.append({
+                "tax_name": r.get("resTaxName") or r.get("resTaxItemName"),
+                "tax_type": r.get("resTaxType"),
+                "payment_date": r.get("resPaymentDate") or r.get("resTaxDate"),
+                "due_date": r.get("resDueDate") or r.get("resStatementDate"),
+                "amount": r.get("resPaymentAmount") or r.get("resTaxAmount"),
+                "status": r.get("resStatus") or r.get("resPaymentStatus"),
+                "raw": r,
+            })
+        return {"items": out, "count": len(out)}
+    except CodefError as e:
+        raise HTTPException(400, _codef_error_detail(e))
+    except Exception as e:
+        logger.exception("tax-payments failed")
+        raise HTTPException(500, f"내부 오류: {type(e).__name__}")
+    finally:
+        client.close()
+
+
 @router.get("/card-billings")
 def list_card_billings(
     entity_id: int,

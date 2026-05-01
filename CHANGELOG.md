@@ -2,6 +2,32 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-05-01 — Codef 공공기관 + 카드 청구서 (Phase 2/3/4)
+
+### Added — Phase 4 (카드 청구서)
+- `card_billings` 테이블 (Alembic `t0u1v2w3x4y5`)
+- `CodefClient.get_card_billings` + `sync_card_billings`
+  - Codef `/v1/kr/card/b/account/billing-list`
+  - `_normalize_card_billing_row` (resCardNo / resBillingMonth / resPaymentDate)
+- `POST /api/integrations/codef/sync-card-billing`
+- `GET /api/integrations/card-billings?entity_id&months`
+- 신규 frontend 페이지 `/card-billings` + 사이드바 메뉴 "카드 청구서"
+
+### Added — Phase 2 (사업자번호 검증)
+- `CodefClient.check_business_status(biz_no)` — Codef `/v1/kr/public/nt/business/status`
+- `POST /api/integrations/codef/business-status` — `{biz_no: '1968103665'}` 입력
+- 응답: 휴폐업 상태, 과세유형, 상태 변경일 등
+
+### Added — Phase 3 (국세 납부내역)
+- `CodefClient.get_tax_payment_list` — Codef `/v1/kr/public/nt/payment/payment-list`
+- `POST /api/integrations/codef/tax-payments`
+- `tax_type`: `all` / `vat` (부가세) / `corporate` (법인세) / `income` (원천세)
+- 응답: 세목/납부일/금액/상태 정규화 list (DB 저장 X, 조회용)
+
+### Notes
+- Phase 2/3 endpoint 동작 검증은 Codef demo quota (CF-00012 일 100건) 리셋 후 가능
+- Phase 2/3 frontend UI 는 추후 — 사업자번호 검증 버튼 (invoice form 옆), 부가세 위젯 (dashboard) 등
+
 ## [Unreleased] - 2026-05-01 — 세금계산서 ↔ 플랫폼 매출 분리 (Phase 1)
 
 ### Added
