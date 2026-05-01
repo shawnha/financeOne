@@ -658,6 +658,103 @@ class CodefClient:
             return data.get("resApprovalList", [])
         return []
 
+    def get_card_billings(
+        self,
+        connected_id: str,
+        start_month: str,
+        end_month: str,
+        card_type: str,
+    ) -> list[dict]:
+        """카드 청구서 조회 (월별 결제 명세).
+
+        Codef endpoint: /v1/kr/card/b/account/billing-list
+        Args:
+            start_month / end_month: 'YYYYMM' (조회 청구월 범위)
+            card_type: ORG_CODES 키 (lotte_card 등)
+        """
+        org_code = ORG_CODES.get(card_type)
+        if not org_code:
+            raise CodefError(f"Unknown card type: {card_type}")
+        data = self._request(
+            "/v1/kr/card/b/account/billing-list",
+            {
+                "connectedId": connected_id,
+                "organization": org_code,
+                "startMonth": start_month,
+                "endMonth": end_month,
+                "inquiryType": "0",
+            },
+        )
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            # Codef 응답 구조 다양 — 일반적으로 resBillingList
+            return data.get("resBillingList") or data.get("resCardBillList") or []
+        return []
+
+    def sync_card_billings(
+        self,
+        conn: PgConnection,
+        entity_id: int,
+        connected_id: str,
+        start_month: str,
+        end_month: str,
+        card_type: str,
+    ) -> dict:
+        """카드 청구서를 card_billings 테이블에 동기화.
+
+        같은 (entity, card_org, card_no_masked, billing_month) 는 UPSERT.
+        """
+        if card_type not in CARD_ORGS:
+            raise CodefError(f"unsupported card org: {card_type}")
+        billings = self.get_card_billings(
+            connected_id, start_month, end_month, card_type,
+        )
+        cur = conn.cursor()
+        upserted = 0
+        for raw in billings:
+            norm = _normalize_card_billing_row(raw, card_type)
+            if not norm:
+                continue
+            cur.execute(
+                """
+                INSERT INTO card_billings (
+                    entity_id, card_org, card_no_masked, billing_month,
+                    billing_date, settlement_date,
+                    total_amount, principal_amount, installment_amount, interest_amount,
+                    currency, status, raw_data, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'KRW', 'pending', %s, NOW())
+                ON CONFLICT (entity_id, card_org, card_no_masked, billing_month) DO UPDATE SET
+                    billing_date = EXCLUDED.billing_date,
+                    settlement_date = EXCLUDED.settlement_date,
+                    total_amount = EXCLUDED.total_amount,
+                    principal_amount = EXCLUDED.principal_amount,
+                    installment_amount = EXCLUDED.installment_amount,
+                    interest_amount = EXCLUDED.interest_amount,
+                    raw_data = EXCLUDED.raw_data,
+                    updated_at = NOW()
+                """,
+                [
+                    entity_id, card_type, norm["card_no_masked"], norm["billing_month"],
+                    norm.get("billing_date"), norm.get("settlement_date"),
+                    norm["total_amount"],
+                    norm.get("principal_amount"),
+                    norm.get("installment_amount"),
+                    norm.get("interest_amount"),
+                    json.dumps(raw, ensure_ascii=False),
+                ],
+            )
+            upserted += 1
+        conn.commit()
+        cur.close()
+        return {
+            "fetched": len(billings),
+            "upserted": upserted,
+            "card_org": card_type,
+            "period": f"{start_month}~{end_month}",
+            "environment": self.environment,
+        }
+
     def sync_card_approvals(
         self,
         conn: PgConnection,
@@ -1180,6 +1277,73 @@ def _normalize_biz_no(s: Optional[str]) -> str:
     if not s:
         return ""
     return "".join(c for c in str(s) if c.isdigit())
+
+
+def _normalize_card_billing_row(item: dict, card_type: str) -> Optional[dict]:
+    """카드 청구서 row 정규화.
+
+    Codef 카드 청구서 응답 필드는 카드사별로 다름. 공통적으로:
+      - resCardNo / resCardNumber
+      - resBillingMonth / resPaymentMonth (YYYYMM)
+      - resBillingDate (YYYYMMDD) / resPaymentDate (출금일)
+      - resTotalAmount / resPaymentAmount (청구 총액)
+      - resPrincipalAmount / resInstallmentBalance / resInterest
+    """
+    # 카드번호 — 마스킹 4자리 추출
+    raw_card = (
+        item.get("resCardNo") or item.get("resCardNumber")
+        or item.get("resAccount") or ""
+    )
+    digits = "".join(c for c in str(raw_card) if c.isdigit())
+    card_no_masked = f"****{digits[-4:]}" if len(digits) >= 4 else (str(raw_card)[:20] if raw_card else "")
+
+    # 청구월 (YYYYMM)
+    bm = (
+        item.get("resBillingMonth") or item.get("resPaymentMonth")
+        or item.get("resBillingYear", "") + item.get("resBillingMonthOnly", "")
+    )
+    bm = str(bm).strip() if bm else ""
+    if not bm:
+        # billing_date 에서 추정
+        bd = item.get("resBillingDate") or item.get("resPaymentDate") or ""
+        if isinstance(bd, str) and len(bd) >= 6:
+            bm = bd[:6]
+    if not bm or len(bm) < 6:
+        return None  # 청구월 식별 불가 → skip
+
+    def _parse_date(v):
+        if not v:
+            return None
+        s = str(v).strip()
+        if len(s) == 8 and s.isdigit():
+            try:
+                return date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+            except ValueError:
+                return None
+        return None
+
+    def _amount(v) -> Decimal:
+        if v is None or v == "":
+            return Decimal("0")
+        try:
+            return Decimal(str(v).replace(",", ""))
+        except Exception:
+            return Decimal("0")
+
+    return {
+        "card_no_masked": card_no_masked,
+        "billing_month": bm[:6],
+        "billing_date": _parse_date(item.get("resBillingDate")),
+        "settlement_date": _parse_date(
+            item.get("resPaymentDate") or item.get("resSettlementDate")
+        ),
+        "total_amount": _amount(
+            item.get("resTotalAmount") or item.get("resPaymentAmount")
+        ),
+        "principal_amount": _amount(item.get("resPrincipalAmount")) or None,
+        "installment_amount": _amount(item.get("resInstallmentBalance")) or None,
+        "interest_amount": _amount(item.get("resInterest") or item.get("resFee")) or None,
+    }
 
 
 def _normalize_tax_invoice_row(item: dict, our_biz_no: Optional[str] = None) -> Optional[dict]:

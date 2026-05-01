@@ -48,6 +48,7 @@ const sections: { label: string; items: SidebarItem[] }[] = [
     items: [
       { label: "거래내역", icon: CreditCard, href: "/transactions", enabled: true },
       { label: "세금계산서", icon: FileSpreadsheet, href: "/invoices", enabled: true },
+      { label: "카드 청구서", icon: CreditCard, href: "/card-billings", enabled: true },
       { label: "업로드", icon: Upload, href: "/upload", enabled: true },
       // Slack 매칭은 ExpenseOne 도입 후 사용 빈도 낮아 숨김 (코드 보존, 재활성 원하면 enabled: true)
       // { label: "Slack 매칭", icon: MessageSquare, href: "/slack-match", enabled: true },

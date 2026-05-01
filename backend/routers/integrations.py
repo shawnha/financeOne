@@ -748,6 +748,98 @@ def codef_sync_card(
         client.close()
 
 
+class CodefCardBillingRequest(BaseModel):
+    """카드 청구서 (월별 명세) sync 요청."""
+    entity_id: int
+    card_type: str
+    start_month: str            # YYYYMM
+    end_month: str              # YYYYMM
+    connected_id: Optional[str] = None
+
+    @field_validator("card_type")
+    @classmethod
+    def validate_card_type(cls, v: str) -> str:
+        if v not in VALID_CODEF_ORGS:
+            raise ValueError(f"card_type must be one of {VALID_CODEF_ORGS}")
+        return v
+
+    @field_validator("start_month", "end_month")
+    @classmethod
+    def validate_month(cls, v: str) -> str:
+        if not re.match(r"^\d{6}$", v):
+            raise ValueError("month must be YYYYMM format")
+        return v
+
+
+@router.post("/codef/sync-card-billing")
+def codef_sync_card_billing(
+    body: CodefCardBillingRequest,
+    conn: PgConnection = Depends(get_db),
+):
+    """카드 청구서 sync — card_billings 테이블에 UPSERT."""
+    from backend.services.integrations.codef import CodefError
+    connected_id = _resolve_connected_id(conn, body.entity_id, body.card_type, body.connected_id)
+    client = _get_codef_client()
+    try:
+        result = client.sync_card_billings(
+            conn, body.entity_id, connected_id,
+            body.start_month, body.end_month, body.card_type,
+        )
+        return result
+    except CodefError as e:
+        conn.rollback()
+        log_id = _log_codef_error(conn, body.entity_id, body.card_type, e)
+        raise HTTPException(400, _codef_error_detail(e, log_id))
+    except Exception as e:
+        conn.rollback()
+        logger.exception("Codef card billing sync failed")
+        raise HTTPException(500, f"내부 오류: {type(e).__name__}")
+    finally:
+        client.close()
+
+
+@router.get("/card-billings")
+def list_card_billings(
+    entity_id: int,
+    months: int = 12,
+    conn: PgConnection = Depends(get_db),
+):
+    """card_billings 리스트 — entity 의 최근 N개월 청구서."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT cb.id, cb.entity_id, cb.card_org, cb.card_no_masked,
+                   cb.billing_month, cb.billing_date, cb.settlement_date,
+                   cb.total_amount, cb.principal_amount, cb.installment_amount,
+                   cb.interest_amount, cb.currency, cb.status, cb.paid_amount,
+                   cb.transaction_id, cb.updated_at
+            FROM card_billings cb
+            WHERE cb.entity_id = %s
+              AND cb.billing_month >=
+                  to_char((NOW() - (%s || ' months')::interval)::date, 'YYYYMM')
+            ORDER BY cb.billing_month DESC, cb.card_org, cb.card_no_masked
+            """,
+            [entity_id, months],
+        )
+        cols = [c[0] for c in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        # Decimal/date 직렬화
+        for r in rows:
+            for k in ("total_amount", "principal_amount", "installment_amount",
+                      "interest_amount", "paid_amount"):
+                if r.get(k) is not None:
+                    r[k] = float(r[k])
+            for k in ("billing_date", "settlement_date"):
+                if r.get(k):
+                    r[k] = r[k].isoformat()
+            if r.get("updated_at"):
+                r["updated_at"] = r["updated_at"].isoformat()
+        return {"items": rows, "count": len(rows)}
+    finally:
+        cur.close()
+
+
 class CodefTaxInvoiceSyncRequest(CodefSyncRequest):
     query_type: str = "3"  # '1'=매출, '2'=매입, '3'=전체
     our_biz_no: Optional[str] = None  # direction 자동 판별. 미지정 시 모두 'unknown'
