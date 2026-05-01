@@ -448,6 +448,13 @@ function SettingsContent() {
       .catch(() => {})
   }, [])
 
+  // 페이지 진입 시 QBO 연결 상태 자동 확인 (HOI = entity_id=1)
+  useEffect(() => {
+    fetchAPI<ConnectionStatus>("/integrations/quickbooks/status?entity_id=1")
+      .then(setQboStatus)
+      .catch(() => {})
+  }, [])
+
   const [mercurySyncing, setMercurySyncing] = useState(false)
   const [mercurySyncResult, setMercurySyncResult] = useState<string | null>(null)
   const syncMercury = async () => {
@@ -1622,9 +1629,19 @@ function SettingsContent() {
           <CardTitle className="flex items-center gap-2">
             <Wifi className="h-5 w-5" />
             Gowid 법인카드 (차선책)
-            {gowidStatus?.connected && (
-              <span className="text-xs rounded px-2 py-0.5 ml-2 bg-emerald-500/20 text-emerald-400">
-                connected
+            {gowidStatus?.connected ? (
+              gowidStatus.key_source === "settings" ? (
+                <span className="text-xs rounded px-2 py-0.5 ml-2 bg-emerald-500/20 text-emerald-400">
+                  {gowidEntityName(gowidEntityId)} 전용 키
+                </span>
+              ) : (
+                <span className="text-xs rounded px-2 py-0.5 ml-2 bg-yellow-500/20 text-yellow-400" title="이 entity 전용 API 키가 없어 환경변수 (전역) 키로 fallback 됨">
+                  {gowidEntityName(gowidEntityId)} 환경변수 fallback
+                </span>
+              )
+            ) : (
+              <span className="text-xs rounded px-2 py-0.5 ml-2 bg-zinc-500/20 text-zinc-400">
+                {gowidEntityName(gowidEntityId)} 미연결
               </span>
             )}
           </CardTitle>
