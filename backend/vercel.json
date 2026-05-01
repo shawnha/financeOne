@@ -3,11 +3,5 @@
   "regions": ["icn1"],
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index" }
-  ],
-  "crons": [
-    {
-      "path": "/api/integrations/cron/auto-sync",
-      "schedule": "0 */2 * * *"
-    }
   ]
 }
