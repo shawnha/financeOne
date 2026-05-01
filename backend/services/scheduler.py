@@ -282,9 +282,75 @@ async def codef_sync_job() -> None:
         else:
             _last_run["error_count"] += 1
 
+    # Mercury sync (HOI) — codef 후 같은 cron 에서 자동 실행
+    try:
+        loop = asyncio.get_running_loop()
+        mercury_result = await loop.run_in_executor(None, _mercury_sync_sync)
+        _last_run["results"].append(mercury_result)
+        if mercury_result.get("ok"):
+            _last_run["ok_count"] += 1
+        else:
+            _last_run["error_count"] += 1
+    except Exception as e:
+        logger.warning("mercury sync in scheduler failed: %s", e)
+        _last_run["results"].append({"source": "mercury", "ok": False, "detail": str(e)})
+        _last_run["error_count"] += 1
+
     _last_run["finished_at"] = now_kst().isoformat()
-    logger.info("codef_sync_job done ok=%d err=%d",
+    logger.info("auto_sync_job done ok=%d err=%d",
                 _last_run["ok_count"], _last_run["error_count"])
+
+
+def _mercury_sync_sync() -> dict:
+    """Mercury HOI 자동 sync — accounts 모두 + balance + historical.
+
+    토큰이 DB 에 저장되어 있으면 실행. 없으면 skip (non-fatal).
+    """
+    try:
+        from backend.routers.integrations import _get_mercury_token
+        from backend.services.integrations.mercury import MercuryClient
+        from fastapi import HTTPException
+    except Exception as e:
+        return {"source": "mercury", "ok": False, "detail": f"import failed: {e}"}
+
+    try:
+        with _db() as conn:
+            try:
+                token = _get_mercury_token(conn)
+            except HTTPException:
+                return {"source": "mercury", "ok": False, "detail": "token not configured"}
+
+            client = MercuryClient(token)
+            synced_total = 0
+            try:
+                accounts = client.get_accounts()
+                for acc in accounts:
+                    acc_id = acc.get("id")
+                    if not acc_id:
+                        continue
+                    try:
+                        r = client.sync_transactions(conn, acc_id)
+                        synced_total += r.get("synced", 0)
+                    except Exception as e:
+                        logger.warning("mercury account %s sync error: %s", acc_id, e)
+                bal = client.sync_balance_snapshot(conn)
+                hist = client.sync_historical_balances(conn)
+                conn.commit()
+                return {
+                    "source": "mercury", "ok": True,
+                    "detail": {
+                        "accounts": len(accounts), "synced": synced_total,
+                        "balance_upserted": bal.get("upserted"),
+                        "historical_upserted": hist.get("snapshots_upserted"),
+                        "drift": hist.get("reconstruction_drift"),
+                    },
+                }
+            finally:
+                client.close()
+    except Exception as e:
+        logger.exception("mercury sync crashed")
+        return {"source": "mercury", "ok": False,
+                "detail": f"exception: {type(e).__name__}: {str(e)[:120]}"}
 
 
 def start_scheduler() -> None:
@@ -300,7 +366,7 @@ def start_scheduler() -> None:
 
     # SCHEDULER_CRON_HOURS 우선 (예: "9,18" = KST 9시·18시). 없으면 INTERVAL_MIN fallback.
     cron_hours = os.environ.get("SCHEDULER_CRON_HOURS", "").strip()
-    interval_min = int(os.environ.get("SCHEDULER_INTERVAL_MIN", "90"))
+    interval_min = int(os.environ.get("SCHEDULER_INTERVAL_MIN", "120"))
 
     _scheduler = AsyncIOScheduler()
     if cron_hours:
@@ -348,7 +414,7 @@ def get_status() -> dict:
         "running": _scheduler is not None and _scheduler.running,
         "mode": "cron" if cron_hours else "interval",
         "cron_hours": cron_hours or None,
-        "interval_min": int(os.environ.get("SCHEDULER_INTERVAL_MIN", "90")),
+        "interval_min": int(os.environ.get("SCHEDULER_INTERVAL_MIN", "120")),
         "enabled": os.environ.get("SCHEDULER_ENABLED", "1").lower() not in ("0", "false", "no"),
         "serverless": serverless,
         "last_run": _last_run.copy() if _last_run else None,

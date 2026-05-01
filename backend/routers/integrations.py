@@ -3,7 +3,7 @@
 import os
 import re
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, field_validator
 from typing import Optional
@@ -1010,6 +1010,22 @@ def codef_scheduler_status():
 @router.post("/codef/scheduler/run-now")
 async def codef_scheduler_run_now():
     """수동 트리거 — 즉시 sync job 1회 실행."""
+    from backend.services.scheduler import run_now
+    return await run_now()
+
+
+@router.get("/cron/auto-sync")
+async def cron_auto_sync(request: Request):
+    """Vercel Cron 엔드포인트 — 120 분마다 codef + mercury 자동 sync.
+
+    Vercel cron 은 GET request 만 보내므로 별도 GET wrapper.
+    secret header (CRON_SECRET) 로 보호 — Vercel 자체 cron 만 통과.
+    """
+    cron_secret = os.environ.get("CRON_SECRET", "")
+    if cron_secret:
+        auth = request.headers.get("authorization", "")
+        if auth != f"Bearer {cron_secret}":
+            raise HTTPException(401, detail="unauthorized")
     from backend.services.scheduler import run_now
     return await run_now()
 
