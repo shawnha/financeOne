@@ -27,7 +27,7 @@ HOI Inc. (미국 모회사, Delaware C-Corp) ← USD, US GAAP
 | DB | Neon PostgreSQL (14 tables, dev/prod branch) |
 | AI | Anthropic Claude API + mapping_rules 학습 |
 | Charts | Recharts |
-| Deploy | Vercel (frontend, free) + Railway (backend, free) |
+| Deploy | Vercel (frontend + backend serverless functions) |
 
 ## Development Phases
 

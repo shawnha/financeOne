@@ -22,8 +22,8 @@
 ### ExpenseOne 일 1회 자동 동기화 cron (P2)
 - **What:** ExpenseOne 승인 경비를 FinanceOne으로 매일 01:00 KST 자동 pull
 - **Why:** CEO가 '동기화 버튼 누르는 것도 잊는' 리스크 제거. 월말 결산 직전에 한꺼번에 돌리면 누락/지연 발생 가능.
-- **Context:** CEO 리뷰 2026-04-19에서 SELECTIVE EXPANSION #1로 ACCEPTED됐으나, Backend 호스팅 미결정 상태 (CLAUDE.md Railway 기록 stale, 실제 FastAPI 배포 위치 미정)로 DEFERRED. Supabase는 Python 런타임 없음 → Edge Function (Deno rewrite) vs FastAPI 외부 배포(Fly/Render/Cloud Run) 결정 필요.
-- **Depends on:** Backend hosting 전략 결정 세션
+- **Context:** CEO 리뷰 2026-04-19에서 SELECTIVE EXPANSION #1로 ACCEPTED. Backend는 Vercel serverless functions로 배포되어 있으며, GitHub Actions cron(120분 주기)이 sync 보완 중. 일 1회 cron은 GitHub Actions schedule로 추가 가능.
+- **Depends on:** GitHub Actions cron schedule 설정
 - **Effort:** S (스크립트 자체) + backend deploy 의존
 - **Priority:** P2
 
@@ -48,9 +48,5 @@
 - **Depends on:** ExpenseOne 공개 URL 확정
 - **Priority:** P3
 
-### CLAUDE.md 배포 스택 기록 정정 (P2)
-- **What:** CLAUDE.md `Deploy: Vercel (frontend) + Railway (backend)` 라인 업데이트
-- **Why:** Railway 기록은 stale. 실제로는 backend hosting 미결정 상태. QBO Production 전환 시점에 "Render/Fly.io 등" 언급 (project_resume.md).
-- **Context:** CEO 리뷰 2026-04-19에서 발견. 문서와 실제 상태 불일치.
-- **Depends on:** Backend hosting 결정 세션
-- **Priority:** P2
+### ~~CLAUDE.md 배포 스택 기록 정정~~ (DONE 2026-05-04)
+- ~~Vercel (frontend) + Railway (backend) → Vercel (frontend + backend serverless) 정정 완료. Railway 흔적 모두 제거.~~

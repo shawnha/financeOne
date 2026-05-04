@@ -40,7 +40,7 @@
 - Frontend: Next.js 14 App Router
 - Backend: FastAPI (Python)
 - DB: Supabase PostgreSQL (financeone 스키마, Session pooler)
-- Deploy: Vercel (frontend) + Railway (backend)
+- Deploy: Vercel (frontend + backend serverless functions)
 
 ## Directory
 - frontend/src/app: Next.js 페이지

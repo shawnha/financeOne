@@ -19,7 +19,7 @@ ax-hub의 ops 모듈이 FinanceOne 역할을 일부 커버 (원가/재무 관리
 | DB | Supabase (PostgreSQL + pgvector) | Neon PostgreSQL (psycopg2) |
 | State | Zustand | - |
 | Icons | Phosphor Icons | Lucide |
-| 배포 | Vercel (서버리스) | Vercel (FE) + Railway (BE) |
+| 배포 | Vercel (서버리스) | Vercel (FE + BE serverless) |
 | 모노레포 | pnpm workspace | 단일 프로젝트 |
 | AI | Anthropic SDK + OpenAI SDK | Anthropic SDK |
 
@@ -37,7 +37,7 @@ ax-hub의 ops 모듈이 FinanceOne 역할을 일부 커버 (원가/재무 관리
 - 마이그레이션 작업량 추정: 20-32일
 
 ### DevOps
-- Railway(상시 서버) → Vercel 서버리스 전환은 재작성 수준
+- Vercel 서버리스 환경에서 운영 중 (이전 Railway 계획 폐기됨)
 - 서버리스 10초 타임아웃 → AI 매핑(Claude API 호출) 등에서 문제 가능
 - DB 마이그레이션(Neon → Supabase)은 둘 다 PostgreSQL이라 비교적 쉬움
 - 백엔드 제로 다운타임 전환은 운영 복잡도 매우 높음
@@ -60,8 +60,8 @@ ax-hub의 ops 모듈이 FinanceOne 역할을 일부 커버 (원가/재무 관리
 ax-hub (Vercel)
   └── ops 모듈 (TypeScript)
         └── Anti-Corruption Layer (API Client)
-              └── FinanceOne API (FastAPI on Railway)
-                    └── Neon PostgreSQL
+              └── FinanceOne API (FastAPI on Vercel serverless)
+                    └── Supabase PostgreSQL
 ```
 
 ### 통합 시작 조건 (Phase 4 시점에 재평가)
