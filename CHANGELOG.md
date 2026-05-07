@@ -2,6 +2,25 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-05-08 — 거래처명 별칭 + 매핑 direction 인지 + UI 명확화
+
+### Added
+- DB migration `x4y5z6a7b8c9` — `payee_aliases` 테이블 신설
+  - `(canonical_name, alias)` 매핑 — 약국 사장 개인명 ↔ 약국 정식명 연결
+  - 1차 자동 매칭 30건 등록 (예: "이희성(아이튼" → "동탄)아이튼튼약국")
+  - ambiguous 8건 + no_match 39건은 향후 사용자 검토용
+- DB migration `y5z6a7b8c9d0` — `mapping_rules.applicable_directions TEXT[]`
+  - `['sales']` / `['purchase']` / NULL (전체) 로 룰 적용 방향 제한
+  - 새로엠에스(주) 매출 룰 → sales 전용으로 정정 (매입 invoice 잘못 매핑 방지)
+  - 기존 잘못 매핑된 매입 invoice 2건 NULL 처리 → 재매핑 시 정상 분류
+- `auto_map_transaction(direction='sales'|'purchase')` 시그니처 + exact_match/similar_match 에 direction 필터링
+- transactions auto-map endpoint: `type='in'` → sales / `out` → purchase 자동 매핑
+- invoices auto-map endpoint: invoices.direction 그대로 사용
+
+### Changed
+- P&L 페이지 부제 명확화 — "운영 직관 view (현금주의 OpEx). 외상 거래/K-GAAP 정합은 재무제표 페이지"
+- 1-3월 매입 invoices 31건 자동 매핑 + 4월 잘못 매핑된 6건 재매핑 (3건 정상화)
+
 ## [Unreleased] - 2026-05-07 — 옵션 ② VAT 면세/과세 분리 (K-GAAP 정합)
 
 ### Added

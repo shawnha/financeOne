@@ -405,8 +405,11 @@ export function PnlContent() {
             P&amp;L
           </h1>
           <p className="text-xs text-muted-foreground mt-1">
-            매출 = 도매 매출관리 (발생주의) · 매출원가 = 매출 row × 매입가 · OpEx = 거래내역 판관비
+            매출 = 도매 매출관리 (발생주의) · 매출원가 = 매출 row × 매입가 · OpEx = 거래내역 판관비 (현금주의)
             {isExcl && <span className="ml-2 text-amber-300/80">· VAT 제외 (K-GAAP base)</span>}
+          </p>
+          <p className="text-[10px] text-muted-foreground/70 mt-1">
+            ⓘ 운영 직관 view — 외상 거래 / 발생주의 K-GAAP 정합 손익은 <span className="text-foreground/70">재무제표 페이지</span> 참조
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">

@@ -334,7 +334,7 @@ def auto_map_unmapped(
         cur.execute(
             f"""
             SELECT t.id, t.counterparty, t.description,
-                   t.internal_account_id, t.standard_account_id,
+                   t.internal_account_id, t.standard_account_id, t.type,
                    (
                        SELECT string_agg(
                            COALESCE(tsm.item_description, ''),
@@ -358,15 +358,19 @@ def auto_map_unmapped(
         mapped_count = 0
         updated_count = 0
         mapped_ids = []
-        for tx_id, counterparty, description, current_ia, current_sa, slack_desc in targets:
+        for tx_id, counterparty, description, current_ia, current_sa, tx_type, slack_desc in targets:
             # Slack 컨텍스트를 description에 합침
             enriched_desc = " ".join(filter(None, [description, slack_desc]))
+
+            # transactions.type='in' (수입) → sales 룰만 / 'out' (지출) → purchase 룰만
+            tx_direction = "sales" if tx_type == "in" else ("purchase" if tx_type == "out" else None)
 
             mapping = auto_map_transaction(
                 cur, entity_id=entity_id,
                 counterparty=counterparty,
                 description=enriched_desc or None,
                 enable_ai=enable_ai,
+                direction=tx_direction,
             )
             if not mapping:
                 continue

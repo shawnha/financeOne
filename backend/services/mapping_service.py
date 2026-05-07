@@ -15,28 +15,42 @@ AI_MODEL = "claude-haiku-4-5-20251001"
 # ── 1. 정확 일치 ──────────────────────────────────────────────
 
 
-def exact_match(cur, *, entity_id: int, counterparty: str | None, description: str | None = None) -> dict | None:
+def exact_match(
+    cur, *,
+    entity_id: int,
+    counterparty: str | None,
+    description: str | None = None,
+    direction: str | None = None,
+) -> dict | None:
     """counterparty로 mapping_rules 정확 일치 조회.
 
     Slack 컨텍스트(description_pattern)가 있는 규칙을 우선 매칭.
     description이 주어지면 description_pattern과 비교하여 가장 적합한 규칙 선택.
+    direction 이 주어지면 applicable_directions 에 그 방향이 포함된 룰만 매칭
+    (NULL 인 룰은 모든 방향 허용).
     """
     if not counterparty:
         return None
 
+    dir_filter = "AND (applicable_directions IS NULL OR %s = ANY(applicable_directions))"
+    dir_params = [direction] if direction else []
+    if not direction:
+        dir_filter = ""
+
     # 1차: description 있으면 description_pattern이 일치하는 규칙 우선
     if description:
         cur.execute(
-            """
+            f"""
             SELECT internal_account_id, standard_account_id, confidence
             FROM mapping_rules
             WHERE entity_id = %s AND counterparty_pattern = %s AND confidence >= 0.8
               AND description_pattern IS NOT NULL
               AND %s ILIKE '%%' || description_pattern || '%%'
+              {dir_filter}
             ORDER BY confidence DESC, hit_count DESC
             LIMIT 1
             """,
-            [entity_id, counterparty, description],
+            [entity_id, counterparty, description, *dir_params],
         )
         row = cur.fetchone()
         if row:
@@ -49,14 +63,15 @@ def exact_match(cur, *, entity_id: int, counterparty: str | None, description: s
 
     # 2차: fallback — description_pattern 없는 기본 규칙
     cur.execute(
-        """
+        f"""
         SELECT internal_account_id, standard_account_id, confidence
         FROM mapping_rules
         WHERE entity_id = %s AND counterparty_pattern = %s AND confidence >= 0.8
+          {dir_filter}
         ORDER BY confidence DESC, hit_count DESC
         LIMIT 1
         """,
-        [entity_id, counterparty],
+        [entity_id, counterparty, *dir_params],
     )
     row = cur.fetchone()
     if not row:
@@ -79,6 +94,7 @@ def similar_match(
     entity_id: int,
     counterparty: str | None,
     description: str | None,
+    direction: str | None = None,
 ) -> dict | None:
     """pg_trgm 유사도 기반 매칭. counterparty + description 결합."""
     if not counterparty and not description:
@@ -86,8 +102,14 @@ def similar_match(
 
     search_text = " ".join(filter(None, [counterparty, description]))
 
+    dir_filter = ""
+    dir_params: list = []
+    if direction:
+        dir_filter = "AND (applicable_directions IS NULL OR %s = ANY(applicable_directions))"
+        dir_params = [direction]
+
     cur.execute(
-        """
+        f"""
         SELECT internal_account_id, standard_account_id,
                GREATEST(
                    similarity(counterparty_pattern, %s),
@@ -107,6 +129,7 @@ def similar_match(
               OR (vendor IS NOT NULL AND similarity(vendor, %s) >= %s)
           )
           AND confidence >= 0.5
+          {dir_filter}
         ORDER BY sim DESC, confidence DESC, hit_count DESC
         LIMIT 1
         """,
@@ -114,7 +137,8 @@ def similar_match(
          entity_id,
          search_text, SIMILAR_THRESHOLD,
          search_text, SIMILAR_THRESHOLD,
-         search_text, SIMILAR_THRESHOLD],
+         search_text, SIMILAR_THRESHOLD,
+         *dir_params],
     )
     row = cur.fetchone()
     if not row:
@@ -346,22 +370,28 @@ def auto_map_transaction(
     counterparty: str | None,
     description: str | None = None,
     enable_ai: bool = False,
+    direction: str | None = None,
 ) -> dict | None:
     """5단계 캐스케이드 매칭: exact → similar → keyword → AI → None.
 
     Returns dict with keys: internal_account_id, standard_account_id, confidence, match_type
     or None if all stages fail.
+
+    direction: 'sales' | 'purchase' | None. mapping_rules.applicable_directions
+    가 NULL 이면 모든 방향 허용. 명시된 경우 direction 이 그 array 에 포함되어야.
+    transactions 의 type='in' → direction='sales', type='out' → direction='purchase'.
+    invoices 는 direction 컬럼 그대로 사용.
     """
     if not counterparty and not description:
         return None
 
     # 1. 정확 일치
-    result = exact_match(cur, entity_id=entity_id, counterparty=counterparty, description=description)
+    result = exact_match(cur, entity_id=entity_id, counterparty=counterparty, description=description, direction=direction)
     if result:
         return result
 
     # 2. 유사 매칭 (pg_trgm)
-    result = similar_match(cur, entity_id=entity_id, counterparty=counterparty, description=description)
+    result = similar_match(cur, entity_id=entity_id, counterparty=counterparty, description=description, direction=direction)
     if result:
         return result
 

@@ -211,6 +211,112 @@ def get_auto_match_candidates(
         raise HTTPException(500, "내부 오류")
 
 
+@router.post("/invoices/auto-map")
+def auto_map_invoices(
+    entity_id: int = Query(...),
+    direction: Optional[str] = Query(None, pattern="^(purchase|sales)$"),
+    year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None),
+    only_unmapped: bool = Query(True, description="True 면 standard_account_id IS NULL 만 갱신."),
+    enable_ai: bool = Query(False),
+    conn: PgConnection = Depends(get_db),
+):
+    """invoices 의 standard_account_id 자동 매핑.
+
+    transactions 와 동일한 mapping_service 룰 사용 (counterparty + description 기반).
+    options-B (VAT 정합) 분석 위해 매입 세금계산서 표준계정 매핑이 선행 작업.
+    """
+    from backend.services.mapping_service import auto_map_transaction
+
+    cur = conn.cursor()
+    try:
+        cur.execute("SET search_path TO financeone, public")
+        clauses = ["entity_id = %s"]
+        params: list = [entity_id]
+        if direction:
+            clauses.append("direction = %s")
+            params.append(direction)
+        if year and month:
+            clauses.append("issue_date >= %s AND issue_date < %s")
+            params.append(f"{year}-{month:02d}-01")
+            next_month = month + 1
+            next_year = year
+            if next_month > 12:
+                next_month = 1
+                next_year = year + 1
+            params.append(f"{next_year}-{next_month:02d}-01")
+        if only_unmapped:
+            clauses.append("standard_account_id IS NULL")
+        where = " AND ".join(clauses)
+
+        cur.execute(
+            f"""
+            SELECT id, counterparty, description, standard_account_id, direction
+            FROM invoices
+            WHERE {where}
+            ORDER BY issue_date, id
+            """,
+            params,
+        )
+        targets = cur.fetchall()
+
+        new_mapped = 0
+        updated = 0
+        skipped_no_match = 0
+        mapped_ids = []
+        examples = []
+        for inv_id, counterparty, description, current_sa, inv_direction in targets:
+            mapping = auto_map_transaction(
+                cur, entity_id=entity_id,
+                counterparty=counterparty,
+                description=description,
+                enable_ai=enable_ai,
+                direction=inv_direction,  # 'sales' or 'purchase'
+            )
+            if not mapping or not mapping.get("standard_account_id"):
+                skipped_no_match += 1
+                continue
+            new_sa = mapping["standard_account_id"]
+            if new_sa == current_sa:
+                continue
+            cur.execute(
+                """
+                UPDATE invoices
+                SET standard_account_id = %s, updated_at = NOW()
+                WHERE id = %s
+                """,
+                [new_sa, inv_id],
+            )
+            if current_sa is None:
+                new_mapped += 1
+            else:
+                updated += 1
+            mapped_ids.append(inv_id)
+            if len(examples) < 10:
+                examples.append({
+                    "invoice_id": inv_id,
+                    "counterparty": counterparty,
+                    "standard_account_id": new_sa,
+                    "confidence": float(mapping.get("confidence", 0)),
+                    "match_type": mapping.get("match_type"),
+                })
+
+        conn.commit()
+        cur.close()
+        return {
+            "total_targets": len(targets),
+            "new_mapped": new_mapped,
+            "updated": updated,
+            "skipped_no_match": skipped_no_match,
+            "mapped_ids": mapped_ids,
+            "examples": examples,
+        }
+    except Exception:
+        conn.rollback()
+        logger.exception("invoices auto-map failed")
+        raise
+
+
 @router.get("/invoices/{invoice_id}")
 def get_invoice_endpoint(invoice_id: int, conn: PgConnection = Depends(get_db)):
     inv = get_invoice(conn, invoice_id)
