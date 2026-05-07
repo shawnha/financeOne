@@ -79,9 +79,13 @@ interface MonthlyRow {
   revenue: number
   cogs: number
   gross_profit: number
+  gross_margin_pct: number | null
   opex: number
   operating_profit: number
   net_income: number
+  purchases_total: number
+  sales_count: number
+  purchases_count: number
 }
 
 interface MonthlyData {
@@ -500,6 +504,140 @@ export function PnlContent() {
                 strokeWidth={2}
                 strokeDasharray="4 4"
                 dot={{ r: 2, fill: "#F59E0B" }}
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      </Card>
+
+      {/* 월별 매출 vs 매출원가 vs 매입 비교 */}
+      <Card className="p-6 rounded-2xl">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <h3 className="text-sm font-medium text-muted-foreground">
+            월별 매출 · 매출원가 · 매입 추이 ({monthly.months.length}개월)
+          </h3>
+          <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 rounded-sm bg-[hsl(var(--accent))]/60" /> 매출
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 rounded-sm bg-[hsl(var(--loss))]/50" /> 매출원가
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 rounded-sm bg-amber-500/60" /> 매입
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-0.5 bg-emerald-400" /> 매출총이익률 (우)
+            </span>
+          </div>
+        </div>
+        <div className="h-[260px] max-md:h-[200px]">
+          <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+            <ComposedChart data={chartData} margin={{ top: 10, right: 50, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="4 4" stroke="rgba(255,255,255,0.03)" vertical={false} />
+              <XAxis
+                dataKey="month"
+                tick={{ fill: "#64748b", fontSize: 11 }}
+                axisLine={{ stroke: "rgba(255,255,255,0.06)" }}
+                tickLine={false}
+                tickFormatter={(v) => `${parseInt(v.slice(5))}월`}
+              />
+              <YAxis
+                yAxisId="amount"
+                tick={{ fill: "#64748b", fontSize: 10 }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v) => abbreviateAmount(v)}
+                width={60}
+              />
+              <YAxis
+                yAxisId="pct"
+                orientation="right"
+                tick={{ fill: "#64748b", fontSize: 10 }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v) => `${v.toFixed(0)}%`}
+                width={40}
+                domain={["auto", "auto"]}
+              />
+              <RechartsTooltip
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null
+                  const data = payload[0].payload as MonthlyRow
+                  const cogsRatio = data.revenue > 0 ? (data.cogs / data.revenue) * 100 : 0
+                  const purRatio = data.revenue > 0 ? (data.purchases_total / data.revenue) * 100 : 0
+                  return (
+                    <div className="rounded-lg bg-popover border border-border px-3 py-2 shadow-lg text-xs space-y-0.5 min-w-[200px]">
+                      <p className="text-muted-foreground mb-1">{label}</p>
+                      <p className="font-mono tabular-nums flex justify-between gap-4">
+                        <span>매출 ({data.sales_count}건)</span>
+                        <span className="text-[hsl(var(--accent))]">{formatByEntity(data.revenue, entityId)}</span>
+                      </p>
+                      <p className="font-mono tabular-nums flex justify-between gap-4">
+                        <span>매출원가 ({cogsRatio.toFixed(1)}%)</span>
+                        <span className="text-[hsl(var(--loss))]">-{formatByEntity(data.cogs, entityId)}</span>
+                      </p>
+                      <p className="font-mono tabular-nums flex justify-between gap-4">
+                        <span>매입 ({data.purchases_count}건 · {purRatio.toFixed(1)}%)</span>
+                        <span className="text-amber-400">{formatByEntity(data.purchases_total, entityId)}</span>
+                      </p>
+                      <div className="border-t border-border/40 my-1" />
+                      <p className="font-mono tabular-nums flex justify-between gap-4">
+                        <span>매출총이익</span>
+                        <span className={profitColor(data.gross_profit)}>{formatByEntity(data.gross_profit, entityId)}</span>
+                      </p>
+                      <p className="font-mono tabular-nums flex justify-between gap-4">
+                        <span>매출총이익률</span>
+                        <span className="text-emerald-400">
+                          {data.gross_margin_pct == null ? "-" : `${data.gross_margin_pct.toFixed(2)}%`}
+                        </span>
+                      </p>
+                    </div>
+                  )
+                }}
+              />
+              <Bar yAxisId="amount" dataKey="revenue" name="매출" radius={[4, 4, 0, 0]} barSize={14}>
+                {chartData.map((entry, i) => (
+                  <Cell
+                    key={`rev2-${i}`}
+                    fill="hsl(var(--accent))"
+                    fillOpacity={entry.isSelected ? 0.8 : 0.45}
+                    cursor="pointer"
+                    onClick={() => setSelectedMonth(entry.month)}
+                  />
+                ))}
+              </Bar>
+              <Bar yAxisId="amount" dataKey="cogs" name="매출원가" radius={[4, 4, 0, 0]} barSize={14}>
+                {chartData.map((entry, i) => (
+                  <Cell
+                    key={`cogs-${i}`}
+                    fill="hsl(var(--loss))"
+                    fillOpacity={entry.isSelected ? 0.7 : 0.35}
+                    cursor="pointer"
+                    onClick={() => setSelectedMonth(entry.month)}
+                  />
+                ))}
+              </Bar>
+              <Bar yAxisId="amount" dataKey="purchases_total" name="매입" radius={[4, 4, 0, 0]} barSize={14}>
+                {chartData.map((entry, i) => (
+                  <Cell
+                    key={`pur-${i}`}
+                    fill="#F59E0B"
+                    fillOpacity={entry.isSelected ? 0.8 : 0.4}
+                    cursor="pointer"
+                    onClick={() => setSelectedMonth(entry.month)}
+                  />
+                ))}
+              </Bar>
+              <Line
+                yAxisId="pct"
+                type="monotone"
+                dataKey="gross_margin_pct"
+                name="매출총이익률"
+                stroke="#34D399"
+                strokeWidth={2}
+                dot={{ r: 3, fill: "#34D399" }}
+                connectNulls
               />
             </ComposedChart>
           </ResponsiveContainer>

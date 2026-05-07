@@ -2,6 +2,18 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-05-07 — P&L 월별 매출 vs 매출원가 vs 매입 비교 chart
+
+### Added
+- `pnl_service.get_pnl_monthly` 응답에 `purchases_total` / `gross_margin_pct` / `sales_count` / `purchases_count` 추가
+- frontend pnl-content.tsx 에 신규 ComposedChart Card "월별 매출 · 매출원가 · 매입 추이"
+  - grouped bar 3종 (매출/매출원가/매입) + 매출총이익률 line (우측 Y axis %)
+  - tooltip: 건수, 매출 대비 비율, 매출총이익, 매출총이익률 통합 표시
+  - bar 클릭 시 선택 월 전환 (기존 chart 와 동일 패턴)
+
+### Verified (entity 13, 2026-04)
+- 매출 ₩3,299,687,404 / 매출원가 98.8% / 매입 103.3% / 매출총이익률 1.16% — 한눈에 마진 압박 인지 가능
+
 ## [Unreleased] - 2026-05-07 — P&L 매출/매입 drilldown (제품·거래처별 분석)
 
 ### Added

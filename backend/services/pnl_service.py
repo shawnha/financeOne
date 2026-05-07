@@ -313,9 +313,13 @@ def get_pnl_monthly(conn: PgConnection, entity_id: int, months: int = 12) -> dic
             "revenue": s["revenue"],
             "cogs": s["cogs"],
             "gross_profit": s["gross_profit"],
+            "gross_margin_pct": s["gross_margin_pct"],
             "opex": s["opex"],
             "operating_profit": s["operating_profit"],
             "net_income": s["net_income"],
+            "purchases_total": s["purchases_total"],
+            "sales_count": s["sales_count"],
+            "purchases_count": s["purchases_count"],
         })
     cur.close()
     return {"months": result, "available_months": available}
