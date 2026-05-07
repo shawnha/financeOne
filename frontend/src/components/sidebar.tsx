@@ -25,6 +25,7 @@ import {
   FileSpreadsheet,
   Wallet,
   FileBarChart,
+  TrendingDown,
 } from "lucide-react"
 
 type SidebarItem = {
@@ -43,6 +44,7 @@ const sections: { label: string; items: SidebarItem[] }[] = [
       { label: "현금흐름표", icon: TrendingUp, href: "/cashflow", enabled: true },
       { label: "OpEx", icon: Wallet, href: "/opex", enabled: true },
       { label: "P&L", icon: FileBarChart, href: "/pnl", enabled: true },
+      { label: "외상매출금", icon: TrendingDown, href: "/receivables", enabled: true },
       { label: "재무제표", icon: FileText, href: "/statements", enabled: true },
       { label: "리포트", icon: BarChart3, href: "/reports", enabled: false },
     ],

@@ -2,6 +2,27 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-05-08 — 외상매출금 페이지 신설 (payee_aliases 활용)
+
+### Added
+- `backend/services/receivables_service.py` — get_receivables_summary / get_receivables_monthly
+  - payee_aliases + 자기 매칭 base 로 매출관리 vs 거래내역 입금 통합
+  - 거래처별 발생/회수/외상/회수율 계산
+  - 월별 추이 (누적 외상매출금 포함)
+- `/api/receivables/summary` / `/monthly` endpoint
+- `/receivables` 페이지 신설
+  - 4 KPI 카드 (발생/회수/외상/회수율)
+  - 월별 발생 vs 회수 + 누적 외상 듀얼 Y축 chart
+  - 거래처별 detail (top 50, 회수율 색상 indicator)
+  - alias 없는 입금 별도 섹션 (payee_aliases 보강 필요 알림)
+- 사이드바 "외상매출금" 메뉴 추가 (TrendingDown 아이콘)
+
+### Verified (한아원홀세일)
+- 발생 매출 ₩7,547M / 회수 ₩2,517M / 외상매출금 ₩5,029M / 회수율 33.4%
+- 월별: 1월 57% / 2월 53% / 3월 62% (도매업 특성 — 다음 달 회수)
+- 4월 매출 ₩3.3B 는 5월부터 회수 시작
+- 회수율 0% 거래처 다수 → payee_aliases 추가 매칭 필요 (다음 step)
+
 ## [Unreleased] - 2026-05-08 — 거래처명 별칭 + 매핑 direction 인지 + UI 명확화
 
 ### Added
