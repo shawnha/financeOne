@@ -2,6 +2,11 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-05-07 — API 문서 URL 수정
+
+### Fixed
+- `docs/api-wholesale-upload.md` 의 production base URL 을 추측값 (`finance.hanah1.com`) 에서 실제 Vercel 배포 URL (`financeone-api.vercel.app`) 로 교체. curl/Python/Node 예시 모두 동일하게 수정.
+
 ## [Unreleased] - 2026-05-07 — API 문서에 key 발급/관리 절차 보강
 
 ### Added

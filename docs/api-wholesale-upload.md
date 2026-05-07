@@ -3,8 +3,10 @@
 외부 자동화 프로그램 (cron, RPA, ETL job) 이 매출관리/매입관리 xlsx 를 주기적으로 FinanceOne 에 업로드할 때 사용하는 endpoint 명세.
 
 **Base URL**:
-- Production: `https://finance.hanah1.com/api` (Vercel)
+- Production: `https://financeone-api.vercel.app/api` (Vercel `financeone-api` 프로젝트, icn1 region)
 - Local dev: `http://localhost:8000/api`
+
+> 참고 — frontend 는 별도 배포: `https://financesone.vercel.app` (외부 자동 업로드 프로그램은 frontend 가 아니라 위 backend URL 직접 호출)
 
 **Last updated**: 2026-05-07
 
@@ -258,13 +260,13 @@ key = os.environ["FINANCEONE_API_KEY"]
 ```bash
 # 매출 업로드
 curl -X POST \
-  "https://finance.hanah1.com/api/upload/wholesale-sales?entity_id=13" \
+  "https://financeone-api.vercel.app/api/upload/wholesale-sales?entity_id=13" \
   -H "X-API-Key: $FINANCEONE_API_KEY" \
   -F "file=@/path/to/4월매출관리.xlsx"
 
 # 매입 업로드
 curl -X POST \
-  "https://finance.hanah1.com/api/upload/wholesale-purchases?entity_id=13" \
+  "https://financeone-api.vercel.app/api/upload/wholesale-purchases?entity_id=13" \
   -H "X-API-Key: $FINANCEONE_API_KEY" \
   -F "file=@/path/to/4월매입관리.xlsx"
 ```
@@ -275,7 +277,7 @@ curl -X POST \
 import os
 import requests
 
-API_BASE = "https://finance.hanah1.com/api"
+API_BASE = "https://financeone-api.vercel.app/api"
 HEADERS = {"X-API-Key": os.environ["FINANCEONE_API_KEY"]}
 
 def upload_sales(entity_id: int, xlsx_path: str) -> dict:
@@ -323,7 +325,7 @@ const path = require("path");
 const FormData = require("form-data");
 const axios = require("axios");
 
-const API_BASE = "https://finance.hanah1.com/api";
+const API_BASE = "https://financeone-api.vercel.app/api";
 const API_KEY = process.env.FINANCEONE_API_KEY;
 
 async function uploadSales(entityId, xlsxPath) {
