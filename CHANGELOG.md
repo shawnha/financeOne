@@ -2,6 +2,29 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-05-07 — 옵션 ② VAT 면세/과세 분리 (K-GAAP 정합)
+
+### Added
+- DB migration `w3x4y5z6a7b8` — `standard_accounts.is_vat_taxable` BOOLEAN 컬럼 + 인덱스
+  - 면세 항목 (`is_vat_taxable=false`): 80200 직원급여, 80500 잡급, 81700 세금과공과금, 93100 이자비용, 90100 이자수익
+  - 그 외 비용 표준계정 = 과세 (default true)
+- `pnl_service.get_pnl_summary` 의 `opex_excl_vat` 정밀 계산
+  ```sql
+  SUM(CASE WHEN s.is_vat_taxable THEN amount/1.1 ELSE amount END)
+  ```
+  - 인건비 (₩42M, 36% 비중) 면세 처리로 절대값 정확
+  - K-GAAP 손익계산서 base 와 정합
+- `operating_profit_excl_vat` / `net_income_excl_vat` 모두 새 `opex_excl_vat` 사용
+- `pnl_monthly` 응답에도 `opex_excl_vat` 추가
+
+### Verified (4월 한아원홀세일)
+- VAT 포함 운영비 ₩37.8M / VAT 제외 ₩36.0M (면세 ₩17.9M 그대로 + 과세 ₩19.9M /1.1)
+- VAT 포함 영업이익 +₩533K / VAT 제외 -₩1,172K
+- 이전 옵션 ③ (운영비 그대로) 의 -₩2,952K 보다 ₩1,780K 정확화
+
+### Why 옵션 ② 채택
+PDF 가결산 손익계산서 (K-GAAP) 와의 정합성. 옵션 ① (일괄 /1.1) 은 인건비도 /1.1 처리해 ₩4M 가량 절대값 부정확. is_vat_taxable 분류는 향후 재무제표 페이지에서도 재사용.
+
 ## [Unreleased] - 2026-05-07 — 자동 매핑 표준/내부 분리 (Phase 0)
 
 ### Added

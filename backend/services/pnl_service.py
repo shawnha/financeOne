@@ -62,10 +62,15 @@ def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -
     purchases_excl_vat = Decimal(str(pur_row[1]))
     purchases_count = pur_row[2]
 
-    # 판관비 (운영비)
+    # 판관비 (운영비) — VAT 포함 / 제외 모두 계산
+    # is_vat_taxable=true 항목만 /1.1 처리 (인건비/공과금/이자 등 면세는 그대로)
     cur.execute(
         """
-        SELECT COALESCE(SUM(t.amount), 0)
+        SELECT
+          COALESCE(SUM(t.amount), 0) AS opex,
+          COALESCE(SUM(
+            CASE WHEN s.is_vat_taxable THEN t.amount / 1.1 ELSE t.amount END
+          ), 0) AS opex_excl_vat
         FROM transactions t
         JOIN standard_accounts s ON s.id = t.standard_account_id
         WHERE t.entity_id = %s AND t.date >= %s AND t.date < %s
@@ -75,7 +80,9 @@ def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -
         """,
         [entity_id, start, end, list(SGA_SUBS)],
     )
-    opex = Decimal(str(cur.fetchone()[0]))
+    opex_row = cur.fetchone()
+    opex = Decimal(str(opex_row[0]))
+    opex_excl_vat = Decimal(str(opex_row[1]))
 
     # 영업외 비용/수익
     cur.execute(
@@ -148,9 +155,10 @@ def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -
     net_income = operating_profit + non_op_income - non_op_expense
 
     # VAT 제외 (K-GAAP 손익계산서 정합)
-    # opex/non_op 은 거래내역 기준 — 일반적으로 VAT 분리 안 됨. 동일값 유지.
+    # opex_excl_vat: 면세 (인건비/공과금) 그대로 + 과세 항목 /1.1
+    # non_op 은 거래내역 기준 — 일반적으로 VAT 분리 안 됨. 동일값 유지.
     gross_profit_x = revenue_excl_vat - cogs_excl_vat
-    operating_profit_x = gross_profit_x - opex
+    operating_profit_x = gross_profit_x - opex_excl_vat
     net_income_x = operating_profit_x + non_op_income - non_op_expense
 
     return {
@@ -171,6 +179,7 @@ def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -
         # VAT 제외 (K-GAAP 손익 정합 — 공급가액 base)
         "revenue_excl_vat": float(revenue_excl_vat),
         "cogs_excl_vat": float(cogs_excl_vat),
+        "opex_excl_vat": float(opex_excl_vat),
         "gross_profit_excl_vat": float(gross_profit_x),
         "gross_margin_pct_excl_vat": float(gross_profit_x / revenue_excl_vat * 100) if revenue_excl_vat > 0 else None,
         "operating_profit_excl_vat": float(operating_profit_x),
@@ -348,6 +357,7 @@ def get_pnl_monthly(conn: PgConnection, entity_id: int, months: int = 12) -> dic
             "purchases_total": s["purchases_total"],
             "revenue_excl_vat": s["revenue_excl_vat"],
             "cogs_excl_vat": s["cogs_excl_vat"],
+            "opex_excl_vat": s["opex_excl_vat"],
             "gross_profit_excl_vat": s["gross_profit_excl_vat"],
             "gross_margin_pct_excl_vat": s["gross_margin_pct_excl_vat"],
             "operating_profit_excl_vat": s["operating_profit_excl_vat"],
