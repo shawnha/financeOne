@@ -478,6 +478,11 @@ export function ActualTab({ entityId }: { entityId: string | null }) {
         />
       </div>
 
+      {/* Daily Chart — 선택된 월의 일별 입금/출금 + 잔고 추이 */}
+      {detail && detail.rows.length > 2 && (
+        <DailyChart detail={detail} entityId={entityId} />
+      )}
+
       {/* Transaction List */}
       <Card className="overflow-hidden rounded-2xl">
         <div className="px-4 py-3 flex items-center justify-between border-b border-border">
@@ -867,5 +872,179 @@ function AccountGroupedList({ rows, entityId }: { rows: ActualRow[]; entityId: s
         </div>
       )}
     </div>
+  )
+}
+
+// ── Daily Chart (선택된 월의 일별 추이) ─────────────────
+
+function DailyTooltipContent({
+  active,
+  payload,
+  month,
+  entityId,
+}: {
+  active?: boolean
+  payload?: Array<{ payload: DailyPoint }>
+  month: number
+  entityId: string | null
+}) {
+  if (!active || !payload?.length) return null
+  const p = payload[0].payload
+  return (
+    <div className="rounded-lg bg-popover border border-border px-3 py-2 shadow-lg text-xs space-y-0.5">
+      <p className="text-muted-foreground mb-1">{month}월 {p.dayLabel}일</p>
+      {p.hasTx ? (
+        <>
+          {p.income > 0 && (
+            <p className="font-mono tabular-nums text-[hsl(var(--profit))]">
+              입금: +{formatByEntity(p.income, entityId)}
+            </p>
+          )}
+          {p.expense > 0 && (
+            <p className="font-mono tabular-nums text-[hsl(var(--loss))]">
+              출금: -{formatByEntity(p.expense, entityId)}
+            </p>
+          )}
+        </>
+      ) : (
+        <p className="text-muted-foreground italic">거래 없음</p>
+      )}
+      <p className="font-mono tabular-nums text-amber-400 pt-0.5 border-t border-border/40 mt-1">
+        잔고: {formatByEntity(p.balance, entityId)}
+      </p>
+    </div>
+  )
+}
+
+interface DailyPoint {
+  day: string
+  dayLabel: number
+  income: number
+  expense: number
+  balance: number
+  hasTx: boolean
+}
+
+function DailyChart({ detail, entityId }: { detail: ActualData; entityId: string | null }) {
+  const dailyData = useMemo<DailyPoint[]>(() => {
+    const txRows = detail.rows.filter((r) => r.type === "in" || r.type === "out")
+    if (txRows.length === 0) return []
+
+    // Group by date — sum income/expense, keep last balance of the day
+    const dayMap = new Map<string, { income: number; expense: number; balance: number }>()
+    for (const row of txRows) {
+      if (!row.date) continue
+      const day = row.date.slice(0, 10)
+      const existing = dayMap.get(day) ?? { income: 0, expense: 0, balance: row.balance }
+      if (row.type === "in") existing.income += row.amount
+      else existing.expense += Math.abs(row.amount)
+      existing.balance = row.balance // rows are chronological → last wins
+      dayMap.set(day, existing)
+    }
+
+    // Gap-fill all days of month for continuous balance line
+    const lastDay = new Date(detail.year, detail.month, 0).getDate()
+    const filled: DailyPoint[] = []
+    let prevBalance = detail.opening_balance
+    for (let d = 1; d <= lastDay; d++) {
+      const dayStr = `${detail.year}-${String(detail.month).padStart(2, "0")}-${String(d).padStart(2, "0")}`
+      const found = dayMap.get(dayStr)
+      if (found) {
+        filled.push({ day: dayStr, dayLabel: d, ...found, hasTx: true })
+        prevBalance = found.balance
+      } else {
+        filled.push({ day: dayStr, dayLabel: d, income: 0, expense: 0, balance: prevBalance, hasTx: false })
+      }
+    }
+    return filled
+  }, [detail])
+
+  if (dailyData.length === 0) return null
+
+  return (
+    <Card className="p-6 rounded-2xl">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-medium text-muted-foreground">
+          {detail.month}월 일별 현금흐름 ({detail.year})
+        </h3>
+        <p className="text-[11px] text-muted-foreground">
+          잔고 추이 + 일별 입금/출금
+        </p>
+      </div>
+      <div className="h-[220px] max-md:h-[180px]">
+        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+          <ComposedChart data={dailyData} margin={{ top: 20, right: 10, left: 10, bottom: 5 }}>
+            <defs>
+              <linearGradient id="incomeBarGradDaily" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#22C55E" stopOpacity={0.6} />
+                <stop offset="100%" stopColor="#22C55E" stopOpacity={0.05} />
+              </linearGradient>
+              <linearGradient id="expenseBarGradDaily" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#EF4444" stopOpacity={0.6} />
+                <stop offset="100%" stopColor="#EF4444" stopOpacity={0.05} />
+              </linearGradient>
+              <linearGradient id="balanceAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#F59E0B" stopOpacity={0.25} />
+                <stop offset="100%" stopColor="#F59E0B" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="4 4" stroke="rgba(255,255,255,0.03)" vertical={false} />
+            <XAxis
+              dataKey="dayLabel"
+              tick={{ fill: "#64748b", fontSize: 10 }}
+              axisLine={{ stroke: "rgba(255,255,255,0.06)" }}
+              tickLine={false}
+              interval={2}
+              tickFormatter={(v) => `${v}`}
+            />
+            <YAxis
+              yAxisId="amount"
+              tick={{ fill: "#64748b", fontSize: 10 }}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={(v) => abbreviateAmount(v)}
+              width={55}
+            />
+            <YAxis
+              yAxisId="balance"
+              orientation="right"
+              tick={{ fill: "#94a3b8", fontSize: 10 }}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={(v) => abbreviateAmount(v)}
+              width={55}
+            />
+            <RechartsTooltip content={<DailyTooltipContent month={detail.month} entityId={entityId} />} />
+            <Area
+              yAxisId="balance"
+              type="monotone"
+              dataKey="balance"
+              name="잔고"
+              fill="url(#balanceAreaGrad)"
+              stroke="#F59E0B"
+              strokeWidth={1.5}
+              dot={false}
+              animationDuration={300}
+            />
+            <Bar yAxisId="amount" dataKey="income" name="입금" radius={[3, 3, 0, 0]} barSize={6} animationDuration={300}>
+              {dailyData.map((_, i) => (
+                <Cell key={`d-in-${i}`} fill="url(#incomeBarGradDaily)" stroke="#22C55E" strokeWidth={0.5} />
+              ))}
+            </Bar>
+            <Bar yAxisId="amount" dataKey="expense" name="출금" radius={[3, 3, 0, 0]} barSize={6} animationDuration={300}>
+              {dailyData.map((_, i) => (
+                <Cell key={`d-out-${i}`} fill="url(#expenseBarGradDaily)" stroke="#EF4444" strokeWidth={0.5} />
+              ))}
+            </Bar>
+            <Legend
+              wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
+              formatter={(value: string) => <span style={{ color: "#94a3b8", fontSize: 11 }}>{value}</span>}
+              iconType="circle"
+              iconSize={8}
+            />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    </Card>
   )
 }
