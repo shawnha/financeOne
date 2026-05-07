@@ -16,6 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { EntityTabs } from "@/components/entity-tabs"
+import { TransferMemoUpload } from "@/components/transfer-memo-upload"
 import { fetchAPI } from "@/lib/api"
 import { toast } from "sonner"
 import {
@@ -303,6 +304,9 @@ function UploadZone({
 
   return (
     <div className="space-y-4">
+      {/* Transfer memo importer (이체결과내역 → transfer_memo) */}
+      <TransferMemoUpload />
+
       {/* Drop Zone */}
       <div
         role="button"

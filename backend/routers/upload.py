@@ -12,6 +12,10 @@ from backend.services.parsers import detect_parser
 from backend.services.parsers.woori_bank import WooriBankParser
 from backend.services.dedup_service import build_file_key_counts, is_file_duplicate
 from backend.services.mapping_service import auto_map_transaction
+from backend.services.transfer_history_service import (
+    parse_transfer_history,
+    apply_transfer_memos,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -617,3 +621,50 @@ def rematch_file_transactions(
     except Exception as e:
         conn.rollback()
         raise HTTPException(500, f"재매칭 실패: {e}")
+
+
+@router.post("/transfer-history")
+async def upload_transfer_history(
+    file: UploadFile = File(...),
+    entity_id: int = Query(..., description="법인 ID (필수)"),
+    overwrite: bool = Query(False, description="기존 transfer_memo 가 있어도 덮어쓸지"),
+    conn: PgConnection = Depends(get_db),
+):
+    """이체결과내역 (BZ뱅크 grid_exceldata 등) import — transfer_memo 보강.
+
+    신규 transactions 생성 X. 기존 거래와 date+amount 매칭 후 메모만 update.
+    """
+    filename = file.filename or "unknown"
+    if not filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(400, "xlsx/xls 만 지원합니다")
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(400, "빈 파일입니다")
+
+    try:
+        rows = parse_transfer_history(file_bytes)
+    except Exception as e:
+        raise HTTPException(400, f"파일 파싱 실패: {e}")
+
+    if not rows:
+        raise HTTPException(400, "파싱된 행이 없습니다 (헤더/거래일시 확인)")
+
+    try:
+        result = apply_transfer_memos(conn, entity_id, rows, overwrite=overwrite)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(500, f"메모 매칭 실패: {e}")
+
+    return {
+        "filename": filename,
+        "entity_id": entity_id,
+        "total": result.total,
+        "matched": result.matched,
+        "ambiguous": result.ambiguous,
+        "unmatched": result.unmatched,
+        "sample_matched": result.sample_matched,
+        "ambiguous_rows": result.ambiguous_rows[:20],
+        "unmatched_rows": result.unmatched_rows[:20],
+    }
