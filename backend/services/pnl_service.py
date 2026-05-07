@@ -22,12 +22,16 @@ def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -
     start, end = build_date_range(year, month)
     cur = conn.cursor()
 
-    # 매출 + 매출원가 (도매)
+    # 매출 + 매출원가 (도매) — VAT 포함/제외 둘 다
+    # supply_amount (xlsx col O) = VAT 제외 매출. NULL 이면 total_amount/1.1 fallback.
+    # cogs_unit_price 는 VAT 포함 단가 (관행) → /1.1 로 VAT 제외 추정
     cur.execute(
         """
         SELECT
           COALESCE(SUM(total_amount), 0) AS revenue,
+          COALESCE(SUM(COALESCE(supply_amount, total_amount / 1.1)), 0) AS revenue_excl_vat,
           COALESCE(SUM(quantity * COALESCE(cogs_unit_price, 0)), 0) AS cogs,
+          COALESCE(SUM(quantity * COALESCE(cogs_unit_price, 0) / 1.1), 0) AS cogs_excl_vat,
           COUNT(*) AS tx_count
         FROM wholesale_sales
         WHERE entity_id = %s AND sales_date >= %s AND sales_date < %s
@@ -36,13 +40,18 @@ def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -
     )
     rev_row = cur.fetchone()
     revenue = Decimal(str(rev_row[0]))
-    cogs = Decimal(str(rev_row[1]))
-    sales_count = rev_row[2]
+    revenue_excl_vat = Decimal(str(rev_row[1]))
+    cogs = Decimal(str(rev_row[2]))
+    cogs_excl_vat = Decimal(str(rev_row[3]))
+    sales_count = rev_row[4]
 
     # 매입 (검증용)
     cur.execute(
         """
-        SELECT COALESCE(SUM(total_amount), 0), COUNT(*)
+        SELECT
+          COALESCE(SUM(total_amount), 0),
+          COALESCE(SUM(COALESCE(supply_amount, total_amount / 1.1)), 0),
+          COUNT(*)
         FROM wholesale_purchases
         WHERE entity_id = %s AND purchase_date >= %s AND purchase_date < %s
         """,
@@ -50,7 +59,8 @@ def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -
     )
     pur_row = cur.fetchone()
     purchases = Decimal(str(pur_row[0]))
-    purchases_count = pur_row[1]
+    purchases_excl_vat = Decimal(str(pur_row[1]))
+    purchases_count = pur_row[2]
 
     # 판관비 (운영비)
     cur.execute(
@@ -137,8 +147,15 @@ def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -
     operating_profit = gross_profit - opex
     net_income = operating_profit + non_op_income - non_op_expense
 
+    # VAT 제외 (K-GAAP 손익계산서 정합)
+    # opex/non_op 은 거래내역 기준 — 일반적으로 VAT 분리 안 됨. 동일값 유지.
+    gross_profit_x = revenue_excl_vat - cogs_excl_vat
+    operating_profit_x = gross_profit_x - opex
+    net_income_x = operating_profit_x + non_op_income - non_op_expense
+
     return {
         "year": year, "month": month, "entity_id": entity_id,
+        # VAT 포함 (default — 합계금액 base)
         "revenue": float(revenue),
         "cogs": float(cogs),
         "gross_profit": float(gross_profit),
@@ -151,6 +168,17 @@ def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -
         "net_income": float(net_income),
         "net_margin_pct": float(net_income / revenue * 100) if revenue > 0 else None,
         "purchases_total": float(purchases),
+        # VAT 제외 (K-GAAP 손익 정합 — 공급가액 base)
+        "revenue_excl_vat": float(revenue_excl_vat),
+        "cogs_excl_vat": float(cogs_excl_vat),
+        "gross_profit_excl_vat": float(gross_profit_x),
+        "gross_margin_pct_excl_vat": float(gross_profit_x / revenue_excl_vat * 100) if revenue_excl_vat > 0 else None,
+        "operating_profit_excl_vat": float(operating_profit_x),
+        "operating_margin_pct_excl_vat": float(operating_profit_x / revenue_excl_vat * 100) if revenue_excl_vat > 0 else None,
+        "net_income_excl_vat": float(net_income_x),
+        "net_margin_pct_excl_vat": float(net_income_x / revenue_excl_vat * 100) if revenue_excl_vat > 0 else None,
+        "purchases_total_excl_vat": float(purchases_excl_vat),
+        # 공통
         "sales_count": sales_count,
         "purchases_count": purchases_count,
         "opex_breakdown": opex_breakdown,
@@ -318,6 +346,13 @@ def get_pnl_monthly(conn: PgConnection, entity_id: int, months: int = 12) -> dic
             "operating_profit": s["operating_profit"],
             "net_income": s["net_income"],
             "purchases_total": s["purchases_total"],
+            "revenue_excl_vat": s["revenue_excl_vat"],
+            "cogs_excl_vat": s["cogs_excl_vat"],
+            "gross_profit_excl_vat": s["gross_profit_excl_vat"],
+            "gross_margin_pct_excl_vat": s["gross_margin_pct_excl_vat"],
+            "operating_profit_excl_vat": s["operating_profit_excl_vat"],
+            "net_income_excl_vat": s["net_income_excl_vat"],
+            "purchases_total_excl_vat": s["purchases_total_excl_vat"],
             "sales_count": s["sales_count"],
             "purchases_count": s["purchases_count"],
         })

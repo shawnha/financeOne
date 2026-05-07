@@ -68,11 +68,23 @@ interface PnlSummary {
   net_income: number
   net_margin_pct: number | null
   purchases_total: number
+  // VAT 제외 (K-GAAP)
+  revenue_excl_vat: number
+  cogs_excl_vat: number
+  gross_profit_excl_vat: number
+  gross_margin_pct_excl_vat: number | null
+  operating_profit_excl_vat: number
+  operating_margin_pct_excl_vat: number | null
+  net_income_excl_vat: number
+  net_margin_pct_excl_vat: number | null
+  purchases_total_excl_vat: number
   sales_count: number
   purchases_count: number
   opex_breakdown: Array<{ code: string; name: string; count: number; amount: number }>
   non_op_expense_transactions: NonOpTx[]
 }
+
+type VatMode = "incl" | "excl"
 
 interface MonthlyRow {
   month: string
@@ -84,6 +96,13 @@ interface MonthlyRow {
   operating_profit: number
   net_income: number
   purchases_total: number
+  revenue_excl_vat: number
+  cogs_excl_vat: number
+  gross_profit_excl_vat: number
+  gross_margin_pct_excl_vat: number | null
+  operating_profit_excl_vat: number
+  net_income_excl_vat: number
+  purchases_total_excl_vat: number
   sales_count: number
   purchases_count: number
 }
@@ -148,6 +167,16 @@ export function PnlContent() {
   const [monthly, setMonthly] = useState<MonthlyData | null>(null)
   const [state, setState] = useState<LoadState>("loading")
   const [error, setError] = useState("")
+  const [vatMode, setVatModeState] = useState<VatMode>("incl")
+  // localStorage 복원 — hydration 안전 (mount 후만)
+  useEffect(() => {
+    const saved = typeof window !== "undefined" ? localStorage.getItem("financeone-pnl-vat") : null
+    if (saved === "incl" || saved === "excl") setVatModeState(saved)
+  }, [])
+  const setVatMode = useCallback((m: VatMode) => {
+    setVatModeState(m)
+    if (typeof window !== "undefined") localStorage.setItem("financeone-pnl-vat", m)
+  }, [])
   const [globalMonth, setGlobalMonth] = useGlobalMonth()
   const [selectedMonth, setSelectedMonthLocal] = useState(globalMonth)
   const setSelectedMonth = useCallback(
@@ -331,8 +360,30 @@ export function PnlContent() {
   }
 
   const months = monthly.available_months
+
+  // vatMode 에 따른 P&L 값 선택 (수익/매출원가/매입은 VAT 적용, 운영비/영업외는 거래내역 base 라 변경 없음)
+  const isExcl = vatMode === "excl"
+  const v = {
+    revenue: isExcl ? summary.revenue_excl_vat : summary.revenue,
+    cogs: isExcl ? summary.cogs_excl_vat : summary.cogs,
+    gross_profit: isExcl ? summary.gross_profit_excl_vat : summary.gross_profit,
+    gross_margin_pct: isExcl ? summary.gross_margin_pct_excl_vat : summary.gross_margin_pct,
+    operating_profit: isExcl ? summary.operating_profit_excl_vat : summary.operating_profit,
+    operating_margin_pct: isExcl ? summary.operating_margin_pct_excl_vat : summary.operating_margin_pct,
+    net_income: isExcl ? summary.net_income_excl_vat : summary.net_income,
+    net_margin_pct: isExcl ? summary.net_margin_pct_excl_vat : summary.net_margin_pct,
+    purchases_total: isExcl ? summary.purchases_total_excl_vat : summary.purchases_total,
+  }
+
   const chartData = monthly.months.map((m) => ({
     ...m,
+    revenue: isExcl ? m.revenue_excl_vat : m.revenue,
+    cogs: isExcl ? m.cogs_excl_vat : m.cogs,
+    gross_profit: isExcl ? m.gross_profit_excl_vat : m.gross_profit,
+    gross_margin_pct: isExcl ? m.gross_margin_pct_excl_vat : m.gross_margin_pct,
+    operating_profit: isExcl ? m.operating_profit_excl_vat : m.operating_profit,
+    net_income: isExcl ? m.net_income_excl_vat : m.net_income,
+    purchases_total: isExcl ? m.purchases_total_excl_vat : m.purchases_total,
     isSelected: m.month === selectedMonth,
   }))
 
@@ -350,53 +401,84 @@ export function PnlContent() {
           </h1>
           <p className="text-xs text-muted-foreground mt-1">
             매출 = 도매 매출관리 (발생주의) · 매출원가 = 매출 row × 매입가 · OpEx = 거래내역 판관비
+            {isExcl && <span className="ml-2 text-amber-300/80">· VAT 제외 (K-GAAP base)</span>}
           </p>
         </div>
-        <MonthPicker
-          months={months}
-          selected={selectedMonth}
-          onSelect={setSelectedMonth}
-          accentColor="hsl(var(--accent))"
-        />
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="inline-flex rounded-md border border-border/40 bg-secondary/40 p-0.5 text-[11px]">
+            <button
+              type="button"
+              onClick={() => setVatMode("incl")}
+              className={cn(
+                "px-2.5 py-1 rounded transition-colors",
+                vatMode === "incl"
+                  ? "bg-accent/20 text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              title="합계금액 base — 매출관리 xlsx col Q"
+            >
+              VAT 포함
+            </button>
+            <button
+              type="button"
+              onClick={() => setVatMode("excl")}
+              className={cn(
+                "px-2.5 py-1 rounded transition-colors",
+                vatMode === "excl"
+                  ? "bg-accent/20 text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              title="공급가액 base — K-GAAP 손익계산서 정합"
+            >
+              VAT 제외 (K-GAAP)
+            </button>
+          </div>
+          <MonthPicker
+            months={months}
+            selected={selectedMonth}
+            onSelect={setSelectedMonth}
+            accentColor="hsl(var(--accent))"
+          />
+        </div>
       </div>
 
       {/* Top KPIs — 매출 / 매출총이익 / 영업이익 / 순이익 */}
       <div className="grid grid-cols-4 gap-3 max-md:grid-cols-2">
         <KPICard
           label="매출"
-          value={formatByEntity(summary.revenue, entityId)}
-          subtext={`${summary.sales_count}건`}
+          value={formatByEntity(v.revenue, entityId)}
+          subtext={`${summary.sales_count}건${isExcl ? " · VAT 제외" : ""}`}
           large
         />
         <KPICard
           label="매출총이익"
-          value={formatByEntity(summary.gross_profit, entityId)}
-          subtext={summary.gross_margin_pct != null ? `${fmtPct(summary.gross_margin_pct)} 마진` : undefined}
-          colorClass={profitColor(summary.gross_profit)}
-          subtextColor={summary.gross_profit >= 0 ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]"}
+          value={formatByEntity(v.gross_profit, entityId)}
+          subtext={v.gross_margin_pct != null ? `${fmtPct(v.gross_margin_pct)} 마진` : undefined}
+          colorClass={profitColor(v.gross_profit)}
+          subtextColor={v.gross_profit >= 0 ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]"}
           large
         />
         <KPICard
           label="영업이익"
-          value={formatByEntity(summary.operating_profit, entityId)}
+          value={formatByEntity(v.operating_profit, entityId)}
           subtext={
-            summary.operating_margin_pct != null
-              ? `${fmtPct(summary.operating_margin_pct)} 영업이익률`
+            v.operating_margin_pct != null
+              ? `${fmtPct(v.operating_margin_pct)} 영업이익률`
               : undefined
           }
-          colorClass={profitColor(summary.operating_profit)}
+          colorClass={profitColor(v.operating_profit)}
           subtextColor={
-            summary.operating_profit >= 0 ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]"
+            v.operating_profit >= 0 ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]"
           }
           large
         />
         <KPICard
           label="당기순이익"
-          value={formatByEntity(summary.net_income, entityId)}
-          subtext={summary.net_margin_pct != null ? fmtPct(summary.net_margin_pct) : undefined}
-          colorClass={profitColor(summary.net_income)}
+          value={formatByEntity(v.net_income, entityId)}
+          subtext={v.net_margin_pct != null ? fmtPct(v.net_margin_pct) : undefined}
+          colorClass={profitColor(v.net_income)}
           subtextColor={
-            summary.net_income >= 0 ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]"
+            v.net_income >= 0 ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]"
           }
           large
         />
@@ -406,8 +488,8 @@ export function PnlContent() {
       <div className="grid grid-cols-3 gap-3 max-md:grid-cols-1">
         <KPICard
           label="매출원가"
-          value={`-${formatByEntity(summary.cogs, entityId)}`}
-          subtext={`${summary.purchases_count}건 매입 ₩${summary.purchases_total.toLocaleString()}`}
+          value={`-${formatByEntity(v.cogs, entityId)}`}
+          subtext={`${summary.purchases_count}건 매입 ₩${v.purchases_total.toLocaleString()}`}
           colorClass="text-[hsl(var(--loss))]"
         />
         <KPICard
@@ -652,7 +734,7 @@ export function PnlContent() {
         <div className="divide-y divide-border/40">
           <PnlRow
             label="매출"
-            value={summary.revenue}
+            value={v.revenue}
             entityId={entityId}
             bold
             onClick={toggleRevenue}
@@ -671,7 +753,7 @@ export function PnlContent() {
           )}
           <PnlRow
             label="(-) 매출원가"
-            value={-summary.cogs}
+            value={-v.cogs}
             entityId={entityId}
             indent
             onClick={toggleCogs}
@@ -689,7 +771,7 @@ export function PnlContent() {
               negative
             />
           )}
-          <PnlRow label="매출총이익" value={summary.gross_profit} entityId={entityId} bold subtle pct={summary.gross_margin_pct} />
+          <PnlRow label="매출총이익" value={v.gross_profit} entityId={entityId} bold subtle pct={v.gross_margin_pct} />
           <PnlRow
             label="(-) OpEx (판관비)"
             value={-summary.opex}
@@ -700,11 +782,11 @@ export function PnlContent() {
           />
           <PnlRow
             label="영업이익"
-            value={summary.operating_profit}
+            value={v.operating_profit}
             entityId={entityId}
             bold
             highlight
-            pct={summary.operating_margin_pct}
+            pct={v.operating_margin_pct}
           />
           <PnlRow label="(+) 영업외수익" value={summary.non_op_income} entityId={entityId} indent />
           <PnlRow
@@ -756,18 +838,18 @@ export function PnlContent() {
           )}
           <PnlRow
             label="당기순이익"
-            value={summary.net_income}
+            value={v.net_income}
             entityId={entityId}
             bold
             highlight
-            pct={summary.net_margin_pct}
+            pct={v.net_margin_pct}
           />
         </div>
       </Card>
 
       {/* 집중도 분석 — 제품/매입처별 의존도 (한아원홀세일 only) */}
       {summary.sales_count > 0 && (
-        <ConcentrationCard entityId={entityId} year={summary.year} month={summary.month} revenue={summary.revenue} purchases={summary.purchases_total} />
+        <ConcentrationCard entityId={entityId} year={summary.year} month={summary.month} revenue={v.revenue} purchases={v.purchases_total} />
       )}
 
       {/* 매입 (도매) — 별도 분석 (P&L 표에 없음) */}
@@ -792,7 +874,7 @@ export function PnlContent() {
             </p>
           </div>
           <p className="text-base font-mono tabular-nums">
-            {formatByEntity(summary.purchases_total, entityId)}
+            {formatByEntity(v.purchases_total, entityId)}
           </p>
         </button>
         {purchasesExpanded && (

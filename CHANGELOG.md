@@ -2,6 +2,25 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-05-07 — P&L VAT 포함/제외 toggle (K-GAAP 정합)
+
+### Added
+- `pnl_service.get_pnl_summary` 응답에 VAT 제외 필드 8개 추가
+  - `revenue_excl_vat` (`SUM(supply_amount)`, NULL 시 `total_amount/1.1` fallback)
+  - `cogs_excl_vat` = 매출 row × cogs_unit_price / 1.1 (cogs 단가는 VAT 포함 가정)
+  - `purchases_total_excl_vat` (`SUM(supply_amount)`)
+  - 파생: `gross_profit_excl_vat` / `gross_margin_pct_excl_vat` / `operating_profit_excl_vat` / `operating_margin_pct_excl_vat` / `net_income_excl_vat` / `net_margin_pct_excl_vat`
+  - `pnl_service.get_pnl_monthly` 도 동일 필드 추가
+- `pnl-content.tsx` 헤더에 `VAT 포함` / `VAT 제외 (K-GAAP)` toggle 버튼
+  - localStorage `financeone-pnl-vat` 에 mode 저장 (mount 후 복원, hydration 안전)
+  - KPI 카드 / P&L 표 / 월별 차트 / 집중도 분석 / 매입 section 모두 mode 반영
+  - OpEx (판관비) / 영업외 (비용/수익) 은 거래내역 base 라 mode 영향 없음
+
+### Verified (entity 13, 2026-04)
+- VAT 포함: 매출 ₩3,299M / 영업이익 +₩533K (BEP 근접) / 순이익 -₩926K
+- VAT 제외: 매출 ₩2,999M / **영업이익 -₩2,952K (적자)** / 순이익 -₩4,413K
+- VAT 제외 view 가 사업의 진짜 손익 상태 드러냄 — VAT 포함 base 로 BEP 처럼 보이던 게 실은 적자
+
 ## [Unreleased] - 2026-05-07 — P&L 집중도 분석 (사업 리스크 시각화)
 
 ### Added
