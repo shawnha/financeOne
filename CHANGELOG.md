@@ -2,6 +2,27 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-05-07 — 자동 매핑 표준/내부 분리 (Phase 0)
+
+### Added
+- `/api/transactions/auto-map` endpoint 에 `target` query param 추가
+  - `internal`: internal_account_id 만 update
+  - `standard`: standard_account_id 만 update
+  - `both` (default): 둘 다 update (기존 동작)
+- `only_unmapped=true` 모드도 target 별 NULL 컬럼 검사 (internal/standard/both 분기)
+- 거래내역 페이지의 "자동 매핑" 메뉴를 dropdown sub-menu 로 분리
+  - 둘 다 / 표준계정만 (회계) / 내부계정만 (사업) — 각 sub 메뉴에 "비어있는 것만" / "전체 재매핑"
+- toast 메시지에 target 라벨 추가 (`표준계정 자동 매핑: 신규 N건...`)
+
+### Why
+표준계정 (K-GAAP 회계 분류) 과 내부계정 (운영/사업 분류) 은 서로 다른 결정. 함께 매핑하면 사용자가 표준만/내부만 부분 수정/검증하기 어려움. 분리로 세밀한 컨트롤 가능 — 옵션 B (VAT 정합) 작업의 전제 조건.
+
+### Verified
+- target=standard + only_unmapped=true → 표준계정 NULL 인 1건 매핑 ✓
+- target=internal + only_unmapped=true → internal NULL 인 5건 중 4건 매핑 ✓
+- target=both → 기존 동작 유지 ✓
+- target=foo → 422 validation 에러 ✓
+
 ## [Unreleased] - 2026-05-07 — P&L VAT 포함/제외 toggle (K-GAAP 정합)
 
 ### Added

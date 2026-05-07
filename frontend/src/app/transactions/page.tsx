@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/dialog"
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
+  DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu"
 import {
   Search, Download, ChevronLeft, ChevronRight, X, AlertTriangle, AlertCircle, Upload, RotateCw, RefreshCw, Wand2, MessageSquare, SlidersHorizontal, ChevronDown, CheckCircle2, Receipt,
@@ -856,32 +857,36 @@ export default function TransactionsPage() {
 
   // 자동 매핑
   const [autoMapping, setAutoMapping] = useState(false)
-  const handleAutoMap = useCallback(async (onlyUnmapped: boolean = false) => {
-    if (!entityId) return
-    setAutoMapping(true)
-    try {
-      const [y, m] = (filters.dateFrom && filters.dateTo && filters.dateFrom.slice(0, 7) === filters.dateTo.slice(0, 7)
-        ? filters.dateFrom.slice(0, 7) : globalMonth).split("-").map(Number)
-      const result = await fetchAPI<{ new_mapped: number; updated: number; total_targets: number }>(
-        `/transactions/auto-map?entity_id=${entityId}&year=${y}&month=${m}&only_unmapped=${onlyUnmapped}`,
-        { method: "POST" },
-      )
-      const total = (result.new_mapped || 0) + (result.updated || 0)
-      if (total > 0) {
-        const parts = []
-        if (result.new_mapped) parts.push(`신규 ${result.new_mapped}건`)
-        if (result.updated) parts.push(`변경 ${result.updated}건`)
-        toast.success(`자동 매핑: ${parts.join(", ")} (대상 ${result.total_targets}건)`)
-        fetchTransactions(true)
-      } else {
-        toast.info(`변경할 거래가 없습니다.`)
+  const handleAutoMap = useCallback(
+    async (onlyUnmapped: boolean = false, target: "internal" | "standard" | "both" = "both") => {
+      if (!entityId) return
+      setAutoMapping(true)
+      try {
+        const [y, m] = (filters.dateFrom && filters.dateTo && filters.dateFrom.slice(0, 7) === filters.dateTo.slice(0, 7)
+          ? filters.dateFrom.slice(0, 7) : globalMonth).split("-").map(Number)
+        const result = await fetchAPI<{ new_mapped: number; updated: number; total_targets: number }>(
+          `/transactions/auto-map?entity_id=${entityId}&year=${y}&month=${m}&only_unmapped=${onlyUnmapped}&target=${target}`,
+          { method: "POST" },
+        )
+        const total = (result.new_mapped || 0) + (result.updated || 0)
+        const targetLabel = target === "internal" ? "내부계정" : target === "standard" ? "표준계정" : "전체"
+        if (total > 0) {
+          const parts = []
+          if (result.new_mapped) parts.push(`신규 ${result.new_mapped}건`)
+          if (result.updated) parts.push(`변경 ${result.updated}건`)
+          toast.success(`${targetLabel} 자동 매핑: ${parts.join(", ")} (대상 ${result.total_targets}건)`)
+          fetchTransactions(true)
+        } else {
+          toast.info(`${targetLabel} — 변경할 거래가 없습니다.`)
+        }
+      } catch {
+        toast.error("자동 매핑에 실패했습니다")
+      } finally {
+        setAutoMapping(false)
       }
-    } catch {
-      toast.error("자동 매핑에 실패했습니다")
-    } finally {
-      setAutoMapping(false)
-    }
-  }, [entityId, fetchTransactions])
+    },
+    [entityId, filters.dateFrom, filters.dateTo, globalMonth, fetchTransactions],
+  )
 
   // 자동 매핑 일괄 확정
   // 브랜드/사업부별 색상 점 — 하위 계정에 항상 표시
@@ -1115,15 +1120,50 @@ export default function TransactionsPage() {
                   <ChevronDown className="h-3.5 w-3.5" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56 rounded-2xl">
-                <DropdownMenuItem onClick={() => handleAutoMap(true)} disabled={autoMapping} className="rounded-xl">
-                  <Wand2 className="h-4 w-4 mr-2" />
-                  {autoMapping ? "매핑 중..." : "자동 매핑 (비어있는 것만)"}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleAutoMap(false)} disabled={autoMapping} className="rounded-xl">
-                  <Wand2 className="h-4 w-4 mr-2" />
-                  {autoMapping ? "매핑 중..." : "자동 매핑 (전체 재매핑)"}
-                </DropdownMenuItem>
+              <DropdownMenuContent align="end" className="w-60 rounded-2xl">
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger className="rounded-xl">
+                    <Wand2 className="h-4 w-4 mr-2" />
+                    {autoMapping ? "매핑 중..." : "자동 매핑 — 둘 다"}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="rounded-2xl">
+                    <DropdownMenuItem onClick={() => handleAutoMap(true, "both")} disabled={autoMapping} className="rounded-xl">
+                      비어있는 것만
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleAutoMap(false, "both")} disabled={autoMapping} className="rounded-xl">
+                      전체 재매핑
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger className="rounded-xl">
+                    <Wand2 className="h-4 w-4 mr-2 text-emerald-400" />
+                    표준계정만 (회계)
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="rounded-2xl">
+                    <DropdownMenuItem onClick={() => handleAutoMap(true, "standard")} disabled={autoMapping} className="rounded-xl">
+                      비어있는 것만
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleAutoMap(false, "standard")} disabled={autoMapping} className="rounded-xl">
+                      전체 재매핑
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger className="rounded-xl">
+                    <Wand2 className="h-4 w-4 mr-2 text-blue-400" />
+                    내부계정만 (사업)
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="rounded-2xl">
+                    <DropdownMenuItem onClick={() => handleAutoMap(true, "internal")} disabled={autoMapping} className="rounded-xl">
+                      비어있는 것만
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleAutoMap(false, "internal")} disabled={autoMapping} className="rounded-xl">
+                      전체 재매핑
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={handleBulkConfirmAutoMapped}
                   disabled={bulkConfirming || autoMappedUnconfirmed.length === 0}

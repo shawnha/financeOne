@@ -291,19 +291,26 @@ def auto_map_unmapped(
     enable_ai: bool = Query(False),
     only_unmapped: bool = Query(
         False,
-        description="True 면 internal_account_id IS NULL 만 갱신 (기존 매핑 보존). False(기본) 면 manual/confirmed 빼고 모두 재매핑.",
+        description="True 면 target 컬럼이 NULL 인 거래만 갱신. False 면 manual/confirmed 빼고 모두 재매핑.",
+    ),
+    target: str = Query(
+        "both",
+        pattern="^(internal|standard|both)$",
+        description="매핑 대상: internal(내부계정만) | standard(표준계정만) | both(둘 다)",
     ),
     conn: PgConnection = Depends(get_db),
 ):
     """자동 매핑: manual/confirmed 제외 거래에 5단계 캐스케이드 적용.
 
-    year/month가 주어지면 해당 월만, 없으면 전체 대상.
-    Slack 매칭이 확정된 거래는 item_description을 description에 합쳐서
-    키워드/유사 매칭 정확도를 높인다.
+    target 별 동작:
+    - internal: internal_account_id 만 update. standard 는 안 건드림.
+    - standard: standard_account_id 만 update. internal 안 건드림.
+    - both (default): 둘 다 update.
 
-    only_unmapped=True 모드: 사용자가 직접 매핑한 결과는 절대 안 건드리고
-    아직 매핑이 비어있는 거래만 채움. mapping_source 가 무엇이든 internal_account_id
-    값만 NULL 이면 대상.
+    only_unmapped=True 모드 + target 조합:
+    - target=internal: internal_account_id IS NULL 만 대상
+    - target=standard: standard_account_id IS NULL 만 대상
+    - target=both: internal_account_id IS NULL 만 대상 (기존 동작)
     """
     cur = conn.cursor()
     try:
@@ -314,11 +321,20 @@ def auto_map_unmapped(
             month_filter = "AND date_trunc('month', t.date) = %s::date"
             params.append(f"{year}-{month:02d}-01")
 
-        unmapped_filter = "AND t.internal_account_id IS NULL" if only_unmapped else ""
+        if only_unmapped:
+            null_col = {
+                "internal": "internal_account_id",
+                "standard": "standard_account_id",
+                "both": "internal_account_id",
+            }[target]
+            unmapped_filter = f"AND t.{null_col} IS NULL"
+        else:
+            unmapped_filter = ""
 
         cur.execute(
             f"""
-            SELECT t.id, t.counterparty, t.description, t.internal_account_id,
+            SELECT t.id, t.counterparty, t.description,
+                   t.internal_account_id, t.standard_account_id,
                    (
                        SELECT string_agg(
                            COALESCE(tsm.item_description, ''),
@@ -342,7 +358,7 @@ def auto_map_unmapped(
         mapped_count = 0
         updated_count = 0
         mapped_ids = []
-        for tx_id, counterparty, description, current_ia, slack_desc in targets:
+        for tx_id, counterparty, description, current_ia, current_sa, slack_desc in targets:
             # Slack 컨텍스트를 description에 합침
             enriched_desc = " ".join(filter(None, [description, slack_desc]))
 
@@ -356,32 +372,43 @@ def auto_map_unmapped(
                 continue
 
             new_ia = mapping["internal_account_id"]
-            # 미분류 → 매핑: mapped
-            # 기존 매핑 → 다른 계정: updated
-            if current_ia is None:
-                mapped_count += 1
-            elif new_ia != current_ia:
-                updated_count += 1
-            else:
-                continue  # 같은 계정이면 스킵
+            new_sa = mapping["standard_account_id"]
+
+            # target 별 변경 여부 결정
+            if target == "internal":
+                if new_ia == current_ia:
+                    continue
+                if current_ia is None:
+                    mapped_count += 1
+                else:
+                    updated_count += 1
+                set_clause = "internal_account_id = %s, mapping_confidence = %s, mapping_source = %s"
+                set_params = [new_ia, mapping["confidence"], mapping.get("match_type", "rule")]
+            elif target == "standard":
+                if new_sa == current_sa:
+                    continue
+                if current_sa is None:
+                    mapped_count += 1
+                else:
+                    updated_count += 1
+                set_clause = "standard_account_id = %s, mapping_confidence = %s, mapping_source = %s"
+                set_params = [new_sa, mapping["confidence"], mapping.get("match_type", "rule")]
+            else:  # both
+                if new_ia == current_ia and new_sa == current_sa:
+                    continue
+                if current_ia is None:
+                    mapped_count += 1
+                elif new_ia != current_ia:
+                    updated_count += 1
+                set_clause = (
+                    "internal_account_id = %s, standard_account_id = %s, "
+                    "mapping_confidence = %s, mapping_source = %s"
+                )
+                set_params = [new_ia, new_sa, mapping["confidence"], mapping.get("match_type", "rule")]
 
             cur.execute(
-                """
-                UPDATE transactions
-                SET internal_account_id = %s,
-                    standard_account_id = %s,
-                    mapping_confidence = %s,
-                    mapping_source = %s,
-                    updated_at = NOW()
-                WHERE id = %s
-                """,
-                [
-                    new_ia,
-                    mapping["standard_account_id"],
-                    mapping["confidence"],
-                    mapping.get("match_type", "rule"),
-                    tx_id,
-                ],
+                f"UPDATE transactions SET {set_clause}, updated_at = NOW() WHERE id = %s",
+                set_params + [tx_id],
             )
             mapped_ids.append(tx_id)
 
