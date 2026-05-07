@@ -12,6 +12,7 @@ import {
   Tooltip as RechartsTooltip,
   ComposedChart,
   Cell,
+  ReferenceLine,
 } from "recharts"
 import { AlertCircle, RefreshCw, TrendingUp, FileBarChart, ArrowRight, ChevronDown, ChevronUp } from "lucide-react"
 import Link from "next/link"
@@ -596,6 +597,21 @@ export function PnlContent() {
                   />
                 ))}
               </Bar>
+              {/* BEP (영업이익 = 0) 기준선 — 흑자/적자 경계 */}
+              <ReferenceLine
+                yAxisId="profit"
+                y={0}
+                stroke="hsl(var(--loss))"
+                strokeDasharray="3 3"
+                strokeWidth={1.5}
+                label={{
+                  value: "BEP",
+                  position: "insideRight",
+                  fill: "hsl(var(--loss))",
+                  fontSize: 10,
+                  fontWeight: 600,
+                }}
+              />
               <Line
                 yAxisId="profit"
                 type="monotone"
@@ -739,6 +755,21 @@ export function PnlContent() {
                   />
                 ))}
               </Bar>
+              {/* 매출총이익률 0% 기준선 */}
+              <ReferenceLine
+                yAxisId="pct"
+                y={0}
+                stroke="hsl(var(--loss))"
+                strokeDasharray="3 3"
+                strokeWidth={1.5}
+                label={{
+                  value: "0%",
+                  position: "insideRight",
+                  fill: "hsl(var(--loss))",
+                  fontSize: 10,
+                  fontWeight: 600,
+                }}
+              />
               <Line
                 yAxisId="pct"
                 type="monotone"
