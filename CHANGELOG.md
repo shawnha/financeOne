@@ -2,6 +2,28 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-05-07 — P&L 매출/매입 drilldown (제품·거래처별 분석)
+
+### Added
+- `backend/services/pnl_service.py` — `get_revenue_breakdown` / `get_cogs_breakdown` / `get_purchases_breakdown`
+  - `_breakdown_rows` 헬퍼: top N rows + 기타 + 합계 형식
+  - `group_by`: `'product'` (제품명) | `'payee'` (매출은 거래처 / 매입은 매입처)
+- `backend/routers/pnl.py` — 3 신규 endpoint
+  - `GET /api/pnl/revenue-breakdown?entity_id&year&month&group_by&limit`
+  - `GET /api/pnl/cogs-breakdown` — 매출 row × cogs_unit_price 기준 매출원가 분석
+  - `GET /api/pnl/purchases-breakdown` — `wholesale_purchases` 기준 매입 분석
+- `frontend/src/app/pnl/pnl-content.tsx`
+  - `BreakdownPanel` 컴포넌트: 기준 toggle (제품별/거래처별) + top N + 기타 + 합계 row
+  - 매출/매출원가 PnlRow → expandable + lazy fetch (영업외비용 패턴 동일)
+  - 매입 (도매) section 신설 — P&L 표 하단 별도 Card (KPI subtext 노출만 됐던 매입 정보 drilldown 가능)
+  - 월/entity 변경 시 drilldown 캐시 무효화
+
+### Verified (한아원홀세일 entity 13, 2026-04)
+- 매출 drilldown 합계 ₩3,299,687,404 = `summary.revenue` ✓
+- 매출원가 drilldown 합계 -₩3,261,338,377 = `-summary.cogs` ✓
+- 매입 drilldown 합계 ₩3,409,300,549 = `summary.purchases_total` ✓
+- 인사이트: 마운자로 4종 = 매출 90.6% / 유진약품 1곳 = 매입 51.8% (집중도 높음)
+
 ## [Unreleased] - 2026-05-01 — Codef 공공기관 + 카드 청구서 (Phase 2/3/4)
 
 ### Added — Phase 4 (카드 청구서)

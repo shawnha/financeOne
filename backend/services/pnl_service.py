@@ -158,6 +158,129 @@ def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -
     }
 
 
+_GROUP_COLS = {
+    "product": "product_name",
+    "payee": "payee_name",
+}
+
+
+def _breakdown_rows(rows, total_count: int, total_amount: Decimal, limit: int) -> dict:
+    """top N + 기타 + 합계 형식. rows: [(key, count, amount), ...] DESC."""
+    top = rows[:limit]
+    rest = rows[limit:]
+    others_count = sum(r[1] for r in rest)
+    others_amount = sum(Decimal(str(r[2])) for r in rest)
+    return {
+        "rows": [
+            {"key": r[0] or "(이름없음)", "count": r[1], "amount": float(r[2])}
+            for r in top
+        ],
+        "others": {"count": others_count, "amount": float(others_amount)} if rest else None,
+        "total": {"count": total_count, "amount": float(total_amount)},
+    }
+
+
+def get_revenue_breakdown(
+    conn: PgConnection, entity_id: int, year: int, month: int,
+    group_by: str = "product", limit: int = 20,
+) -> dict:
+    if group_by not in _GROUP_COLS:
+        raise ValueError(f"group_by must be one of {list(_GROUP_COLS)}")
+    col = _GROUP_COLS[group_by]
+    start, end = build_date_range(year, month)
+    cur = conn.cursor()
+    cur.execute(
+        f"""
+        SELECT {col}, COUNT(*), COALESCE(SUM(total_amount), 0)
+        FROM wholesale_sales
+        WHERE entity_id = %s AND sales_date >= %s AND sales_date < %s
+        GROUP BY {col}
+        ORDER BY SUM(total_amount) DESC NULLS LAST
+        """,
+        [entity_id, start, end],
+    )
+    rows = cur.fetchall()
+    cur.execute(
+        """
+        SELECT COUNT(*), COALESCE(SUM(total_amount), 0)
+        FROM wholesale_sales
+        WHERE entity_id = %s AND sales_date >= %s AND sales_date < %s
+        """,
+        [entity_id, start, end],
+    )
+    tot_count, tot_amount = cur.fetchone()
+    cur.close()
+    return {"group_by": group_by, **_breakdown_rows(rows, tot_count, Decimal(str(tot_amount)), limit)}
+
+
+def get_cogs_breakdown(
+    conn: PgConnection, entity_id: int, year: int, month: int,
+    group_by: str = "product", limit: int = 20,
+) -> dict:
+    """매출원가 = 매출 row 의 quantity × cogs_unit_price. payee = 매출 거래처 (=고객)."""
+    if group_by not in _GROUP_COLS:
+        raise ValueError(f"group_by must be one of {list(_GROUP_COLS)}")
+    col = _GROUP_COLS[group_by]
+    start, end = build_date_range(year, month)
+    cur = conn.cursor()
+    cur.execute(
+        f"""
+        SELECT {col}, COUNT(*), COALESCE(SUM(quantity * COALESCE(cogs_unit_price, 0)), 0)
+        FROM wholesale_sales
+        WHERE entity_id = %s AND sales_date >= %s AND sales_date < %s
+        GROUP BY {col}
+        ORDER BY SUM(quantity * COALESCE(cogs_unit_price, 0)) DESC NULLS LAST
+        """,
+        [entity_id, start, end],
+    )
+    rows = cur.fetchall()
+    cur.execute(
+        """
+        SELECT COUNT(*), COALESCE(SUM(quantity * COALESCE(cogs_unit_price, 0)), 0)
+        FROM wholesale_sales
+        WHERE entity_id = %s AND sales_date >= %s AND sales_date < %s
+        """,
+        [entity_id, start, end],
+    )
+    tot_count, tot_amount = cur.fetchone()
+    cur.close()
+    return {"group_by": group_by, **_breakdown_rows(rows, tot_count, Decimal(str(tot_amount)), limit)}
+
+
+def get_purchases_breakdown(
+    conn: PgConnection, entity_id: int, year: int, month: int,
+    group_by: str = "payee", limit: int = 20,
+) -> dict:
+    """매입 (실제 매입처) — wholesale_purchases. payee = 매입처."""
+    if group_by not in _GROUP_COLS:
+        raise ValueError(f"group_by must be one of {list(_GROUP_COLS)}")
+    col = _GROUP_COLS[group_by]
+    start, end = build_date_range(year, month)
+    cur = conn.cursor()
+    cur.execute(
+        f"""
+        SELECT {col}, COUNT(*), COALESCE(SUM(total_amount), 0)
+        FROM wholesale_purchases
+        WHERE entity_id = %s AND purchase_date >= %s AND purchase_date < %s
+        GROUP BY {col}
+        ORDER BY SUM(total_amount) DESC NULLS LAST
+        """,
+        [entity_id, start, end],
+    )
+    rows = cur.fetchall()
+    cur.execute(
+        """
+        SELECT COUNT(*), COALESCE(SUM(total_amount), 0)
+        FROM wholesale_purchases
+        WHERE entity_id = %s AND purchase_date >= %s AND purchase_date < %s
+        """,
+        [entity_id, start, end],
+    )
+    tot_count, tot_amount = cur.fetchone()
+    cur.close()
+    return {"group_by": group_by, **_breakdown_rows(rows, tot_count, Decimal(str(tot_amount)), limit)}
+
+
 def get_pnl_monthly(conn: PgConnection, entity_id: int, months: int = 12) -> dict:
     """월별 P&L 시리즈 (차트용)."""
     cur = conn.cursor()

@@ -38,6 +38,21 @@ interface NonOpTx {
   std_name: string
 }
 
+type GroupBy = "product" | "payee"
+
+interface BreakdownRow {
+  key: string
+  count: number
+  amount: number
+}
+
+interface BreakdownResponse {
+  group_by: GroupBy
+  rows: BreakdownRow[]
+  others: { count: number; amount: number } | null
+  total: { count: number; amount: number }
+}
+
 interface PnlSummary {
   year: number
   month: number
@@ -113,6 +128,18 @@ export function PnlContent() {
   const router = useRouter()
   const entityId = searchParams.get("entity")
   const [nonOpExpanded, setNonOpExpanded] = useState(false)
+  const [revenueExpanded, setRevenueExpanded] = useState(false)
+  const [revenueGroup, setRevenueGroup] = useState<GroupBy>("product")
+  const [revenueData, setRevenueData] = useState<BreakdownResponse | null>(null)
+  const [revenueLoading, setRevenueLoading] = useState(false)
+  const [cogsExpanded, setCogsExpanded] = useState(false)
+  const [cogsGroup, setCogsGroup] = useState<GroupBy>("product")
+  const [cogsData, setCogsData] = useState<BreakdownResponse | null>(null)
+  const [cogsLoading, setCogsLoading] = useState(false)
+  const [purchasesExpanded, setPurchasesExpanded] = useState(false)
+  const [purchasesGroup, setPurchasesGroup] = useState<GroupBy>("payee")
+  const [purchasesData, setPurchasesData] = useState<BreakdownResponse | null>(null)
+  const [purchasesLoading, setPurchasesLoading] = useState(false)
   const [summary, setSummary] = useState<PnlSummary | null>(null)
   const [monthly, setMonthly] = useState<MonthlyData | null>(null)
   const [state, setState] = useState<LoadState>("loading")
@@ -163,6 +190,88 @@ export function PnlContent() {
   useEffect(() => {
     fetchData()
   }, [fetchData])
+
+  // month 또는 entity 가 바뀌면 drilldown 캐시 무효화
+  useEffect(() => {
+    setRevenueData(null)
+    setCogsData(null)
+    setPurchasesData(null)
+  }, [selectedMonth, entityId])
+
+  const fetchBreakdown = useCallback(
+    async (kind: "revenue" | "cogs" | "purchases", group: GroupBy) => {
+      if (!entityId || !summary) return
+      const setter =
+        kind === "revenue" ? setRevenueData : kind === "cogs" ? setCogsData : setPurchasesData
+      const loadSetter =
+        kind === "revenue"
+          ? setRevenueLoading
+          : kind === "cogs"
+          ? setCogsLoading
+          : setPurchasesLoading
+      const path =
+        kind === "revenue"
+          ? "revenue-breakdown"
+          : kind === "cogs"
+          ? "cogs-breakdown"
+          : "purchases-breakdown"
+      loadSetter(true)
+      try {
+        const data = await fetchAPI<BreakdownResponse>(
+          `/pnl/${path}?entity_id=${entityId}&year=${summary.year}&month=${summary.month}&group_by=${group}&limit=20`,
+          { cache: "no-store" },
+        )
+        setter(data)
+      } catch {
+        setter(null)
+      } finally {
+        loadSetter(false)
+      }
+    },
+    [entityId, summary],
+  )
+
+  const toggleRevenue = useCallback(() => {
+    const next = !revenueExpanded
+    setRevenueExpanded(next)
+    if (next && !revenueData) fetchBreakdown("revenue", revenueGroup)
+  }, [revenueExpanded, revenueData, revenueGroup, fetchBreakdown])
+
+  const toggleCogs = useCallback(() => {
+    const next = !cogsExpanded
+    setCogsExpanded(next)
+    if (next && !cogsData) fetchBreakdown("cogs", cogsGroup)
+  }, [cogsExpanded, cogsData, cogsGroup, fetchBreakdown])
+
+  const togglePurchases = useCallback(() => {
+    const next = !purchasesExpanded
+    setPurchasesExpanded(next)
+    if (next && !purchasesData) fetchBreakdown("purchases", purchasesGroup)
+  }, [purchasesExpanded, purchasesData, purchasesGroup, fetchBreakdown])
+
+  const switchRevenueGroup = useCallback(
+    (g: GroupBy) => {
+      setRevenueGroup(g)
+      fetchBreakdown("revenue", g)
+    },
+    [fetchBreakdown],
+  )
+
+  const switchCogsGroup = useCallback(
+    (g: GroupBy) => {
+      setCogsGroup(g)
+      fetchBreakdown("cogs", g)
+    },
+    [fetchBreakdown],
+  )
+
+  const switchPurchasesGroup = useCallback(
+    (g: GroupBy) => {
+      setPurchasesGroup(g)
+      fetchBreakdown("purchases", g)
+    },
+    [fetchBreakdown],
+  )
 
   if (!entityId) {
     return (
@@ -403,8 +512,45 @@ export function PnlContent() {
           <h3 className="text-base font-semibold">{summary.month}월 손익계산서</h3>
         </div>
         <div className="divide-y divide-border/40">
-          <PnlRow label="매출" value={summary.revenue} entityId={entityId} bold />
-          <PnlRow label="(-) 매출원가" value={-summary.cogs} entityId={entityId} indent />
+          <PnlRow
+            label="매출"
+            value={summary.revenue}
+            entityId={entityId}
+            bold
+            onClick={toggleRevenue}
+            expandable
+            expanded={revenueExpanded}
+          />
+          {revenueExpanded && (
+            <BreakdownPanel
+              data={revenueData}
+              loading={revenueLoading}
+              group={revenueGroup}
+              onSwitch={switchRevenueGroup}
+              entityId={entityId}
+              accent="profit"
+            />
+          )}
+          <PnlRow
+            label="(-) 매출원가"
+            value={-summary.cogs}
+            entityId={entityId}
+            indent
+            onClick={toggleCogs}
+            expandable
+            expanded={cogsExpanded}
+          />
+          {cogsExpanded && (
+            <BreakdownPanel
+              data={cogsData}
+              loading={cogsLoading}
+              group={cogsGroup}
+              onSwitch={switchCogsGroup}
+              entityId={entityId}
+              accent="loss"
+              negative
+            />
+          )}
           <PnlRow label="매출총이익" value={summary.gross_profit} entityId={entityId} bold subtle pct={summary.gross_margin_pct} />
           <PnlRow
             label="(-) 운영비 (판관비)"
@@ -479,6 +625,44 @@ export function PnlContent() {
             pct={summary.net_margin_pct}
           />
         </div>
+      </Card>
+
+      {/* 매입 (도매) — 별도 분석 (P&L 표에 없음) */}
+      <Card className="overflow-hidden rounded-2xl">
+        <button
+          type="button"
+          onClick={togglePurchases}
+          aria-expanded={purchasesExpanded}
+          className="w-full px-4 py-3 border-b border-border/40 flex items-center justify-between hover:bg-white/[0.03] transition-colors"
+        >
+          <div className="text-left">
+            <p className="text-base font-semibold flex items-center gap-1.5">
+              매입 (도매)
+              {purchasesExpanded ? (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ChevronUp className="h-4 w-4 text-muted-foreground rotate-90" />
+              )}
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {summary.purchases_count}건 · 매입처별/제품별 분석
+            </p>
+          </div>
+          <p className="text-base font-mono tabular-nums">
+            {formatByEntity(summary.purchases_total, entityId)}
+          </p>
+        </button>
+        {purchasesExpanded && (
+          <BreakdownPanel
+            data={purchasesData}
+            loading={purchasesLoading}
+            group={purchasesGroup}
+            onSwitch={switchPurchasesGroup}
+            entityId={entityId}
+            accent="neutral"
+            payeeLabel="매입처"
+          />
+        )}
       </Card>
 
       {/* OpEx breakdown link */}
@@ -570,5 +754,142 @@ function PnlRow({
         {pct != null ? `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%` : ""}
       </span>
     </Comp>
+  )
+}
+
+function BreakdownPanel({
+  data,
+  loading,
+  group,
+  onSwitch,
+  entityId,
+  accent,
+  negative,
+  payeeLabel = "거래처",
+}: {
+  data: BreakdownResponse | null
+  loading: boolean
+  group: GroupBy
+  onSwitch: (g: GroupBy) => void
+  entityId: string | null
+  accent: "profit" | "loss" | "neutral"
+  negative?: boolean
+  payeeLabel?: string
+}) {
+  const accentClass =
+    accent === "profit"
+      ? "text-[hsl(var(--profit))]"
+      : accent === "loss"
+      ? "text-[hsl(var(--loss))]"
+      : "text-foreground"
+
+  const fmt = (v: number) => `${negative ? "-" : ""}${formatByEntity(v, entityId)}`
+
+  const totalAmount = data?.total.amount ?? 0
+
+  return (
+    <div className="bg-black/[0.08]">
+      {/* group toggle */}
+      <div className="px-4 py-2 pl-12 flex items-center gap-1.5 border-b border-border/20">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold mr-2">
+          기준
+        </span>
+        <button
+          type="button"
+          onClick={() => onSwitch("product")}
+          className={cn(
+            "text-[11px] px-2.5 py-1 rounded-md font-medium transition-colors",
+            group === "product"
+              ? "bg-accent/20 text-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-white/[0.04]",
+          )}
+        >
+          제품별
+        </button>
+        <button
+          type="button"
+          onClick={() => onSwitch("payee")}
+          className={cn(
+            "text-[11px] px-2.5 py-1 rounded-md font-medium transition-colors",
+            group === "payee"
+              ? "bg-accent/20 text-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-white/[0.04]",
+          )}
+        >
+          {payeeLabel}별
+        </button>
+        {data && (
+          <span className="text-[10px] text-muted-foreground/60 ml-auto">
+            top {data.rows.length}{data.others ? ` · 기타 ${data.others.count}` : ""} · 합 {data.total.count}건
+          </span>
+        )}
+      </div>
+
+      {loading || !data ? (
+        <div className="px-4 py-6 pl-12 text-xs text-muted-foreground">
+          불러오는 중…
+        </div>
+      ) : data.rows.length === 0 ? (
+        <div className="px-4 py-6 pl-12 text-xs text-muted-foreground">
+          데이터가 없습니다.
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-[1fr_70px_140px_60px] px-4 py-2 pl-12 text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold">
+            <span>{group === "product" ? "제품" : payeeLabel}</span>
+            <span className="text-right">건수</span>
+            <span className="text-right">금액</span>
+            <span className="text-right">비중</span>
+          </div>
+          {data.rows.map((row, idx) => {
+            const pct = totalAmount > 0 ? (row.amount / totalAmount) * 100 : 0
+            return (
+              <div
+                key={`${group}-${idx}-${row.key}`}
+                className="grid grid-cols-[1fr_70px_140px_60px] px-4 py-1.5 pl-12 border-t border-border/20 text-[12px]"
+              >
+                <span className="truncate" title={row.key}>
+                  <span className="text-muted-foreground/50 mr-1.5 font-mono tabular-nums">
+                    {String(idx + 1).padStart(2, " ")}
+                  </span>
+                  {row.key}
+                </span>
+                <span className="text-right font-mono tabular-nums text-muted-foreground">
+                  {row.count}
+                </span>
+                <span className={cn("text-right font-mono tabular-nums", accentClass)}>
+                  {fmt(row.amount)}
+                </span>
+                <span className="text-right font-mono tabular-nums text-muted-foreground/70 text-[11px]">
+                  {pct.toFixed(1)}%
+                </span>
+              </div>
+            )
+          })}
+          {data.others && (
+            <div className="grid grid-cols-[1fr_70px_140px_60px] px-4 py-1.5 pl-12 border-t border-border/20 text-[12px] text-muted-foreground/80">
+              <span>기타 ({data.others.count}{group === "product" ? "개 제품" : "곳"})</span>
+              <span className="text-right font-mono tabular-nums">{data.others.count}</span>
+              <span className={cn("text-right font-mono tabular-nums", accentClass, "opacity-70")}>
+                {fmt(data.others.amount)}
+              </span>
+              <span className="text-right font-mono tabular-nums text-muted-foreground/70 text-[11px]">
+                {totalAmount > 0 ? ((data.others.amount / totalAmount) * 100).toFixed(1) : "0.0"}%
+              </span>
+            </div>
+          )}
+          <div className="grid grid-cols-[1fr_70px_140px_60px] px-4 py-2 pl-12 border-t border-border/40 bg-secondary/40 text-[12px] font-semibold">
+            <span>합계</span>
+            <span className="text-right font-mono tabular-nums">{data.total.count}</span>
+            <span className={cn("text-right font-mono tabular-nums", accentClass)}>
+              {fmt(data.total.amount)}
+            </span>
+            <span className="text-right font-mono tabular-nums text-muted-foreground/70">
+              100%
+            </span>
+          </div>
+        </>
+      )}
+    </div>
   )
 }

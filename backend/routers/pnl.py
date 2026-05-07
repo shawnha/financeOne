@@ -6,7 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
-from backend.services.pnl_service import get_pnl_monthly, get_pnl_summary
+from backend.services.pnl_service import (
+    get_cogs_breakdown,
+    get_pnl_monthly,
+    get_pnl_summary,
+    get_purchases_breakdown,
+    get_revenue_breakdown,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,4 +45,55 @@ def pnl_monthly(
         return get_pnl_monthly(conn, entity_id, months)
     except Exception as e:
         logger.error("P&L monthly error: %s", e)
+        raise HTTPException(500, detail=str(e))
+
+
+@router.get("/revenue-breakdown")
+def revenue_breakdown(
+    entity_id: int = Query(...),
+    year: int = Query(...),
+    month: int = Query(...),
+    group_by: str = Query("product", pattern="^(product|payee)$"),
+    limit: int = Query(20, ge=1, le=200),
+    conn: PgConnection = Depends(get_db),
+):
+    """매출 drilldown — 제품별/거래처별 top N + 기타 + 합계."""
+    try:
+        return get_revenue_breakdown(conn, entity_id, year, month, group_by, limit)
+    except Exception as e:
+        logger.error("revenue-breakdown error: %s", e)
+        raise HTTPException(500, detail=str(e))
+
+
+@router.get("/cogs-breakdown")
+def cogs_breakdown(
+    entity_id: int = Query(...),
+    year: int = Query(...),
+    month: int = Query(...),
+    group_by: str = Query("product", pattern="^(product|payee)$"),
+    limit: int = Query(20, ge=1, le=200),
+    conn: PgConnection = Depends(get_db),
+):
+    """매출원가 drilldown — 제품별/거래처별 (매출 row × 매입가)."""
+    try:
+        return get_cogs_breakdown(conn, entity_id, year, month, group_by, limit)
+    except Exception as e:
+        logger.error("cogs-breakdown error: %s", e)
+        raise HTTPException(500, detail=str(e))
+
+
+@router.get("/purchases-breakdown")
+def purchases_breakdown(
+    entity_id: int = Query(...),
+    year: int = Query(...),
+    month: int = Query(...),
+    group_by: str = Query("payee", pattern="^(product|payee)$"),
+    limit: int = Query(20, ge=1, le=200),
+    conn: PgConnection = Depends(get_db),
+):
+    """매입 drilldown — 매입처별/제품별."""
+    try:
+        return get_purchases_breakdown(conn, entity_id, year, month, group_by, limit)
+    except Exception as e:
+        logger.error("purchases-breakdown error: %s", e)
         raise HTTPException(500, detail=str(e))
