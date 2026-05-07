@@ -510,16 +510,27 @@ export function PnlContent() {
         />
       </div>
 
-      {/* Monthly chart — 매출 (bar) + 영업이익 (line) */}
+      {/* Monthly chart — 매출 (bar, 좌측 Y) + 영업이익/순이익 (line, 우측 Y) */}
       <Card className="p-6 rounded-2xl">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <h3 className="text-sm font-medium text-muted-foreground">
             월별 매출 + 영업이익 ({monthly.months.length}개월)
           </h3>
+          <div className="flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap">
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 rounded-sm bg-[hsl(var(--accent))]/60" /> 매출 (좌)
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-0.5 bg-emerald-400" /> 영업이익 (우)
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-0.5 bg-amber-400" style={{ borderTop: "2px dashed #F59E0B" }} /> 순이익 (우)
+            </span>
+          </div>
         </div>
         <div className="h-[260px] max-md:h-[200px]">
           <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-            <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 5 }}>
+            <ComposedChart data={chartData} margin={{ top: 10, right: 50, left: 10, bottom: 5 }}>
               <defs>
                 <linearGradient id="revBarGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="hsl(var(--accent))" stopOpacity={0.6} />
@@ -535,11 +546,22 @@ export function PnlContent() {
                 tickFormatter={(v) => `${parseInt(v.slice(5))}월`}
               />
               <YAxis
+                yAxisId="amount"
                 tick={{ fill: "#64748b", fontSize: 10 }}
                 axisLine={false}
                 tickLine={false}
                 tickFormatter={(v) => abbreviateAmount(v)}
                 width={60}
+              />
+              <YAxis
+                yAxisId="profit"
+                orientation="right"
+                tick={{ fill: "#64748b", fontSize: 10 }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v) => abbreviateAmount(v)}
+                width={50}
+                domain={["auto", "auto"]}
               />
               <RechartsTooltip
                 content={({ active, payload, label }) => {
@@ -561,7 +583,7 @@ export function PnlContent() {
                   )
                 }}
               />
-              <Bar dataKey="revenue" name="매출" radius={[6, 6, 0, 0]} barSize={26}>
+              <Bar yAxisId="amount" dataKey="revenue" name="매출" radius={[6, 6, 0, 0]} barSize={26}>
                 {chartData.map((entry, i) => (
                   <Cell
                     key={`rev-${i}`}
@@ -575,21 +597,23 @@ export function PnlContent() {
                 ))}
               </Bar>
               <Line
+                yAxisId="profit"
                 type="monotone"
                 dataKey="operating_profit"
                 name="영업이익"
                 stroke="#22C55E"
-                strokeWidth={2}
-                dot={{ r: 3, fill: "#22C55E" }}
+                strokeWidth={2.5}
+                dot={{ r: 4, fill: "#22C55E" }}
               />
               <Line
+                yAxisId="profit"
                 type="monotone"
                 dataKey="net_income"
                 name="순이익"
                 stroke="#F59E0B"
                 strokeWidth={2}
                 strokeDasharray="4 4"
-                dot={{ r: 2, fill: "#F59E0B" }}
+                dot={{ r: 3, fill: "#F59E0B" }}
               />
             </ComposedChart>
           </ResponsiveContainer>
