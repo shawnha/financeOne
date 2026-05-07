@@ -266,7 +266,7 @@ export function OpexContent() {
       <div className="p-6">
         <Card className="p-12 flex flex-col items-center justify-center text-center gap-4">
           <Wallet className="h-12 w-12 text-muted-foreground" />
-          <p className="text-lg font-medium">해당 법인에 운영비 거래가 없습니다.</p>
+          <p className="text-lg font-medium">해당 법인에 OpEx 거래가 없습니다.</p>
           <p className="text-sm text-muted-foreground">
             거래에 SG&amp;A 계정(판매관리비)이 매핑되면 자동으로 표시됩니다.
             <br />
@@ -307,7 +307,7 @@ export function OpexContent() {
         <div>
           <h1 className="text-xl font-semibold flex items-center gap-2">
             <Wallet className="h-5 w-5 text-[hsl(var(--accent))]" />
-            실질 운영비 (SG&amp;A)
+            OpEx (SG&amp;A)
           </h1>
           <p className="text-xs text-muted-foreground mt-1">
             판매관리비 — 매출원가 / 외상매입금 결제 / 자산취득 / 영업외비용 제외
@@ -324,14 +324,14 @@ export function OpexContent() {
       {/* KPI Cards */}
       <div className="grid grid-cols-4 gap-3 max-md:grid-cols-2">
         <KPICard
-          label="이번달 운영비"
+          label="이번달 OpEx"
           value={formatByEntity(current, entityId)}
           subtext={`${txCount}건`}
           colorClass="text-foreground"
           icon={Wallet}
         />
         <KPICard
-          label="전월 운영비"
+          label="전월 OpEx"
           value={formatByEntity(prev, entityId)}
           subtext={
             changePct == null
@@ -381,7 +381,7 @@ export function OpexContent() {
       <Card className="p-6 rounded-2xl">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-medium text-muted-foreground">
-            월별 운영비 추이 ({summary.months.length}개월)
+            월별 OpEx 추이 ({summary.months.length}개월)
           </h3>
         </div>
         <div className="h-[220px] max-md:h-[180px]">
@@ -463,13 +463,13 @@ export function OpexContent() {
         <Skeleton className="h-[300px] w-full rounded-2xl" />
       ) : detailState === "empty" ? (
         <Card className="p-8 text-center text-sm text-muted-foreground rounded-2xl">
-          이번 달 운영비 거래가 없습니다.
+          이번 달 OpEx 거래가 없습니다.
         </Card>
       ) : detail ? (
         <Card className="overflow-hidden rounded-2xl">
           <div className="px-4 py-3 border-b border-border flex items-center justify-between">
             <h3 className="text-base font-semibold">
-              {parseInt(selectedMonth.slice(5))}월 운영비 — 카테고리별
+              {parseInt(selectedMonth.slice(5))}월 OpEx — 카테고리별
             </h3>
             <span className="text-xs text-muted-foreground">
               {detail.tx_count}건 / {formatByEntity(detail.total, entityId)}

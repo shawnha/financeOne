@@ -127,7 +127,7 @@ interface GenerateResult {
 
 const STATEMENT_TYPES_KR = [
   { key: "balance_sheet", label: "재무상태표" },
-  { key: "income_statement", label: "손익계산서" },
+  { key: "income_statement", label: "P&L" },
   { key: "cash_flow", label: "현금흐름표" },
   { key: "trial_balance", label: "합계잔액시산표" },
   { key: "deficit_treatment", label: "결손금처리계산서" },

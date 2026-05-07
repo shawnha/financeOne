@@ -346,10 +346,10 @@ export function PnlContent() {
         <div>
           <h1 className="text-xl font-semibold flex items-center gap-2">
             <FileBarChart className="h-5 w-5 text-[hsl(var(--accent))]" />
-            손익계산서 (P&amp;L)
+            P&amp;L
           </h1>
           <p className="text-xs text-muted-foreground mt-1">
-            매출 = 도매 매출관리 (발생주의) · 매출원가 = 매출 row × 매입가 · 운영비 = 거래내역 판관비
+            매출 = 도매 매출관리 (발생주의) · 매출원가 = 매출 row × 매입가 · OpEx = 거래내역 판관비
           </p>
         </div>
         <MonthPicker
@@ -402,7 +402,7 @@ export function PnlContent() {
         />
       </div>
 
-      {/* Detail breakdown — 매출원가 / 운영비 / 영업외 */}
+      {/* Detail breakdown — 매출원가 / OpEx / 영업외 */}
       <div className="grid grid-cols-3 gap-3 max-md:grid-cols-1">
         <KPICard
           label="매출원가"
@@ -411,7 +411,7 @@ export function PnlContent() {
           colorClass="text-[hsl(var(--loss))]"
         />
         <KPICard
-          label="운영비 (판관비)"
+          label="OpEx (판관비)"
           value={`-${formatByEntity(summary.opex, entityId)}`}
           subtext="OpEx 페이지 연결 →"
           colorClass="text-[hsl(var(--loss))]"
@@ -647,7 +647,7 @@ export function PnlContent() {
       {/* P&L 표 */}
       <Card className="overflow-hidden rounded-2xl">
         <div className="px-4 py-3 border-b border-border">
-          <h3 className="text-base font-semibold">{summary.month}월 손익계산서</h3>
+          <h3 className="text-base font-semibold">{summary.month}월 P&amp;L</h3>
         </div>
         <div className="divide-y divide-border/40">
           <PnlRow
@@ -691,7 +691,7 @@ export function PnlContent() {
           )}
           <PnlRow label="매출총이익" value={summary.gross_profit} entityId={entityId} bold subtle pct={summary.gross_margin_pct} />
           <PnlRow
-            label="(-) 운영비 (판관비)"
+            label="(-) OpEx (판관비)"
             value={-summary.opex}
             entityId={entityId}
             indent
@@ -809,7 +809,7 @@ export function PnlContent() {
         className="flex items-center justify-between p-4 rounded-xl bg-secondary/40 border border-border/40 hover:bg-secondary/60 transition-colors"
       >
         <div>
-          <p className="text-sm font-medium">운영비(판관비) 카테고리별 분석</p>
+          <p className="text-sm font-medium">OpEx (판관비) 카테고리별 분석</p>
           <p className="text-xs text-muted-foreground mt-0.5">
             {summary.opex_breakdown.length}개 표준계정 · 인건비/임차료/교통/사무용품 등
           </p>

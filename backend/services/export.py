@@ -8,7 +8,7 @@ from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 
 STATEMENT_LABELS = {
     "balance_sheet": "재무상태표",
-    "income_statement": "손익계산서",
+    "income_statement": "P&L",
     "cash_flow": "현금흐름표",
     "trial_balance": "합계잔액시산표",
     "deficit_treatment": "결손금처리계산서",
