@@ -668,3 +668,80 @@ async def upload_transfer_history(
         "ambiguous_rows": result.ambiguous_rows[:20],
         "unmatched_rows": result.unmatched_rows[:20],
     }
+
+
+@router.post("/wholesale-sales")
+async def upload_wholesale_sales(
+    file: UploadFile = File(...),
+    entity_id: int = Query(..., description="법인 ID (필수)"),
+    conn: PgConnection = Depends(get_db),
+):
+    """매출관리 xlsx import — 도매 매출 마스터 (제품 단위 row).
+
+    P&L 정확도 base. 거래내역(transactions)은 회수 시점 별개.
+    """
+    from backend.services.wholesale_service import (
+        parse_wholesale_sales as _parse_sales,
+        import_wholesale_sales as _import_sales,
+    )
+    filename = file.filename or "unknown"
+    if not filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(400, "xlsx/xls 만 지원합니다")
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(400, "빈 파일입니다")
+    try:
+        rows = _parse_sales(file_bytes)
+    except Exception as e:
+        raise HTTPException(400, f"파일 파싱 실패: {e}")
+    if not rows:
+        raise HTTPException(400, "파싱된 매출 row 가 없습니다")
+    try:
+        result = _import_sales(conn, entity_id, rows, source_file=filename)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(500, f"import 실패: {e}")
+    return {
+        "filename": filename, "entity_id": entity_id,
+        "total_rows": result.total_rows, "inserted": result.inserted,
+        "duplicates": result.duplicates, "errors": result.errors,
+        "sample": result.sample,
+    }
+
+
+@router.post("/wholesale-purchases")
+async def upload_wholesale_purchases(
+    file: UploadFile = File(...),
+    entity_id: int = Query(..., description="법인 ID (필수)"),
+    conn: PgConnection = Depends(get_db),
+):
+    """매입관리 xlsx import — 도매 매입 마스터 (제품 단위 row)."""
+    from backend.services.wholesale_service import (
+        parse_wholesale_purchases as _parse_purchases,
+        import_wholesale_purchases as _import_purchases,
+    )
+    filename = file.filename or "unknown"
+    if not filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(400, "xlsx/xls 만 지원합니다")
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(400, "빈 파일입니다")
+    try:
+        rows = _parse_purchases(file_bytes)
+    except Exception as e:
+        raise HTTPException(400, f"파일 파싱 실패: {e}")
+    if not rows:
+        raise HTTPException(400, "파싱된 매입 row 가 없습니다")
+    try:
+        result = _import_purchases(conn, entity_id, rows, source_file=filename)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(500, f"import 실패: {e}")
+    return {
+        "filename": filename, "entity_id": entity_id,
+        "total_rows": result.total_rows, "inserted": result.inserted,
+        "duplicates": result.duplicates, "errors": result.errors,
+        "sample": result.sample,
+    }

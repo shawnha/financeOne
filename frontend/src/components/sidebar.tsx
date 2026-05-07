@@ -24,6 +24,7 @@ import {
   Receipt,
   FileSpreadsheet,
   Wallet,
+  FileBarChart,
 } from "lucide-react"
 
 type SidebarItem = {
@@ -41,6 +42,7 @@ const sections: { label: string; items: SidebarItem[] }[] = [
       { label: "대시보드", icon: LayoutDashboard, href: "/", enabled: true },
       { label: "현금흐름표", icon: TrendingUp, href: "/cashflow", enabled: true },
       { label: "운영비", icon: Wallet, href: "/opex", enabled: true },
+      { label: "손익계산서", icon: FileBarChart, href: "/pnl", enabled: true },
       { label: "재무제표", icon: FileText, href: "/statements", enabled: true },
       { label: "리포트", icon: BarChart3, href: "/reports", enabled: false },
     ],

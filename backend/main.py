@@ -41,7 +41,7 @@ _VERSION = _load_version()
 _DISABLE_SCHEDULER = os.getenv("DISABLE_SCHEDULER", "").lower() in ("1", "true", "yes") or bool(os.getenv("VERCEL"))
 
 from backend.database.connection import init_pool, close_pool
-from backend.routers import entities, transactions, accounts, upload, dashboard, statements, slack, journal_entries, integrations, exchange_rates, intercompany, notes, cashflow, forecasts, card_settings, expenseone_match, invoices, opex
+from backend.routers import entities, transactions, accounts, upload, dashboard, statements, slack, journal_entries, integrations, exchange_rates, intercompany, notes, cashflow, forecasts, card_settings, expenseone_match, invoices, opex, pnl
 from backend.services.scheduler import start_scheduler, shutdown_scheduler
 
 
@@ -94,6 +94,7 @@ app.include_router(card_settings.router)
 app.include_router(expenseone_match.router)
 app.include_router(invoices.router)
 app.include_router(opex.router)
+app.include_router(pnl.router)
 
 
 @app.get("/health")

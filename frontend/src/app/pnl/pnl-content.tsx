@@ -1,0 +1,479 @@
+"use client"
+
+import { useEffect, useState, useCallback } from "react"
+import { useSearchParams } from "next/navigation"
+import {
+  Bar,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip as RechartsTooltip,
+  ComposedChart,
+  Cell,
+} from "recharts"
+import { AlertCircle, RefreshCw, TrendingUp, FileBarChart, ArrowRight } from "lucide-react"
+import Link from "next/link"
+
+import { useGlobalMonth } from "@/hooks/use-global-month"
+import { Card } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { fetchAPI } from "@/lib/api"
+import { formatByEntity, abbreviateAmount } from "@/lib/format"
+import { cn } from "@/lib/utils"
+import { MonthPicker } from "@/components/month-picker"
+
+interface PnlSummary {
+  year: number
+  month: number
+  revenue: number
+  cogs: number
+  gross_profit: number
+  gross_margin_pct: number | null
+  opex: number
+  operating_profit: number
+  operating_margin_pct: number | null
+  non_op_income: number
+  non_op_expense: number
+  net_income: number
+  net_margin_pct: number | null
+  purchases_total: number
+  sales_count: number
+  purchases_count: number
+  opex_breakdown: Array<{ code: string; name: string; count: number; amount: number }>
+}
+
+interface MonthlyRow {
+  month: string
+  revenue: number
+  cogs: number
+  gross_profit: number
+  opex: number
+  operating_profit: number
+  net_income: number
+}
+
+interface MonthlyData {
+  months: MonthlyRow[]
+  available_months: string[]
+}
+
+type LoadState = "loading" | "empty" | "error" | "success"
+
+function KPICard({
+  label,
+  value,
+  subtext,
+  colorClass,
+  subtextColor,
+  large,
+}: {
+  label: string
+  value: string
+  subtext?: string
+  colorClass?: string
+  subtextColor?: string
+  large?: boolean
+}) {
+  return (
+    <Card className="bg-secondary rounded-xl p-4">
+      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p
+        className={cn(
+          "font-bold font-mono tabular-nums mt-1 truncate",
+          large ? "text-xl md:text-2xl lg:text-[28px]" : "text-base md:text-lg lg:text-[22px]",
+          colorClass,
+        )}
+      >
+        {value}
+      </p>
+      {subtext && <p className={cn("text-[11px] mt-0.5", subtextColor || "text-muted-foreground")}>{subtext}</p>}
+    </Card>
+  )
+}
+
+export function PnlContent() {
+  const searchParams = useSearchParams()
+  const entityId = searchParams.get("entity")
+  const [summary, setSummary] = useState<PnlSummary | null>(null)
+  const [monthly, setMonthly] = useState<MonthlyData | null>(null)
+  const [state, setState] = useState<LoadState>("loading")
+  const [error, setError] = useState("")
+  const [globalMonth, setGlobalMonth] = useGlobalMonth()
+  const [selectedMonth, setSelectedMonthLocal] = useState(globalMonth)
+  const setSelectedMonth = useCallback(
+    (m: string) => {
+      setSelectedMonthLocal(m)
+      setGlobalMonth(m)
+    },
+    [setGlobalMonth],
+  )
+
+  useEffect(() => setSelectedMonthLocal(globalMonth), [globalMonth])
+
+  const fetchData = useCallback(async () => {
+    if (!entityId) return
+    setState("loading")
+    try {
+      const [m] = selectedMonth.split("-").map(Number)
+      const monthData = await fetchAPI<MonthlyData>(
+        `/pnl/monthly?entity_id=${entityId}&months=12`,
+        { cache: "no-store" },
+      )
+      setMonthly(monthData)
+      if (!monthData.available_months.length) {
+        setState("empty")
+        return
+      }
+      const useMonth = monthData.available_months.includes(selectedMonth)
+        ? selectedMonth
+        : monthData.available_months[monthData.available_months.length - 1]
+      if (useMonth !== selectedMonth) setSelectedMonth(useMonth)
+      const [y, mn] = useMonth.split("-").map(Number)
+      const sumData = await fetchAPI<PnlSummary>(
+        `/pnl/summary?entity_id=${entityId}&year=${y}&month=${mn}`,
+        { cache: "no-store" },
+      )
+      setSummary(sumData)
+      setState("success")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "데이터를 불러올 수 없습니다.")
+      setState("error")
+    }
+  }, [entityId, selectedMonth]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
+
+  if (!entityId) {
+    return (
+      <div className="p-6">
+        <Skeleton className="h-[260px] w-full rounded-xl" />
+      </div>
+    )
+  }
+
+  if (state === "loading") {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="grid grid-cols-4 gap-3 max-md:grid-cols-2">
+          {Array.from({ length: 7 }).map((_, i) => (
+            <Skeleton key={i} className="h-24 rounded-xl" />
+          ))}
+        </div>
+        <Skeleton className="h-[260px] w-full rounded-xl" />
+      </div>
+    )
+  }
+
+  if (state === "error") {
+    return (
+      <div className="p-6">
+        <Card className="p-8 flex flex-col items-center justify-center text-center gap-4">
+          <AlertCircle className="h-12 w-12 text-[hsl(var(--loss))]" />
+          <p className="text-lg font-medium">데이터를 불러올 수 없습니다.</p>
+          <p className="text-sm text-muted-foreground">{error}</p>
+          <Button onClick={fetchData} variant="secondary" className="gap-2">
+            <RefreshCw className="h-4 w-4" /> 다시 시도
+          </Button>
+        </Card>
+      </div>
+    )
+  }
+
+  if (state === "empty" || !summary || !monthly) {
+    return (
+      <div className="p-6">
+        <Card className="p-12 flex flex-col items-center justify-center text-center gap-4">
+          <FileBarChart className="h-12 w-12 text-muted-foreground" />
+          <p className="text-lg font-medium">P&amp;L 데이터가 없습니다.</p>
+          <p className="text-sm text-muted-foreground">
+            매출관리/매입관리 xlsx 를 업로드하면 P&amp;L 이 자동 계산됩니다.
+          </p>
+          <Button asChild variant="secondary">
+            <Link href="/upload">업로드 페이지로</Link>
+          </Button>
+        </Card>
+      </div>
+    )
+  }
+
+  const months = monthly.available_months
+  const chartData = monthly.months.map((m) => ({
+    ...m,
+    isSelected: m.month === selectedMonth,
+  }))
+
+  const fmtPct = (v: number | null) => (v == null ? "-" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`)
+  const profitColor = (v: number) =>
+    v > 0 ? "text-[hsl(var(--profit))]" : v < 0 ? "text-[hsl(var(--loss))]" : "text-foreground"
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-start justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-xl font-semibold flex items-center gap-2">
+            <FileBarChart className="h-5 w-5 text-[hsl(var(--accent))]" />
+            손익계산서 (P&amp;L)
+          </h1>
+          <p className="text-xs text-muted-foreground mt-1">
+            매출 = 도매 매출관리 (발생주의) · 매출원가 = 매출 row × 매입가 · 운영비 = 거래내역 판관비
+          </p>
+        </div>
+        <MonthPicker
+          months={months}
+          selected={selectedMonth}
+          onSelect={setSelectedMonth}
+          accentColor="hsl(var(--accent))"
+        />
+      </div>
+
+      {/* Top KPIs — 매출 / 매출총이익 / 영업이익 / 순이익 */}
+      <div className="grid grid-cols-4 gap-3 max-md:grid-cols-2">
+        <KPICard
+          label="매출"
+          value={formatByEntity(summary.revenue, entityId)}
+          subtext={`${summary.sales_count}건`}
+          large
+        />
+        <KPICard
+          label="매출총이익"
+          value={formatByEntity(summary.gross_profit, entityId)}
+          subtext={summary.gross_margin_pct != null ? `${fmtPct(summary.gross_margin_pct)} 마진` : undefined}
+          colorClass={profitColor(summary.gross_profit)}
+          subtextColor={summary.gross_profit >= 0 ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]"}
+          large
+        />
+        <KPICard
+          label="영업이익"
+          value={formatByEntity(summary.operating_profit, entityId)}
+          subtext={
+            summary.operating_margin_pct != null
+              ? `${fmtPct(summary.operating_margin_pct)} 영업이익률`
+              : undefined
+          }
+          colorClass={profitColor(summary.operating_profit)}
+          subtextColor={
+            summary.operating_profit >= 0 ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]"
+          }
+          large
+        />
+        <KPICard
+          label="당기순이익"
+          value={formatByEntity(summary.net_income, entityId)}
+          subtext={summary.net_margin_pct != null ? fmtPct(summary.net_margin_pct) : undefined}
+          colorClass={profitColor(summary.net_income)}
+          subtextColor={
+            summary.net_income >= 0 ? "text-[hsl(var(--profit))]" : "text-[hsl(var(--loss))]"
+          }
+          large
+        />
+      </div>
+
+      {/* Detail breakdown — 매출원가 / 운영비 / 영업외 */}
+      <div className="grid grid-cols-3 gap-3 max-md:grid-cols-1">
+        <KPICard
+          label="매출원가"
+          value={`-${formatByEntity(summary.cogs, entityId)}`}
+          subtext={`${summary.purchases_count}건 매입 ₩${summary.purchases_total.toLocaleString()}`}
+          colorClass="text-[hsl(var(--loss))]"
+        />
+        <KPICard
+          label="운영비 (판관비)"
+          value={`-${formatByEntity(summary.opex, entityId)}`}
+          subtext="OpEx 페이지 연결 →"
+          colorClass="text-[hsl(var(--loss))]"
+        />
+        <KPICard
+          label="영업외 (비용/수익)"
+          value={`-${formatByEntity(summary.non_op_expense, entityId)} / +${formatByEntity(summary.non_op_income, entityId)}`}
+          subtext={`순 ${summary.non_op_income - summary.non_op_expense >= 0 ? "+" : ""}${formatByEntity(summary.non_op_income - summary.non_op_expense, entityId)}`}
+          colorClass="text-foreground"
+        />
+      </div>
+
+      {/* Monthly chart — 매출 (bar) + 영업이익 (line) */}
+      <Card className="p-6 rounded-2xl">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-medium text-muted-foreground">
+            월별 매출 + 영업이익 ({monthly.months.length}개월)
+          </h3>
+        </div>
+        <div className="h-[260px] max-md:h-[200px]">
+          <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+            <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 5 }}>
+              <defs>
+                <linearGradient id="revBarGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="hsl(var(--accent))" stopOpacity={0.6} />
+                  <stop offset="100%" stopColor="hsl(var(--accent))" stopOpacity={0.05} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="4 4" stroke="rgba(255,255,255,0.03)" vertical={false} />
+              <XAxis
+                dataKey="month"
+                tick={{ fill: "#64748b", fontSize: 11 }}
+                axisLine={{ stroke: "rgba(255,255,255,0.06)" }}
+                tickLine={false}
+                tickFormatter={(v) => `${parseInt(v.slice(5))}월`}
+              />
+              <YAxis
+                tick={{ fill: "#64748b", fontSize: 10 }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v) => abbreviateAmount(v)}
+                width={60}
+              />
+              <RechartsTooltip
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null
+                  const data = payload[0].payload as MonthlyRow
+                  return (
+                    <div className="rounded-lg bg-popover border border-border px-3 py-2 shadow-lg text-xs">
+                      <p className="text-muted-foreground mb-1">{label}</p>
+                      <p className="font-mono tabular-nums">
+                        매출: <span className="text-[hsl(var(--accent))]">{formatByEntity(data.revenue, entityId)}</span>
+                      </p>
+                      <p className="font-mono tabular-nums">
+                        영업이익: <span className={profitColor(data.operating_profit)}>{formatByEntity(data.operating_profit, entityId)}</span>
+                      </p>
+                      <p className="font-mono tabular-nums">
+                        순이익: <span className={profitColor(data.net_income)}>{formatByEntity(data.net_income, entityId)}</span>
+                      </p>
+                    </div>
+                  )
+                }}
+              />
+              <Bar dataKey="revenue" name="매출" radius={[6, 6, 0, 0]} barSize={26}>
+                {chartData.map((entry, i) => (
+                  <Cell
+                    key={`rev-${i}`}
+                    fill="url(#revBarGrad)"
+                    stroke="hsl(var(--accent))"
+                    strokeWidth={entry.isSelected ? 1 : 0.5}
+                    opacity={entry.isSelected ? 1 : 0.4}
+                    cursor="pointer"
+                    onClick={() => setSelectedMonth(entry.month)}
+                  />
+                ))}
+              </Bar>
+              <Line
+                type="monotone"
+                dataKey="operating_profit"
+                name="영업이익"
+                stroke="#22C55E"
+                strokeWidth={2}
+                dot={{ r: 3, fill: "#22C55E" }}
+              />
+              <Line
+                type="monotone"
+                dataKey="net_income"
+                name="순이익"
+                stroke="#F59E0B"
+                strokeWidth={2}
+                strokeDasharray="4 4"
+                dot={{ r: 2, fill: "#F59E0B" }}
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      </Card>
+
+      {/* P&L 표 */}
+      <Card className="overflow-hidden rounded-2xl">
+        <div className="px-4 py-3 border-b border-border">
+          <h3 className="text-base font-semibold">{summary.month}월 손익계산서</h3>
+        </div>
+        <div className="divide-y divide-border/40">
+          <PnlRow label="매출" value={summary.revenue} entityId={entityId} bold />
+          <PnlRow label="(-) 매출원가" value={-summary.cogs} entityId={entityId} indent />
+          <PnlRow label="매출총이익" value={summary.gross_profit} entityId={entityId} bold subtle pct={summary.gross_margin_pct} />
+          <PnlRow label="(-) 운영비 (판관비)" value={-summary.opex} entityId={entityId} indent />
+          <PnlRow
+            label="영업이익"
+            value={summary.operating_profit}
+            entityId={entityId}
+            bold
+            highlight
+            pct={summary.operating_margin_pct}
+          />
+          <PnlRow label="(+) 영업외수익" value={summary.non_op_income} entityId={entityId} indent />
+          <PnlRow label="(-) 영업외비용" value={-summary.non_op_expense} entityId={entityId} indent />
+          <PnlRow
+            label="당기순이익"
+            value={summary.net_income}
+            entityId={entityId}
+            bold
+            highlight
+            pct={summary.net_margin_pct}
+          />
+        </div>
+      </Card>
+
+      {/* OpEx breakdown link */}
+      <Link
+        href={`/opex?entity=${entityId}`}
+        className="flex items-center justify-between p-4 rounded-xl bg-secondary/40 border border-border/40 hover:bg-secondary/60 transition-colors"
+      >
+        <div>
+          <p className="text-sm font-medium">운영비(판관비) 카테고리별 분석</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {summary.opex_breakdown.length}개 표준계정 · 인건비/임차료/교통/사무용품 등
+          </p>
+        </div>
+        <ArrowRight className="h-5 w-5 text-muted-foreground" />
+      </Link>
+    </div>
+  )
+}
+
+function PnlRow({
+  label,
+  value,
+  entityId,
+  bold,
+  highlight,
+  indent,
+  subtle,
+  pct,
+}: {
+  label: string
+  value: number
+  entityId: string | null
+  bold?: boolean
+  highlight?: boolean
+  indent?: boolean
+  subtle?: boolean
+  pct?: number | null
+}) {
+  const isLoss = value < 0
+  const isProfit = bold && value > 0
+  return (
+    <div
+      className={cn(
+        "grid grid-cols-[1fr_auto_70px] gap-4 px-4 py-2.5",
+        indent && "pl-10",
+        highlight && "bg-accent/5",
+        subtle && "bg-secondary/30",
+      )}
+    >
+      <span className={cn("text-sm", bold && "font-semibold")}>{label}</span>
+      <span
+        className={cn(
+          "text-right font-mono tabular-nums",
+          bold ? "text-base" : "text-sm",
+          isLoss && "text-[hsl(var(--loss))]",
+          isProfit && "text-[hsl(var(--profit))]",
+        )}
+      >
+        {value < 0 ? "-" : ""}
+        {formatByEntity(Math.abs(value), entityId)}
+      </span>
+      <span className="text-right text-xs font-mono text-muted-foreground tabular-nums">
+        {pct != null ? `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%` : ""}
+      </span>
+    </div>
+  )
+}

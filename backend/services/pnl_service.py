@@ -1,0 +1,170 @@
+"""P&L (손익계산서) 서비스 — 도매 매출/매입 + OpEx 결합.
+
+매출 (발생주의) = wholesale_sales.total_amount
+매출원가 (발생주의) = wholesale_sales.quantity × cogs_unit_price
+판관비 (현금주의 약식) = transactions WHERE std_account.subcategory IN ('판매관리비','판매비와관리비')
+영업외 = transactions WHERE std_account.subcategory IN ('영업외비용','영업외수익')
+
+도매업 1차 P&L. 발생주의 정합성은 invoices/journal_entries 통합 시 향상.
+"""
+
+from decimal import Decimal
+
+from psycopg2.extensions import connection as PgConnection
+
+from backend.utils.db import build_date_range
+
+
+SGA_SUBS = ("판매관리비", "판매비와관리비")
+
+
+def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -> dict:
+    start, end = build_date_range(year, month)
+    cur = conn.cursor()
+
+    # 매출 + 매출원가 (도매)
+    cur.execute(
+        """
+        SELECT
+          COALESCE(SUM(total_amount), 0) AS revenue,
+          COALESCE(SUM(quantity * COALESCE(cogs_unit_price, 0)), 0) AS cogs,
+          COUNT(*) AS tx_count
+        FROM wholesale_sales
+        WHERE entity_id = %s AND sales_date >= %s AND sales_date < %s
+        """,
+        [entity_id, start, end],
+    )
+    rev_row = cur.fetchone()
+    revenue = Decimal(str(rev_row[0]))
+    cogs = Decimal(str(rev_row[1]))
+    sales_count = rev_row[2]
+
+    # 매입 (검증용)
+    cur.execute(
+        """
+        SELECT COALESCE(SUM(total_amount), 0), COUNT(*)
+        FROM wholesale_purchases
+        WHERE entity_id = %s AND purchase_date >= %s AND purchase_date < %s
+        """,
+        [entity_id, start, end],
+    )
+    pur_row = cur.fetchone()
+    purchases = Decimal(str(pur_row[0]))
+    purchases_count = pur_row[1]
+
+    # 판관비 (운영비)
+    cur.execute(
+        """
+        SELECT COALESCE(SUM(t.amount), 0)
+        FROM transactions t
+        JOIN standard_accounts s ON s.id = t.standard_account_id
+        WHERE t.entity_id = %s AND t.date >= %s AND t.date < %s
+          AND t.type = 'out'
+          AND s.category = '비용' AND s.subcategory = ANY(%s)
+          AND t.is_duplicate = false AND (t.is_cancel IS NOT TRUE)
+        """,
+        [entity_id, start, end, list(SGA_SUBS)],
+    )
+    opex = Decimal(str(cur.fetchone()[0]))
+
+    # 영업외 비용/수익
+    cur.execute(
+        """
+        SELECT
+          COALESCE(SUM(CASE WHEN s.category = '비용' AND s.subcategory = '영업외비용' THEN t.amount ELSE 0 END), 0) AS non_op_expense,
+          COALESCE(SUM(CASE WHEN s.category = '수익' AND s.subcategory = '영업외수익' THEN t.amount ELSE 0 END), 0) AS non_op_income
+        FROM transactions t
+        JOIN standard_accounts s ON s.id = t.standard_account_id
+        WHERE t.entity_id = %s AND t.date >= %s AND t.date < %s
+          AND t.is_duplicate = false AND (t.is_cancel IS NOT TRUE)
+        """,
+        [entity_id, start, end],
+    )
+    nx_row = cur.fetchone()
+    non_op_expense = Decimal(str(nx_row[0]))
+    non_op_income = Decimal(str(nx_row[1]))
+
+    # 표준계정별 운영비 breakdown
+    cur.execute(
+        """
+        SELECT s.code, s.name, COUNT(*), SUM(t.amount)
+        FROM transactions t
+        JOIN standard_accounts s ON s.id = t.standard_account_id
+        WHERE t.entity_id = %s AND t.date >= %s AND t.date < %s
+          AND t.type = 'out'
+          AND s.category = '비용' AND s.subcategory = ANY(%s)
+          AND t.is_duplicate = false AND (t.is_cancel IS NOT TRUE)
+        GROUP BY s.code, s.name
+        ORDER BY SUM(t.amount) DESC
+        """,
+        [entity_id, start, end, list(SGA_SUBS)],
+    )
+    opex_breakdown = [
+        {"code": r[0], "name": r[1], "count": r[2], "amount": float(r[3])}
+        for r in cur.fetchall()
+    ]
+
+    cur.close()
+
+    gross_profit = revenue - cogs
+    operating_profit = gross_profit - opex
+    net_income = operating_profit + non_op_income - non_op_expense
+
+    return {
+        "year": year, "month": month, "entity_id": entity_id,
+        "revenue": float(revenue),
+        "cogs": float(cogs),
+        "gross_profit": float(gross_profit),
+        "gross_margin_pct": float(gross_profit / revenue * 100) if revenue > 0 else None,
+        "opex": float(opex),
+        "operating_profit": float(operating_profit),
+        "operating_margin_pct": float(operating_profit / revenue * 100) if revenue > 0 else None,
+        "non_op_income": float(non_op_income),
+        "non_op_expense": float(non_op_expense),
+        "net_income": float(net_income),
+        "net_margin_pct": float(net_income / revenue * 100) if revenue > 0 else None,
+        "purchases_total": float(purchases),
+        "sales_count": sales_count,
+        "purchases_count": purchases_count,
+        "opex_breakdown": opex_breakdown,
+    }
+
+
+def get_pnl_monthly(conn: PgConnection, entity_id: int, months: int = 12) -> dict:
+    """월별 P&L 시리즈 (차트용)."""
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT DISTINCT to_char(date_trunc('month', sales_date), 'YYYY-MM') AS month
+        FROM wholesale_sales WHERE entity_id = %s
+        UNION
+        SELECT DISTINCT to_char(date_trunc('month', date), 'YYYY-MM') AS month
+        FROM transactions WHERE entity_id = %s
+          AND is_duplicate = false AND (is_cancel IS NOT TRUE)
+        ORDER BY month
+        """,
+        [entity_id, entity_id],
+    )
+    available = [r[0] for r in cur.fetchall()]
+    if not available:
+        cur.close()
+        return {"months": [], "available_months": []}
+
+    target = available[-months:]
+    result = []
+    for m in target:
+        y, mn = int(m[:4]), int(m[5:7])
+        # 함수 내 cursor 재사용 — get_pnl_summary 가 새 cursor 만들어 안전
+        s = get_pnl_summary(conn, entity_id, y, mn)
+        result.append({
+            "month": m,
+            "revenue": s["revenue"],
+            "cogs": s["cogs"],
+            "gross_profit": s["gross_profit"],
+            "opex": s["opex"],
+            "operating_profit": s["operating_profit"],
+            "net_income": s["net_income"],
+        })
+    cur.close()
+    return {"months": result, "available_months": available}

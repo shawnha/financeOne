@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/table"
 import { EntityTabs } from "@/components/entity-tabs"
 import { TransferMemoUpload } from "@/components/transfer-memo-upload"
+import { WholesaleUpload } from "@/components/wholesale-upload"
 import { fetchAPI } from "@/lib/api"
 import { toast } from "sonner"
 import {
@@ -304,6 +305,12 @@ function UploadZone({
 
   return (
     <div className="space-y-4">
+      {/* Wholesale 매출/매입 import (도매 P&L base) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <WholesaleUpload kind="sales" />
+        <WholesaleUpload kind="purchases" />
+      </div>
+
       {/* Transfer memo importer (이체결과내역 → transfer_memo) */}
       <TransferMemoUpload />
 
