@@ -2,6 +2,17 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-05-07 — API 문서에 key 발급/관리 절차 보강
+
+### Added
+- `docs/api-wholesale-upload.md` §1 인증 섹션에 4개 subsection 추가:
+  - §1.1 API key 생성 (openssl/PowerShell/Python 명령)
+  - §1.2 Vercel env 설정 (Dashboard + CLI 절차)
+  - §1.3 외부 프로그램 전달 — 권장/금지 채널
+  - §1.4 회전 (Rotation) 권장 주기와 절차
+  - §1.5 보안 체크리스트
+  - §1.6 향후 다중 key/rate limit 계획
+
 ## [Unreleased] - 2026-05-07 — 도매 업로드 alert + 외부 자동 업로드 API 문서
 
 ### Added

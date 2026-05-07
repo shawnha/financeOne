@@ -19,11 +19,108 @@
 | `FINANCEONE_API_KEY` **미설정** | 인증 없이 호출 가능 (개발/내부망 전용) |
 | `FINANCEONE_API_KEY` **설정** | 모든 요청에 `X-API-Key: <key>` 헤더 필수. 미일치 시 `401 Unauthorized` |
 
-**운영 권장**: 반드시 32자 이상 랜덤 문자열로 설정.
+> ⚠️ **현재 상태**: env 미설정 → 누구나 인증 없이 호출 가능. 외부 자동화 프로그램과 연동하기 전 반드시 아래 §1.3 절차로 key 발급·설정.
+
+### 1.1 API Key 생성 (운영자가 직접 실행)
+
+API key 는 **절대 repo / 슬랙 / 일반 이메일에 평문 commit/공유 금지**. 본인 로컬에서 생성:
+
 ```bash
-# .env or Vercel env
-FINANCEONE_API_KEY=cb7f3d2a8e9c4f1b6a5d8e7c2b9f4a1e
+# macOS / Linux — 64자 hex (256-bit)
+openssl rand -hex 32
+# 출력 예 (이건 예시 — 본인이 다시 생성해서 사용):
+# 7c4d8a2b9e1f5a3c6d8b2e9f4a7c1d5e8b3f6a9c2d4e7f1a8b5c3d9e6f2a4b1c
 ```
+
+```powershell
+# Windows PowerShell
+-join ((48..57) + (97..102) | Get-Random -Count 64 | ForEach-Object {[char]$_})
+```
+
+```python
+# Python (cross-platform)
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+
+생성된 값은 **1Password / Bitwarden** 등 비밀번호 관리자에 즉시 저장.
+
+### 1.2 Vercel 서버에 설정
+
+#### 옵션 A — Vercel Dashboard (권장)
+1. https://vercel.com → FinanceOne 프로젝트 → Settings → Environment Variables
+2. `Add New`
+3. **Key**: `FINANCEONE_API_KEY`
+4. **Value**: §1.1 에서 생성한 64자 hex
+5. **Environments**: Production / Preview / Development 모두 체크
+6. Save → 새 deployment 트리거 (env 는 build time 반영) — Deployments 탭에서 `Redeploy` 클릭
+
+#### 옵션 B — Vercel CLI
+```bash
+# Vercel CLI 설치 필요: npm i -g vercel
+vercel link  # 프로젝트 연결 (1회)
+vercel env add FINANCEONE_API_KEY production
+# 프롬프트에 §1.1 에서 생성한 key 붙여넣기
+
+# preview/development 도 같은 key 로 설정 (권장)
+vercel env add FINANCEONE_API_KEY preview
+vercel env add FINANCEONE_API_KEY development
+
+# 변경 반영
+vercel --prod
+```
+
+### 1.3 외부 자동화 프로그램에 전달
+
+서버에 설정한 동일한 key 를 외부 프로그램에 안전하게 전달:
+
+✅ **권장**:
+- 1Password / Bitwarden 의 secure note 공유
+- Signal / 텔레그램 self-destruct 메시지
+- 직접 만남 / 전화 받아쓰기
+
+❌ **금지**:
+- 카카오톡 / 일반 이메일 / 슬랙 평문 메시지
+- git commit / GitHub issue / 노션 page
+- 캡쳐화면 (URL bar / 터미널 출력)
+
+외부 프로그램 측 설정 예시:
+```bash
+# .env (gitignore 처리 필수)
+FINANCEONE_API_KEY=<§1.1에서 생성한 동일한 key>
+```
+
+```python
+# Python — env 사용
+import os
+key = os.environ["FINANCEONE_API_KEY"]
+```
+
+### 1.4 회전 (Rotation)
+
+- **권장 주기**: 6 ~ 12 개월 1회 또는 직원 퇴사·외부 업체 교체 시 즉시
+- **회전 절차**:
+  1. §1.1 절차로 새 key 생성
+  2. Vercel env 의 `FINANCEONE_API_KEY` 값을 새 key 로 교체 + redeploy
+  3. 외부 프로그램 측도 동시에 새 key 로 교체 (다운타임 < 1분)
+  4. (지금은 단일 key 라 zero-downtime 회전 불가 — 향후 다중 key 지원 시 grace period rotation 가능)
+
+### 1.5 보안 체크리스트
+
+- [ ] `openssl rand -hex 32` 등으로 cryptographically secure 한 64자 hex key 생성
+- [ ] 1Password / Bitwarden 등에 즉시 저장
+- [ ] Vercel env 에 설정 (Production + Preview + Development)
+- [ ] 외부 프로그램의 `.env` (gitignore 됨) 또는 secret manager 에 설정
+- [ ] **commit/공유 절대 금지**: git, 카톡, 일반 이메일, 슬랙 평문
+- [ ] 6~12개월마다 회전
+- [ ] 의심스러운 활동 감지 시 즉시 회전 (서버 로그에 새 IP 등)
+
+### 1.6 (참고) 향후 계획
+
+- 다중 API key 지원 (entity별 / 외부 프로그램별 분리)
+- key 별 rate limit / 호출 로그
+- Grace period rotation (구 key 와 신 key 동시 유효 기간)
+
+위 기능 필요해지면 별도 issue 등록.
 
 ---
 
@@ -333,6 +430,7 @@ schtasks /create /tn "FinanceOne 자동 업로드" `
 | 날짜 | 변경 |
 |---|---|
 | 2026-05-07 | 초기 문서 작성. wholesale-sales / wholesale-purchases endpoint 노출. alerts 필드 추가 (cogs_book_vs_real_diff, negative_margin, missing_cogs) |
+| 2026-05-07 | §1 인증 섹션 보강 — API key 생성 (openssl/PowerShell/Python), Vercel 설정 (Dashboard + CLI), 외부 프로그램 전달 권장/금지, 회전 절차, 보안 체크리스트 |
 
 ---
 
