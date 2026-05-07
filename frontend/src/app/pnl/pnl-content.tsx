@@ -13,8 +13,9 @@ import {
   ComposedChart,
   Cell,
 } from "recharts"
-import { AlertCircle, RefreshCw, TrendingUp, FileBarChart, ArrowRight } from "lucide-react"
+import { AlertCircle, RefreshCw, TrendingUp, FileBarChart, ArrowRight, ChevronDown, ChevronUp } from "lucide-react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 
 import { useGlobalMonth } from "@/hooks/use-global-month"
 import { Card } from "@/components/ui/card"
@@ -24,6 +25,18 @@ import { fetchAPI } from "@/lib/api"
 import { formatByEntity, abbreviateAmount } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { MonthPicker } from "@/components/month-picker"
+
+interface NonOpTx {
+  id: number
+  date: string
+  amount: number
+  description: string
+  counterparty: string | null
+  transfer_memo: string | null
+  internal_name: string | null
+  std_code: string
+  std_name: string
+}
 
 interface PnlSummary {
   year: number
@@ -43,6 +56,7 @@ interface PnlSummary {
   sales_count: number
   purchases_count: number
   opex_breakdown: Array<{ code: string; name: string; count: number; amount: number }>
+  non_op_expense_transactions: NonOpTx[]
 }
 
 interface MonthlyRow {
@@ -96,7 +110,9 @@ function KPICard({
 
 export function PnlContent() {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const entityId = searchParams.get("entity")
+  const [nonOpExpanded, setNonOpExpanded] = useState(false)
   const [summary, setSummary] = useState<PnlSummary | null>(null)
   const [monthly, setMonthly] = useState<MonthlyData | null>(null)
   const [state, setState] = useState<LoadState>("loading")
@@ -390,7 +406,14 @@ export function PnlContent() {
           <PnlRow label="매출" value={summary.revenue} entityId={entityId} bold />
           <PnlRow label="(-) 매출원가" value={-summary.cogs} entityId={entityId} indent />
           <PnlRow label="매출총이익" value={summary.gross_profit} entityId={entityId} bold subtle pct={summary.gross_margin_pct} />
-          <PnlRow label="(-) 운영비 (판관비)" value={-summary.opex} entityId={entityId} indent />
+          <PnlRow
+            label="(-) 운영비 (판관비)"
+            value={-summary.opex}
+            entityId={entityId}
+            indent
+            onClick={() => router.push(`/opex?entity=${entityId}`)}
+            actionHint="OpEx 페이지 →"
+          />
           <PnlRow
             label="영업이익"
             value={summary.operating_profit}
@@ -400,7 +423,53 @@ export function PnlContent() {
             pct={summary.operating_margin_pct}
           />
           <PnlRow label="(+) 영업외수익" value={summary.non_op_income} entityId={entityId} indent />
-          <PnlRow label="(-) 영업외비용" value={-summary.non_op_expense} entityId={entityId} indent />
+          <PnlRow
+            label="(-) 영업외비용"
+            value={-summary.non_op_expense}
+            entityId={entityId}
+            indent
+            onClick={() =>
+              summary.non_op_expense_transactions.length > 0 && setNonOpExpanded((v) => !v)
+            }
+            expandable={summary.non_op_expense_transactions.length > 0}
+            expanded={nonOpExpanded}
+          />
+          {/* 영업외비용 drilldown */}
+          {nonOpExpanded && summary.non_op_expense_transactions.length > 0 && (
+            <div className="bg-black/[0.08]">
+              <div className="grid grid-cols-[80px_120px_1fr_140px] px-4 py-2 pl-12 text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold">
+                <span>날짜</span>
+                <span>표준계정</span>
+                <span>거래</span>
+                <span className="text-right">금액</span>
+              </div>
+              {summary.non_op_expense_transactions.map((tx) => (
+                <div
+                  key={tx.id}
+                  className="grid grid-cols-[80px_120px_1fr_140px] px-4 py-1.5 pl-12 border-t border-border/20 text-[12px]"
+                >
+                  <span className="font-mono text-muted-foreground">{tx.date.slice(5)}</span>
+                  <span className="text-muted-foreground truncate" title={tx.std_name}>
+                    {tx.std_code} {tx.std_name}
+                  </span>
+                  <span className="truncate text-muted-foreground" title={tx.description}>
+                    {tx.description}
+                    {tx.counterparty && (
+                      <span className="text-muted-foreground/50 ml-1.5">· {tx.counterparty}</span>
+                    )}
+                    {tx.transfer_memo && (
+                      <span className="ml-1.5 text-[10px] text-blue-300/80 bg-blue-500/10 rounded px-1 py-0.5">
+                        {tx.transfer_memo}
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-right font-mono tabular-nums text-[hsl(var(--loss))]">
+                    -{formatByEntity(tx.amount, entityId)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           <PnlRow
             label="당기순이익"
             value={summary.net_income}
@@ -438,6 +507,10 @@ function PnlRow({
   indent,
   subtle,
   pct,
+  onClick,
+  expandable,
+  expanded,
+  actionHint,
 }: {
   label: string
   value: number
@@ -447,19 +520,41 @@ function PnlRow({
   indent?: boolean
   subtle?: boolean
   pct?: number | null
+  onClick?: () => void
+  expandable?: boolean
+  expanded?: boolean
+  actionHint?: string
 }) {
   const isLoss = value < 0
   const isProfit = bold && value > 0
+  const clickable = !!onClick
+  const Comp: "button" | "div" = clickable ? "button" : "div"
   return (
-    <div
+    <Comp
+      onClick={onClick}
+      type={clickable ? ("button" as const) : undefined}
+      aria-expanded={expandable ? expanded : undefined}
       className={cn(
-        "grid grid-cols-[1fr_auto_70px] gap-4 px-4 py-2.5",
+        "w-full grid grid-cols-[1fr_auto_70px] gap-4 px-4 py-2.5 text-left",
         indent && "pl-10",
         highlight && "bg-accent/5",
         subtle && "bg-secondary/30",
+        clickable && "hover:bg-white/[0.03] transition-colors cursor-pointer",
       )}
     >
-      <span className={cn("text-sm", bold && "font-semibold")}>{label}</span>
+      <span className={cn("text-sm flex items-center gap-1.5", bold && "font-semibold")}>
+        {label}
+        {expandable && (
+          expanded ? (
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          ) : (
+            <ChevronUp className="h-3.5 w-3.5 text-muted-foreground rotate-90" />
+          )
+        )}
+        {actionHint && !expandable && (
+          <span className="text-[10px] text-muted-foreground/70 ml-1">{actionHint}</span>
+        )}
+      </span>
       <span
         className={cn(
           "text-right font-mono tabular-nums",
@@ -474,6 +569,6 @@ function PnlRow({
       <span className="text-right text-xs font-mono text-muted-foreground tabular-nums">
         {pct != null ? `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%` : ""}
       </span>
-    </div>
+    </Comp>
   )
 }

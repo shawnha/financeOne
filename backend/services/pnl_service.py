@@ -104,6 +104,33 @@ def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -
         for r in cur.fetchall()
     ]
 
+    # 영업외비용 거래 list (drilldown 용)
+    cur.execute(
+        """
+        SELECT t.id, t.date, t.amount, t.description, t.counterparty,
+               t.transfer_memo, ia.name AS internal_name,
+               s.code, s.name
+        FROM transactions t
+        JOIN standard_accounts s ON s.id = t.standard_account_id
+        LEFT JOIN internal_accounts ia ON ia.id = t.internal_account_id
+        WHERE t.entity_id = %s AND t.date >= %s AND t.date < %s
+          AND t.type = 'out'
+          AND s.category = '비용' AND s.subcategory = '영업외비용'
+          AND t.is_duplicate = false AND (t.is_cancel IS NOT TRUE)
+        ORDER BY t.date, t.id
+        """,
+        [entity_id, start, end],
+    )
+    non_op_expense_txs = [
+        {
+            "id": r[0], "date": str(r[1]), "amount": float(r[2]),
+            "description": r[3], "counterparty": r[4],
+            "transfer_memo": r[5], "internal_name": r[6],
+            "std_code": r[7], "std_name": r[8],
+        }
+        for r in cur.fetchall()
+    ]
+
     cur.close()
 
     gross_profit = revenue - cogs
@@ -127,6 +154,7 @@ def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -
         "sales_count": sales_count,
         "purchases_count": purchases_count,
         "opex_breakdown": opex_breakdown,
+        "non_op_expense_transactions": non_op_expense_txs,
     }
 
 
