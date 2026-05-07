@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useEffect, useRef } from "react"
+import { useState, useCallback, useEffect } from "react"
 
 const STORAGE_KEY = "financeone-selected-month"
 
@@ -10,30 +10,28 @@ function currentMonth(): string {
 }
 
 /**
- * 글로벌 월 선택 상태. localStorage에 저장되어 페이지 간 공유.
- * SSR: 현재 월로 초기화 → 마운트 후 localStorage 복원.
- * ready=false 동안 소비자가 fetch를 막을 수 있도록 ready 플래그 제공.
+ * 글로벌 월 선택 상태. localStorage 에 저장되어 페이지 간 공유.
+ *
+ * Hydration safety: SSR 과 CSR 의 initial state 가 항상 `currentMonth()` 로
+ * 동일해야 함. 이전 구현은 useState initializer 에서 `typeof window` 분기로
+ * localStorage 를 즉시 읽어 SSR("2026-05") vs CSR(localStorage="2026-04")
+ * mismatch 가 발생함. 마운트 후 useEffect 에서만 localStorage 복원.
+ *
+ * ready=false 동안 소비자가 fetch 를 막을 수 있도록 ready 플래그 제공.
  */
 export function useGlobalMonth() {
-  const [month, setMonthState] = useState<string>(() => {
-    // SSR 안전: window 존재 시 localStorage에서 즉시 읽기
-    if (typeof window !== "undefined") {
-      return localStorage.getItem(STORAGE_KEY) || currentMonth()
-    }
-    return currentMonth()
-  })
-  const [ready, setReady] = useState(() => typeof window !== "undefined")
-  const initialized = useRef(typeof window !== "undefined")
+  const [month, setMonthState] = useState<string>(currentMonth)
+  const [ready, setReady] = useState(false)
 
-  // SSR fallback: 서버에서 렌더된 경우 마운트 시 복원
+  // 마운트 후 localStorage 복원 (CSR 전용)
   useEffect(() => {
-    if (initialized.current) return
-    initialized.current = true
     const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved) {
+    if (saved && saved !== month) {
       setMonthState(saved)
     }
     setReady(true)
+    // month 비교는 mount 시점 기준만 — deps 비움
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const setMonth = useCallback((m: string) => {

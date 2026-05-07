@@ -2,6 +2,16 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-05-07 — transactions hydration 에러 fix
+
+### Fixed
+- `useGlobalMonth` (`hooks/use-global-month.ts`) useState initializer 가 `typeof window` 분기로 localStorage 즉시 읽음 → SSR ("2026-05") vs CSR (localStorage="2026-04") mismatch. `currentMonth()` 로 시작 → useEffect 에서 localStorage 복원으로 변경.
+- `transactions/page.tsx:336` 동일한 안티패턴 (filters initial state 에서 localStorage 즉시 읽기) 제거. 기존 `globalMonth sync effect (line 380)` 가 마운트 후 filters 동기화.
+
+### Verified
+- 콘솔 hydration 에러 0건 확인 (이전 도메인당 수십개 mismatch + Error: Hydration failed)
+- 페이지 정상 로드, 데이터 fetch 정상
+
 ## [Unreleased] - 2026-05-07 — P&L 월별 매출 vs 매출원가 vs 매입 비교 chart
 
 ### Added

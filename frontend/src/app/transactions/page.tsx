@@ -332,11 +332,11 @@ export default function TransactionsPage() {
     const urlFilter = searchParams.get("filter")
     const urlSourceType = searchParams.get("source_type")
     const urlUnconfirmed = searchParams.get("unconfirmed") === "true"
-    // localStorage에서 직접 읽기 (globalMonth는 아직 초기화 전일 수 있음)
-    const savedMonth = typeof window !== "undefined" ? localStorage.getItem("financeone-selected-month") : null
+    // SSR/CSR hydration 안전: localStorage 즉시 읽기 금지 — globalMonth sync effect 가
+    // 마운트 후 saved month 로 filters 를 업데이트한다.
     const now = new Date()
     const fallback = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
-    const monthStr = urlYear && urlMonth ? `${urlYear}-${String(Number(urlMonth)).padStart(2, "0")}` : (savedMonth || fallback)
+    const monthStr = urlYear && urlMonth ? `${urlYear}-${String(Number(urlMonth)).padStart(2, "0")}` : fallback
     const [y, m] = monthStr.split("-").map(Number)
     const lastDay = new Date(y, m, 0).getDate()
     return {
