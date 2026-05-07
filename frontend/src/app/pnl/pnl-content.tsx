@@ -765,6 +765,11 @@ export function PnlContent() {
         </div>
       </Card>
 
+      {/* 집중도 분석 — 제품/매입처별 의존도 (한아원홀세일 only) */}
+      {summary.sales_count > 0 && (
+        <ConcentrationCard entityId={entityId} year={summary.year} month={summary.month} revenue={summary.revenue} purchases={summary.purchases_total} />
+      )}
+
       {/* 매입 (도매) — 별도 분석 (P&L 표에 없음) */}
       <Card className="overflow-hidden rounded-2xl">
         <button
@@ -1027,6 +1032,217 @@ function BreakdownPanel({
             </span>
           </div>
         </>
+      )}
+    </div>
+  )
+}
+
+interface ConcentrationData {
+  rows: BreakdownRow[]
+  others: { count: number; amount: number } | null
+  total: { count: number; amount: number }
+}
+
+function ConcentrationCard({
+  entityId,
+  year,
+  month,
+  revenue,
+  purchases,
+}: {
+  entityId: string | null
+  year: number
+  month: number
+  revenue: number
+  purchases: number
+}) {
+  const [salesData, setSalesData] = useState<ConcentrationData | null>(null)
+  const [payeeData, setPayeeData] = useState<ConcentrationData | null>(null)
+  const [purchData, setPurchData] = useState<ConcentrationData | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!entityId) return
+    setLoading(true)
+    Promise.all([
+      fetchAPI<ConcentrationData>(`/pnl/revenue-breakdown?entity_id=${entityId}&year=${year}&month=${month}&group_by=product&limit=5`, { cache: "no-store" }),
+      fetchAPI<ConcentrationData>(`/pnl/revenue-breakdown?entity_id=${entityId}&year=${year}&month=${month}&group_by=payee&limit=5`, { cache: "no-store" }),
+      fetchAPI<ConcentrationData>(`/pnl/purchases-breakdown?entity_id=${entityId}&year=${year}&month=${month}&group_by=payee&limit=5`, { cache: "no-store" }),
+    ])
+      .then(([s, p, q]) => {
+        setSalesData(s); setPayeeData(p); setPurchData(q)
+      })
+      .catch(() => { /* silent — UI handles null */ })
+      .finally(() => setLoading(false))
+  }, [entityId, year, month])
+
+  if (loading) {
+    return (
+      <Card className="p-6 rounded-2xl">
+        <Skeleton className="h-[200px] w-full" />
+      </Card>
+    )
+  }
+  if (!salesData || !payeeData || !purchData) return null
+
+  const topProductPct = revenue > 0 && salesData.rows[0] ? (salesData.rows[0].amount / revenue) * 100 : 0
+  const topPayeePct = revenue > 0 && payeeData.rows[0] ? (payeeData.rows[0].amount / revenue) * 100 : 0
+  const topSupplierPct = purchases > 0 && purchData.rows[0] ? (purchData.rows[0].amount / purchases) * 100 : 0
+
+  return (
+    <Card className="p-6 rounded-2xl">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div>
+          <h3 className="text-base font-semibold flex items-center gap-2">
+            <TrendingUp className="h-4 w-4 text-amber-400" />
+            집중도 분석 (사업 리스크)
+          </h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            상위 5개 제품/거래처/매입처의 점유율 — 30% 초과 시 단일 의존 리스크 신호
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4 max-md:grid-cols-1">
+        <ConcentrationColumn
+          title="제품별 매출"
+          subtitle="단일 제품 라인 의존도"
+          data={salesData}
+          base={revenue}
+          entityId={entityId}
+          accent="emerald"
+          topPct={topProductPct}
+          riskMessage={
+            topProductPct >= 30
+              ? `최상위 제품 ${topProductPct.toFixed(0)}% — 해당 제품 공급/규제 변경 시 매출 직격`
+              : null
+          }
+        />
+        <ConcentrationColumn
+          title="거래처별 매출"
+          subtitle="단일 고객 의존도"
+          data={payeeData}
+          base={revenue}
+          entityId={entityId}
+          accent="emerald"
+          topPct={topPayeePct}
+          riskMessage={
+            topPayeePct >= 30
+              ? `최상위 거래처 ${topPayeePct.toFixed(0)}% — 거래 중단 시 매출 직격`
+              : null
+          }
+        />
+        <ConcentrationColumn
+          title="매입처별 매입"
+          subtitle="공급망 단절 리스크"
+          data={purchData}
+          base={purchases}
+          entityId={entityId}
+          accent="amber"
+          topPct={topSupplierPct}
+          riskMessage={
+            topSupplierPct >= 50
+              ? `최상위 매입처 ${topSupplierPct.toFixed(0)}% — 절반 이상 단일 공급. 백업 공급선 확보 필요`
+              : topSupplierPct >= 30
+              ? `최상위 매입처 ${topSupplierPct.toFixed(0)}% — 백업 공급선 검토 권장`
+              : null
+          }
+        />
+      </div>
+    </Card>
+  )
+}
+
+function ConcentrationColumn({
+  title,
+  subtitle,
+  data,
+  base,
+  entityId,
+  accent,
+  topPct,
+  riskMessage,
+}: {
+  title: string
+  subtitle: string
+  data: ConcentrationData
+  base: number
+  entityId: string | null
+  accent: "emerald" | "amber"
+  topPct: number
+  riskMessage: string | null
+}) {
+  const accentClass = accent === "emerald" ? "bg-emerald-500" : "bg-amber-500"
+  const textClass = accent === "emerald" ? "text-emerald-300" : "text-amber-300"
+  const top5Total = data.rows.reduce((s, r) => s + r.amount, 0)
+  const top5Pct = base > 0 ? (top5Total / base) * 100 : 0
+  const othersPct = base > 0 && data.others ? (data.others.amount / base) * 100 : 0
+
+  return (
+    <div className="space-y-2">
+      <div>
+        <h4 className="text-sm font-medium">{title}</h4>
+        <p className="text-[11px] text-muted-foreground">{subtitle}</p>
+      </div>
+
+      {/* 가로 바 (top 5 + 기타) */}
+      <div className="flex h-2 rounded-full overflow-hidden bg-secondary/40">
+        {data.rows.map((r, i) => {
+          const pct = base > 0 ? (r.amount / base) * 100 : 0
+          return (
+            <div
+              key={i}
+              className={cn(accentClass, "transition-opacity")}
+              style={{ width: `${pct}%`, opacity: 1 - i * 0.15 }}
+              title={`${r.key}: ${pct.toFixed(1)}%`}
+            />
+          )
+        })}
+        {data.others && (
+          <div
+            className="bg-muted-foreground/20"
+            style={{ width: `${othersPct}%` }}
+            title={`기타 ${data.others.count}: ${othersPct.toFixed(1)}%`}
+          />
+        )}
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        Top 5 합계 <span className={cn("font-mono tabular-nums", textClass)}>{top5Pct.toFixed(1)}%</span>
+        {data.others && <> · 기타 {data.others.count}개 {othersPct.toFixed(1)}%</>}
+      </p>
+
+      {/* top 5 list */}
+      <div className="space-y-1 mt-2">
+        {data.rows.map((r, i) => {
+          const pct = base > 0 ? (r.amount / base) * 100 : 0
+          return (
+            <div key={i} className="flex items-center justify-between text-[11px] gap-2">
+              <span className="truncate flex-1" title={r.key}>
+                <span className="text-muted-foreground/50 mr-1.5 font-mono">{i + 1}</span>
+                {r.key}
+              </span>
+              <span className={cn("font-mono tabular-nums shrink-0", textClass)}>
+                {pct.toFixed(1)}%
+              </span>
+              <span className="font-mono tabular-nums text-muted-foreground/60 shrink-0 text-right w-20 truncate" title={formatByEntity(r.amount, entityId)}>
+                {formatByEntity(r.amount, entityId)}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* 위험 indicator */}
+      {riskMessage && (
+        <div className="mt-2 flex items-start gap-1.5 p-2 rounded-md bg-red-500/[0.06] border border-red-500/20 text-[11px] text-red-300">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          <span>{riskMessage}</span>
+        </div>
+      )}
+      {!riskMessage && topPct < 30 && data.rows.length > 0 && (
+        <p className="mt-2 text-[11px] text-emerald-400/70 flex items-center gap-1">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400" /> 최상위 {topPct.toFixed(1)}% — 분산 양호
+        </p>
       )}
     </div>
   )

@@ -2,6 +2,21 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-05-07 — P&L 집중도 분석 (사업 리스크 시각화)
+
+### Added
+- `frontend/src/app/pnl/pnl-content.tsx` 에 `ConcentrationCard` 컴포넌트 추가
+  - 제품별 매출 / 거래처별 매출 / 매입처별 매입 — top 5 의 가로 bar + list + 위험 indicator
+  - 30% 초과 (제품/거래처 위험), 50% 초과 (매입처 critical) 시 red 알림 박스
+  - 30% 미만 시 emerald "분산 양호" 표시
+  - P&L 표 아래 / 매입 (도매) section 위에 배치
+  - 한아원홀세일 (entity 13) 전용 — 다른 entity 는 sales_count=0 이라 자동 hide
+
+### Verified (entity 13, 2026-04)
+- 제품: 마운자로 5mg 37%, top 5 = 94.8% → 🔴 단일 제품 의존 위험
+- 거래처: 동탄아이엠유 18.8% → 🟢 분산 양호
+- 매입처: 유진약품 51.8%, top 5 = 98% → 🚨 절반 이상 단일 공급. 백업 공급선 필요
+
 ## [Unreleased] - 2026-05-07 — API 문서 URL 수정
 
 ### Fixed
