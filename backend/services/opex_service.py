@@ -107,7 +107,7 @@ def get_opex_detail(
     cur.execute(
         """
         SELECT t.id, t.date, t.amount, t.description, t.counterparty,
-               t.source_type,
+               t.source_type, t.transfer_memo,
                t.internal_account_id,
                ia.name AS internal_account_name,
                pia.name AS parent_account_name,
@@ -231,6 +231,7 @@ def get_opex_detail(
             "description": r["description"],
             "counterparty": r.get("counterparty"),
             "source_type": r.get("source_type"),
+            "transfer_memo": r.get("transfer_memo"),
             "internal_account_name": r.get("internal_account_name"),
             "parent_account_name": r.get("parent_account_name"),
             "std_code": r.get("std_code"),

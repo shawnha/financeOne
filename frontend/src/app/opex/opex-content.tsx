@@ -52,6 +52,7 @@ interface OpexTx {
   description: string
   counterparty?: string | null
   source_type?: string | null
+  transfer_memo?: string | null
   internal_account_name?: string | null
   parent_account_name?: string | null
   std_code?: string | null
@@ -554,11 +555,16 @@ export function OpexContent() {
                                   <span className="font-mono text-muted-foreground">
                                     {tx.date.slice(5)}
                                   </span>
-                                  <span className="truncate text-muted-foreground" title={tx.description}>
+                                  <span className="truncate text-muted-foreground" title={tx.transfer_memo ? `${tx.description}\n메모: ${tx.transfer_memo}` : tx.description}>
                                     {tx.description}
                                     {tx.counterparty && (
                                       <span className="text-muted-foreground/50 ml-1.5">
                                         · {tx.counterparty}
+                                      </span>
+                                    )}
+                                    {tx.transfer_memo && (
+                                      <span className="ml-1.5 text-[10px] text-blue-300/80 bg-blue-500/10 rounded px-1 py-0.5">
+                                        {tx.transfer_memo.length > 16 ? tx.transfer_memo.slice(0, 16) + "…" : tx.transfer_memo}
                                       </span>
                                     )}
                                   </span>
@@ -612,11 +618,16 @@ export function OpexContent() {
                                     <span className="font-mono text-muted-foreground">
                                       {tx.date.slice(5)}
                                     </span>
-                                    <span className="truncate text-muted-foreground" title={tx.description}>
+                                    <span className="truncate text-muted-foreground" title={tx.transfer_memo ? `${tx.description}\n메모: ${tx.transfer_memo}` : tx.description}>
                                       {tx.description}
                                       {tx.counterparty && (
                                         <span className="text-muted-foreground/50 ml-1.5">
                                           · {tx.counterparty}
+                                        </span>
+                                      )}
+                                      {tx.transfer_memo && (
+                                        <span className="ml-1.5 text-[10px] text-blue-300/80 bg-blue-500/10 rounded px-1 py-0.5">
+                                          {tx.transfer_memo.length > 16 ? tx.transfer_memo.slice(0, 16) + "…" : tx.transfer_memo}
                                         </span>
                                       )}
                                     </span>
