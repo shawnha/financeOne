@@ -126,6 +126,7 @@ export function OpexContent() {
     [setGlobalMonth],
   )
   const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set())
+  const [expandedInternals, setExpandedInternals] = useState<Set<string>>(new Set())
 
   useEffect(() => setSelectedMonthLocal(globalMonth), [globalMonth])
 
@@ -183,17 +184,39 @@ export function OpexContent() {
       return next
     })
   }
+  const toggleInternal = (key: string) => {
+    setExpandedInternals((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
-  // Group tx by parent_account_name for breakdown drilldown
+  // Group tx: parent_account_name → internal_account_name → tx[]
+  type InternalGroup = { internalName: string; rows: OpexTx[]; total: number }
   const txByParent = useMemo(() => {
-    if (!detail) return new Map<string, OpexTx[]>()
-    const map = new Map<string, OpexTx[]>()
+    if (!detail) return new Map<string, InternalGroup[]>()
+    const parentMap = new Map<string, Map<string, OpexTx[]>>()
     for (const tx of detail.transactions) {
-      const key = tx.parent_account_name || tx.internal_account_name || "미분류"
-      if (!map.has(key)) map.set(key, [])
-      map.get(key)!.push(tx)
+      const parentKey = tx.parent_account_name || tx.internal_account_name || "미분류"
+      const internalKey = tx.internal_account_name || tx.parent_account_name || "미분류"
+      if (!parentMap.has(parentKey)) parentMap.set(parentKey, new Map())
+      const inner = parentMap.get(parentKey)!
+      if (!inner.has(internalKey)) inner.set(internalKey, [])
+      inner.get(internalKey)!.push(tx)
     }
-    return map
+    const result = new Map<string, InternalGroup[]>()
+    parentMap.forEach((inner, parentKey) => {
+      const groups: InternalGroup[] = []
+      inner.forEach((rows, internalName) => {
+        const total = rows.reduce((s, r) => s + r.amount, 0)
+        groups.push({ internalName, rows, total })
+      })
+      groups.sort((a, b) => b.total - a.total)
+      result.set(parentKey, groups)
+    })
+    return result
   }, [detail])
 
   // ── Entity 미선택 가드 ──
@@ -504,39 +527,109 @@ export function OpexContent() {
                     </span>
                   </button>
 
-                  {/* Drilldown — transactions for this parent */}
+                  {/* Drilldown — internal sub-groups → transactions */}
                   {expanded && (
                     <div className="bg-black/[0.08] border-t border-border/30">
-                      <div className="grid grid-cols-[80px_70px_1fr_140px] px-4 py-2 pl-10 text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold">
-                        <span>날짜</span>
-                        <span>계정</span>
-                        <span>거래</span>
-                        <span className="text-right">금액</span>
-                      </div>
-                      {txs.map((tx) => (
-                        <div
-                          key={tx.id}
-                          className="grid grid-cols-[80px_70px_1fr_140px] px-4 py-1.5 pl-10 border-t border-border/20 text-[12px]"
-                        >
-                          <span className="font-mono text-muted-foreground">
-                            {tx.date.slice(5)}
-                          </span>
-                          <span className="text-muted-foreground truncate" title={tx.std_name ?? ""}>
-                            {tx.internal_account_name || tx.std_name || "-"}
-                          </span>
-                          <span className="truncate text-muted-foreground" title={tx.description}>
-                            {tx.description}
-                            {tx.counterparty && (
-                              <span className="text-muted-foreground/50 ml-1.5">
-                                · {tx.counterparty}
+                      {(txByParent.get(name) || []).map((g) => {
+                        const internalKey = `${name}::${g.internalName}`
+                        const internalOpen = expandedInternals.has(internalKey)
+                        const internalGroups = txByParent.get(name) || []
+                        const directRender =
+                          internalGroups.length === 1 && g.internalName === name
+
+                        // Single internal matching parent — skip header, show tx directly
+                        if (directRender) {
+                          return (
+                            <div key={internalKey}>
+                              <div className="grid grid-cols-[80px_1fr_140px] px-4 py-2 pl-10 text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold">
+                                <span>날짜</span>
+                                <span>거래</span>
+                                <span className="text-right">금액</span>
+                              </div>
+                              {g.rows.map((tx) => (
+                                <div
+                                  key={tx.id}
+                                  className="grid grid-cols-[80px_1fr_140px] px-4 py-1.5 pl-10 border-t border-border/20 text-[12px]"
+                                >
+                                  <span className="font-mono text-muted-foreground">
+                                    {tx.date.slice(5)}
+                                  </span>
+                                  <span className="truncate text-muted-foreground" title={tx.description}>
+                                    {tx.description}
+                                    {tx.counterparty && (
+                                      <span className="text-muted-foreground/50 ml-1.5">
+                                        · {tx.counterparty}
+                                      </span>
+                                    )}
+                                  </span>
+                                  <span className="text-right font-mono tabular-nums text-[hsl(var(--loss))]">
+                                    -{formatByEntity(tx.amount, entityId)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )
+                        }
+
+                        // Internal sub-group with toggle
+                        return (
+                          <div key={internalKey}>
+                            <button
+                              onClick={() => toggleInternal(internalKey)}
+                              className="w-full grid grid-cols-[1fr_140px_60px] items-center gap-3 px-4 py-2 pl-10 border-t border-border/30 text-left hover:bg-white/[0.02] transition-colors text-[13px]"
+                              aria-expanded={internalOpen}
+                            >
+                              <span className="flex items-center gap-2 min-w-0">
+                                {internalOpen ? (
+                                  <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                                ) : (
+                                  <ChevronUp className="h-3 w-3 text-muted-foreground rotate-90 flex-shrink-0" />
+                                )}
+                                <span className="text-muted-foreground truncate">
+                                  {g.internalName}
+                                </span>
                               </span>
+                              <span className="text-right font-mono tabular-nums text-xs text-foreground/80">
+                                -{formatByEntity(g.total, entityId)}
+                              </span>
+                              <span className="text-right font-mono tabular-nums text-xs text-muted-foreground">
+                                {g.rows.length}건
+                              </span>
+                            </button>
+
+                            {internalOpen && (
+                              <div className="bg-black/[0.12]">
+                                <div className="grid grid-cols-[80px_1fr_140px] px-4 py-1.5 pl-16 text-[10px] uppercase tracking-wider text-muted-foreground/60 font-semibold">
+                                  <span>날짜</span>
+                                  <span>거래</span>
+                                  <span className="text-right">금액</span>
+                                </div>
+                                {g.rows.map((tx) => (
+                                  <div
+                                    key={tx.id}
+                                    className="grid grid-cols-[80px_1fr_140px] px-4 py-1.5 pl-16 border-t border-border/15 text-[12px]"
+                                  >
+                                    <span className="font-mono text-muted-foreground">
+                                      {tx.date.slice(5)}
+                                    </span>
+                                    <span className="truncate text-muted-foreground" title={tx.description}>
+                                      {tx.description}
+                                      {tx.counterparty && (
+                                        <span className="text-muted-foreground/50 ml-1.5">
+                                          · {tx.counterparty}
+                                        </span>
+                                      )}
+                                    </span>
+                                    <span className="text-right font-mono tabular-nums text-[hsl(var(--loss))]">
+                                      -{formatByEntity(tx.amount, entityId)}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
                             )}
-                          </span>
-                          <span className="text-right font-mono tabular-nums text-[hsl(var(--loss))]">
-                            -{formatByEntity(tx.amount, entityId)}
-                          </span>
-                        </div>
-                      ))}
+                          </div>
+                        )
+                      })}
                     </div>
                   )}
                 </div>
