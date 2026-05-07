@@ -2,6 +2,23 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-05-07 — 도매 업로드 alert + 외부 자동 업로드 API 문서
+
+### Added
+- `wholesale_service.compute_sales_alerts` / `compute_purchases_alerts` — 회계 이상 패턴 감지
+  - 매출 3종: 매입가(장부) ≠ 매입가(실), 마진 음수 (손실 판매), 매입가 누락
+  - 매입 2종: 매입단가 장부 vs 실 차이, 매입단가 누락
+- `wholesale_service.ImportResult` 에 `alerts` 필드 추가
+- `/api/upload/wholesale-sales` / `/api/upload/wholesale-purchases` 응답에 `alerts` 노출
+- `frontend/src/components/wholesale-upload.tsx` 에 `AlertsPanel` 컴포넌트 — details/summary 패턴, top 10 row 노출
+- `backend/utils/auth.py` — 옵션 API key 인증 (env `FINANCEONE_API_KEY` 설정 시만 강제)
+- `docs/api-wholesale-upload.md` — 외부 자동 업로드 API 문서 (curl/Python/Node 예시, cron 패턴, 에러 처리)
+
+### Verified (한아원홀세일 entity 13, 4월)
+- 손실 판매 20건 감지 (매입가 오기재 의심 / 재고 처분)
+- 매입가 누락 20건 (매출원가 미반영)
+- 매입가 장부≠실 1건 (₩0 무시 가능)
+
 ## [Unreleased] - 2026-05-07 — transactions hydration 에러 fix
 
 ### Fixed

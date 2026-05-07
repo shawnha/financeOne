@@ -7,6 +7,7 @@ from typing import Optional
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
+from backend.utils.auth import verify_api_key
 from backend.utils.db import fetch_all
 from backend.services.parsers import detect_parser
 from backend.services.parsers.woori_bank import WooriBankParser
@@ -675,6 +676,7 @@ async def upload_wholesale_sales(
     file: UploadFile = File(...),
     entity_id: int = Query(..., description="법인 ID (필수)"),
     conn: PgConnection = Depends(get_db),
+    _auth: None = Depends(verify_api_key),
 ):
     """매출관리 xlsx import — 도매 매출 마스터 (제품 단위 row).
 
@@ -707,6 +709,7 @@ async def upload_wholesale_sales(
         "total_rows": result.total_rows, "inserted": result.inserted,
         "duplicates": result.duplicates, "errors": result.errors,
         "sample": result.sample,
+        "alerts": result.alerts or {},
     }
 
 
@@ -715,6 +718,7 @@ async def upload_wholesale_purchases(
     file: UploadFile = File(...),
     entity_id: int = Query(..., description="법인 ID (필수)"),
     conn: PgConnection = Depends(get_db),
+    _auth: None = Depends(verify_api_key),
 ):
     """매입관리 xlsx import — 도매 매입 마스터 (제품 단위 row)."""
     from backend.services.wholesale_service import (
@@ -744,4 +748,5 @@ async def upload_wholesale_purchases(
         "total_rows": result.total_rows, "inserted": result.inserted,
         "duplicates": result.duplicates, "errors": result.errors,
         "sample": result.sample,
+        "alerts": result.alerts or {},
     }

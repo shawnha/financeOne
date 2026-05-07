@@ -23,6 +23,138 @@ class ImportResult:
     skipped: int
     sample: list[dict]
     errors: list[str]
+    alerts: dict | None = None
+
+
+def compute_sales_alerts(rows: list[dict]) -> dict:
+    """매출관리 row 들에서 회계 이상 패턴 3종 감지.
+
+    1. cogs_book_vs_real_diff: 매입가(장부) ≠ 매입가(실) — 가격 변동 추적
+    2. negative_margin: 매출액 < 매출원가 — 손실 판매 (loss leader / 재고 처분)
+    3. missing_cogs: 매입가(장부) 누락 — 매출원가 미반영
+    """
+    diff_count = 0
+    diff_total = 0.0
+    diff_examples: list[dict] = []
+
+    neg_rows: list[dict] = []
+    missing_rows: list[dict] = []
+
+    for r in rows:
+        qty = r.get("quantity") or 0
+        total = r.get("total_amount") or 0
+        cogs_book = r.get("cogs_unit_price")
+        cogs_real = r.get("cogs_real_unit_price")
+
+        if cogs_book is None or cogs_book == 0:
+            if len(missing_rows) < 20:
+                missing_rows.append({
+                    "date": str(r.get("sales_date")),
+                    "payee": r.get("payee_name"),
+                    "product": (r.get("product_name") or "")[:40],
+                    "qty": qty,
+                    "total": total,
+                })
+            continue
+
+        if cogs_real is not None and cogs_real != 0 and abs(cogs_book - cogs_real) > 0.001:
+            diff_count += 1
+            row_diff = abs(cogs_book - cogs_real) * qty
+            diff_total += row_diff
+            if len(diff_examples) < 10:
+                diff_examples.append({
+                    "date": str(r.get("sales_date")),
+                    "payee": r.get("payee_name"),
+                    "product": (r.get("product_name") or "")[:40],
+                    "qty": qty,
+                    "cogs_book": cogs_book,
+                    "cogs_real": cogs_real,
+                    "diff": row_diff,
+                })
+
+        cogs_total = qty * cogs_book
+        margin = total - cogs_total
+        if margin < 0 and total > 0:
+            if len(neg_rows) < 20:
+                neg_rows.append({
+                    "date": str(r.get("sales_date")),
+                    "payee": r.get("payee_name"),
+                    "product": (r.get("product_name") or "")[:40],
+                    "qty": qty,
+                    "total": total,
+                    "cogs_total": cogs_total,
+                    "margin": margin,
+                })
+
+    return {
+        "cogs_book_vs_real_diff": {
+            "count": diff_count,
+            "total_diff": round(diff_total, 2),
+            "examples": diff_examples,
+        },
+        "negative_margin": {
+            "count": len(neg_rows),
+            "rows": neg_rows,
+        },
+        "missing_cogs": {
+            "count": len(missing_rows),
+            "rows": missing_rows,
+        },
+    }
+
+
+def compute_purchases_alerts(rows: list[dict]) -> dict:
+    """매입관리 row 들에서 회계 이상 패턴 감지.
+
+    1. unit_price_book_vs_real_diff: 단가 장부 vs 실 차이
+    2. missing_unit_price: 단가 누락
+    """
+    diff_count = 0
+    diff_total = 0.0
+    diff_examples: list[dict] = []
+    missing_rows: list[dict] = []
+
+    for r in rows:
+        qty = r.get("quantity") or 0
+        unit = r.get("unit_price")
+        real_unit = r.get("real_unit_price")
+
+        if unit is None or unit == 0:
+            if len(missing_rows) < 20:
+                missing_rows.append({
+                    "date": str(r.get("purchase_date")),
+                    "payee": r.get("payee_name"),
+                    "product": (r.get("product_name") or "")[:40],
+                    "qty": qty,
+                })
+            continue
+
+        if real_unit is not None and real_unit != 0 and abs(unit - real_unit) > 0.001:
+            diff_count += 1
+            row_diff = abs(unit - real_unit) * qty
+            diff_total += row_diff
+            if len(diff_examples) < 10:
+                diff_examples.append({
+                    "date": str(r.get("purchase_date")),
+                    "payee": r.get("payee_name"),
+                    "product": (r.get("product_name") or "")[:40],
+                    "qty": qty,
+                    "unit_book": unit,
+                    "unit_real": real_unit,
+                    "diff": row_diff,
+                })
+
+    return {
+        "unit_price_book_vs_real_diff": {
+            "count": diff_count,
+            "total_diff": round(diff_total, 2),
+            "examples": diff_examples,
+        },
+        "missing_unit_price": {
+            "count": len(missing_rows),
+            "rows": missing_rows,
+        },
+    }
 
 
 def _to_date(val) -> Optional[date]:
@@ -239,6 +371,7 @@ def import_wholesale_sales(
         skipped=0,
         sample=sample,
         errors=errors[:10],
+        alerts=compute_sales_alerts(rows),
     )
 
 
@@ -316,4 +449,5 @@ def import_wholesale_purchases(
         skipped=0,
         sample=sample,
         errors=errors[:10],
+        alerts=compute_purchases_alerts(rows),
     )

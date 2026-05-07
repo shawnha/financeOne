@@ -10,11 +10,42 @@ import { cn } from "@/lib/utils"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000/api"
 
+interface AlertExample {
+  date: string
+  payee: string
+  product: string
+  qty: number
+  total?: number
+  cogs_total?: number
+  margin?: number
+  cogs_book?: number
+  cogs_real?: number
+  unit_book?: number
+  unit_real?: number
+  diff?: number
+}
+
+interface SalesAlerts {
+  cogs_book_vs_real_diff?: { count: number; total_diff: number; examples: AlertExample[] }
+  negative_margin?: { count: number; rows: AlertExample[] }
+  missing_cogs?: { count: number; rows: AlertExample[] }
+}
+
+interface PurchasesAlerts {
+  unit_price_book_vs_real_diff?: { count: number; total_diff: number; examples: AlertExample[] }
+  missing_unit_price?: { count: number; rows: AlertExample[] }
+}
+
 interface ImportResult {
   total_rows: number
   inserted: number
   duplicates: number
   errors?: string[]
+  alerts?: SalesAlerts & PurchasesAlerts
+}
+
+function fmtKRW(n: number): string {
+  return `₩${Math.round(n).toLocaleString("ko-KR")}`
 }
 
 interface Props {
@@ -135,6 +166,8 @@ export function WholesaleUpload({ kind }: Props) {
             </div>
           )}
 
+          {result?.alerts && <AlertsPanel alerts={result.alerts} kind={kind} />}
+
           {error && (
             <div className="mt-3 flex items-center gap-1.5 text-xs text-red-400">
               <AlertCircle className="h-3 w-3" /> {error}
@@ -143,5 +176,131 @@ export function WholesaleUpload({ kind }: Props) {
         </div>
       </div>
     </Card>
+  )
+}
+
+function AlertsPanel({
+  alerts,
+  kind,
+}: {
+  alerts: SalesAlerts & PurchasesAlerts
+  kind: "sales" | "purchases"
+}) {
+  const items: { id: string; level: "warn" | "info"; title: string; subtitle?: string; rows?: AlertExample[] }[] = []
+
+  if (kind === "sales") {
+    const diff = alerts.cogs_book_vs_real_diff
+    if (diff && diff.count > 0) {
+      items.push({
+        id: "cogs-diff",
+        level: "info",
+        title: `매입가 장부≠실 ${diff.count}건`,
+        subtitle: `차액 합계 ${fmtKRW(diff.total_diff)}`,
+        rows: diff.examples,
+      })
+    }
+    const neg = alerts.negative_margin
+    if (neg && neg.count > 0) {
+      items.push({
+        id: "neg-margin",
+        level: "warn",
+        title: `손실 판매 ${neg.count}건`,
+        subtitle: "매출액 < 매출원가 (loss leader / 재고 처분 / 매입가 오기재 의심)",
+        rows: neg.rows,
+      })
+    }
+    const missing = alerts.missing_cogs
+    if (missing && missing.count > 0) {
+      items.push({
+        id: "missing-cogs",
+        level: "warn",
+        title: `매입가 누락 ${missing.count}건`,
+        subtitle: "매출원가 미반영 — 매출관리 xlsx 의 col 41 (매입가-장부) 비어있음",
+        rows: missing.rows,
+      })
+    }
+  } else {
+    const diff = alerts.unit_price_book_vs_real_diff
+    if (diff && diff.count > 0) {
+      items.push({
+        id: "unit-diff",
+        level: "info",
+        title: `매입단가 장부≠실 ${diff.count}건`,
+        subtitle: `차액 합계 ${fmtKRW(diff.total_diff)}`,
+        rows: diff.examples,
+      })
+    }
+    const missing = alerts.missing_unit_price
+    if (missing && missing.count > 0) {
+      items.push({
+        id: "missing-unit",
+        level: "warn",
+        title: `매입단가 누락 ${missing.count}건`,
+        rows: missing.rows,
+      })
+    }
+  }
+
+  if (items.length === 0) {
+    return (
+      <div className="mt-3 flex items-center gap-1.5 text-[11px] text-emerald-400/80">
+        <Check className="h-3 w-3" /> 회계 이상 패턴 없음 (매입가/마진/누락 모두 정상)
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-3 space-y-2">
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground/60 font-semibold">
+        회계 이상 패턴
+      </div>
+      {items.map((item) => (
+        <details
+          key={item.id}
+          className={cn(
+            "rounded border text-xs",
+            item.level === "warn"
+              ? "border-amber-500/20 bg-amber-500/[0.04]"
+              : "border-blue-500/20 bg-blue-500/[0.04]",
+          )}
+        >
+          <summary
+            className={cn(
+              "cursor-pointer px-3 py-2 flex items-center gap-2 select-none",
+              item.level === "warn" ? "text-amber-300" : "text-blue-300",
+            )}
+          >
+            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+            <span className="font-medium">{item.title}</span>
+            {item.subtitle && (
+              <span className="text-muted-foreground text-[11px] truncate">· {item.subtitle}</span>
+            )}
+          </summary>
+          {item.rows && item.rows.length > 0 && (
+            <div className="px-3 pb-2 space-y-0.5 text-[11px] font-mono">
+              {item.rows.slice(0, 10).map((r, i) => (
+                <div key={i} className="grid grid-cols-[80px_120px_1fr_auto] gap-2 truncate">
+                  <span className="text-muted-foreground">{r.date}</span>
+                  <span className="truncate" title={r.payee}>{r.payee}</span>
+                  <span className="truncate text-muted-foreground/80" title={r.product}>{r.product}</span>
+                  <span className="text-right tabular-nums">
+                    {item.id === "neg-margin"
+                      ? `qty ${r.qty} · 매출 ${fmtKRW(r.total ?? 0)} · 원가 ${fmtKRW(r.cogs_total ?? 0)} · ${fmtKRW(r.margin ?? 0)}`
+                      : item.id === "cogs-diff"
+                      ? `qty ${r.qty} · 장부 ${fmtKRW(r.cogs_book ?? 0)} / 실 ${fmtKRW(r.cogs_real ?? 0)} · 차 ${fmtKRW(r.diff ?? 0)}`
+                      : item.id === "unit-diff"
+                      ? `qty ${r.qty} · 장부 ${fmtKRW(r.unit_book ?? 0)} / 실 ${fmtKRW(r.unit_real ?? 0)} · 차 ${fmtKRW(r.diff ?? 0)}`
+                      : `qty ${r.qty}${r.total ? ` · 매출 ${fmtKRW(r.total)}` : ""}`}
+                  </span>
+                </div>
+              ))}
+              {item.rows.length > 10 && (
+                <div className="text-muted-foreground/60 pt-1">…외 {item.rows.length - 10}건</div>
+              )}
+            </div>
+          )}
+        </details>
+      ))}
+    </div>
   )
 }
