@@ -71,6 +71,7 @@ interface PnlSummary {
   // VAT 제외 (K-GAAP)
   revenue_excl_vat: number
   cogs_excl_vat: number
+  opex_excl_vat: number
   gross_profit_excl_vat: number
   gross_margin_pct_excl_vat: number | null
   operating_profit_excl_vat: number
@@ -98,6 +99,7 @@ interface MonthlyRow {
   purchases_total: number
   revenue_excl_vat: number
   cogs_excl_vat: number
+  opex_excl_vat: number
   gross_profit_excl_vat: number
   gross_margin_pct_excl_vat: number | null
   operating_profit_excl_vat: number
@@ -361,11 +363,12 @@ export function PnlContent() {
 
   const months = monthly.available_months
 
-  // vatMode 에 따른 P&L 값 선택 (수익/매출원가/매입은 VAT 적용, 운영비/영업외는 거래내역 base 라 변경 없음)
+  // vatMode 에 따른 P&L 값 선택 (운영비도 VAT 면세/과세 분리 base 로 처리)
   const isExcl = vatMode === "excl"
   const v = {
     revenue: isExcl ? summary.revenue_excl_vat : summary.revenue,
     cogs: isExcl ? summary.cogs_excl_vat : summary.cogs,
+    opex: isExcl ? summary.opex_excl_vat : summary.opex,
     gross_profit: isExcl ? summary.gross_profit_excl_vat : summary.gross_profit,
     gross_margin_pct: isExcl ? summary.gross_margin_pct_excl_vat : summary.gross_margin_pct,
     operating_profit: isExcl ? summary.operating_profit_excl_vat : summary.operating_profit,
@@ -379,6 +382,7 @@ export function PnlContent() {
     ...m,
     revenue: isExcl ? m.revenue_excl_vat : m.revenue,
     cogs: isExcl ? m.cogs_excl_vat : m.cogs,
+    opex: isExcl ? m.opex_excl_vat : m.opex,
     gross_profit: isExcl ? m.gross_profit_excl_vat : m.gross_profit,
     gross_margin_pct: isExcl ? m.gross_margin_pct_excl_vat : m.gross_margin_pct,
     operating_profit: isExcl ? m.operating_profit_excl_vat : m.operating_profit,
@@ -494,8 +498,8 @@ export function PnlContent() {
         />
         <KPICard
           label="OpEx (판관비)"
-          value={`-${formatByEntity(summary.opex, entityId)}`}
-          subtext="OpEx 페이지 연결 →"
+          value={`-${formatByEntity(v.opex, entityId)}`}
+          subtext={isExcl ? "VAT 제외 (면세 분리) · OpEx 페이지 →" : "OpEx 페이지 연결 →"}
           colorClass="text-[hsl(var(--loss))]"
         />
         <KPICard
@@ -774,7 +778,7 @@ export function PnlContent() {
           <PnlRow label="매출총이익" value={v.gross_profit} entityId={entityId} bold subtle pct={v.gross_margin_pct} />
           <PnlRow
             label="(-) OpEx (판관비)"
-            value={-summary.opex}
+            value={-v.opex}
             entityId={entityId}
             indent
             onClick={() => router.push(`/opex?entity=${entityId}`)}
