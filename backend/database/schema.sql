@@ -118,6 +118,7 @@ CREATE TABLE IF NOT EXISTS transactions (
   expense_title          TEXT,
 
   note                   TEXT,
+  transfer_memo          TEXT,             -- 이체 시 입력 메모 (이체결과내역 import)
   created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

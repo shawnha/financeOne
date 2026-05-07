@@ -62,8 +62,11 @@ def list_transactions(
         where.append("t.date <= %s")
         params.append(date_to)
     if source_type is not None:
-        where.append("t.source_type = %s")
+        # Excel 업로드 ('woori_bank') 와 Codef sync ('codef_woori_bank') 는 같은 기관.
+        # 기본 source_type 으로 필터링 시 codef_<x> 도 같이 매칭.
+        where.append("(t.source_type = %s OR t.source_type = %s)")
         params.append(source_type)
+        params.append(f"codef_{source_type}")
     if is_confirmed is not None:
         where.append("t.is_confirmed = %s")
         params.append(is_confirmed)
@@ -119,13 +122,13 @@ def list_transactions(
             amount_val = float(clean)
             lo = round(amount_val * 0.97, 2)
             hi = round(amount_val * 1.03, 2)
-            where.append("(t.amount BETWEEN %s AND %s OR t.description ILIKE %s OR t.counterparty ILIKE %s OR t.note ILIKE %s OR ia.name ILIKE %s OR CAST(t.date AS TEXT) ILIKE %s)")
+            where.append("(t.amount BETWEEN %s AND %s OR t.description ILIKE %s OR t.counterparty ILIKE %s OR t.note ILIKE %s OR t.transfer_memo ILIKE %s OR ia.name ILIKE %s OR CAST(t.date AS TEXT) ILIKE %s)")
             q = f"%{search}%"
-            params.extend([lo, hi, q, q, q, q, q])
+            params.extend([lo, hi, q, q, q, q, q, q])
         except ValueError:
-            where.append("(t.description ILIKE %s OR t.counterparty ILIKE %s OR t.note ILIKE %s OR ia.name ILIKE %s OR CAST(t.date AS TEXT) ILIKE %s)")
+            where.append("(t.description ILIKE %s OR t.counterparty ILIKE %s OR t.note ILIKE %s OR t.transfer_memo ILIKE %s OR ia.name ILIKE %s OR CAST(t.date AS TEXT) ILIKE %s)")
             q = f"%{search}%"
-            params.extend([q, q, q, q, q])
+            params.extend([q, q, q, q, q, q])
 
     where_clause = " AND ".join(where)
     offset = (page - 1) * per_page
@@ -141,10 +144,11 @@ def list_transactions(
         SELECT t.id, t.entity_id, t.date, t.amount, t.currency, t.type,
                t.description, t.counterparty, t.source_type,
                t.mapping_confidence, t.mapping_source, t.is_confirmed,
-               t.is_duplicate, t.note, t.member_id,
+               t.is_duplicate, t.note, t.transfer_memo, t.member_id,
                t.internal_account_id, t.standard_account_id, t.is_cancel, t.card_number,
                t.expense_id, t.expense_submitted_by, t.expense_title,
-               m.name AS member_name,
+               t.parsed_member_name,
+               COALESCE(m.name, t.parsed_member_name) AS member_name,
                ia.code AS internal_account_code, ia.name AS internal_account_name,
                pia.name AS internal_account_parent_name,
                sa.code AS standard_account_code, sa.name AS standard_account_name,

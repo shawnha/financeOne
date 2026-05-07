@@ -54,6 +54,7 @@ interface Transaction {
   is_cancel: boolean
   card_number: string | null
   note: string | null
+  transfer_memo: string | null
   member_id: number | null
   member_name: string | null
   internal_account_id: number | null
@@ -1356,9 +1357,18 @@ export default function TransactionsPage() {
                       </TableCell>
 
                       {/* Description */}
-                      <TableCell className="p-2 text-sm overflow-hidden" title={tx.description || ""}>
+                      <TableCell className="p-2 text-sm overflow-hidden" title={tx.transfer_memo ? `${tx.description || ""}\n메모: ${tx.transfer_memo}` : (tx.description || "")}>
                         <span className={cn("block truncate", tx.is_cancel && "line-through")}>
                           {tx.description || "\u2014"}
+                          {tx.transfer_memo && (
+                            <Badge
+                              variant="outline"
+                              className="ml-1.5 text-[10px] px-1 py-0 bg-blue-500/12 text-blue-300 border-blue-500/30 font-normal"
+                              title={tx.transfer_memo}
+                            >
+                              {tx.transfer_memo.length > 12 ? tx.transfer_memo.slice(0, 12) + "\u2026" : tx.transfer_memo}
+                            </Badge>
+                          )}
                           {tx.is_cancel && <Badge variant="outline" className="ml-1.5 text-[10px] px-1 py-0 bg-amber-500/15 text-amber-400 border-amber-500/30">취소</Badge>}
                         </span>
                       </TableCell>
@@ -1612,6 +1622,12 @@ export default function TransactionsPage() {
                   <span className="text-muted-foreground">내역</span>
                   <p className="font-medium">{detailTx.description || "\u2014"}</p>
                 </div>
+                {detailTx.transfer_memo && (
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">이체메모</span>
+                    <p className="font-medium text-blue-300">{detailTx.transfer_memo}</p>
+                  </div>
+                )}
                 <div>
                   <span className="text-muted-foreground">거래처</span>
                   <p className="font-medium">{detailTx.counterparty || "\u2014"}</p>
