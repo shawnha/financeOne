@@ -19,6 +19,7 @@ class TransactionUpdate(BaseModel):
     standard_account_id: Optional[int] = None
     is_confirmed: Optional[bool] = None
     note: Optional[str] = None
+    pnl_date: Optional[str] = None  # 발생주의 P&L 인식일 (YYYY-MM-DD), NULL=현금주의 (date 사용)
 
 
 class BulkConfirm(BaseModel):

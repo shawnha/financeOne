@@ -73,7 +73,7 @@ def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -
           ), 0) AS opex_excl_vat
         FROM transactions t
         JOIN standard_accounts s ON s.id = t.standard_account_id
-        WHERE t.entity_id = %s AND t.date >= %s AND t.date < %s
+        WHERE t.entity_id = %s AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
           AND t.type = 'out'
           AND s.category = '비용' AND s.subcategory = ANY(%s)
           AND t.is_duplicate = false AND (t.is_cancel IS NOT TRUE)
@@ -92,7 +92,7 @@ def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -
           COALESCE(SUM(CASE WHEN s.category = '수익' AND s.subcategory = '영업외수익' THEN t.amount ELSE 0 END), 0) AS non_op_income
         FROM transactions t
         JOIN standard_accounts s ON s.id = t.standard_account_id
-        WHERE t.entity_id = %s AND t.date >= %s AND t.date < %s
+        WHERE t.entity_id = %s AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
           AND t.is_duplicate = false AND (t.is_cancel IS NOT TRUE)
         """,
         [entity_id, start, end],
@@ -107,7 +107,7 @@ def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -
         SELECT s.code, s.name, COUNT(*), SUM(t.amount)
         FROM transactions t
         JOIN standard_accounts s ON s.id = t.standard_account_id
-        WHERE t.entity_id = %s AND t.date >= %s AND t.date < %s
+        WHERE t.entity_id = %s AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
           AND t.type = 'out'
           AND s.category = '비용' AND s.subcategory = ANY(%s)
           AND t.is_duplicate = false AND (t.is_cancel IS NOT TRUE)
@@ -130,7 +130,7 @@ def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -
         FROM transactions t
         JOIN standard_accounts s ON s.id = t.standard_account_id
         LEFT JOIN internal_accounts ia ON ia.id = t.internal_account_id
-        WHERE t.entity_id = %s AND t.date >= %s AND t.date < %s
+        WHERE t.entity_id = %s AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
           AND t.type = 'out'
           AND s.category = '비용' AND s.subcategory = '영업외비용'
           AND t.is_duplicate = false AND (t.is_cancel IS NOT TRUE)
