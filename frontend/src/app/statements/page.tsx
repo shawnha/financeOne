@@ -81,6 +81,7 @@ interface StatementData {
   entity_name: string
   base_currency?: string
   is_consolidated?: boolean
+  basis?: "cash" | "accrual"
 }
 
 type EditState = {
@@ -106,6 +107,7 @@ interface StatementListItem {
   is_consolidated: boolean
   entity_name: string
   base_currency?: string
+  basis?: "cash" | "accrual"
 }
 
 interface GenerateResult {
@@ -306,6 +308,8 @@ function StatementsContent() {
   const [periodType, setPeriodType] = useState<PeriodType>("annual")
   const [periodValue, setPeriodValue] = useState<string>("1")
   const [consolidatedCurrency, setConsolidatedCurrency] = useState<"USD" | "KRW">("USD")
+  const [basis, setBasis] = useState<"cash" | "accrual">("cash")
+  const [vatExcluded, setVatExcluded] = useState(true)
   const [downloadingPdf, setDownloadingPdf] = useState(false)
   const printableRef = useRef<HTMLDivElement>(null)
   const [edit, setEdit] = useState<EditState>({ lineId: null, amount: "", note: "" })
@@ -376,12 +380,12 @@ function StatementsContent() {
         )
         if (cancelled) return
         // 정확히 같은 기간 (start_month=start, end_month=end) 이고 consolidated/entity 일치
-        // 연결재무제표는 base_currency 도 일치해야 함 (USD/KRW 별도 stmt)
+        // 연결재무제표는 base_currency 도 일치 / 단독은 basis 도 일치 (cash/accrual 별도 stmt)
         const match = list.items.find((s) => {
           const periodOk = s.start_month === start && s.end_month === end
           const scopeOk = isConsolidated
             ? (s.is_consolidated && s.base_currency === consolidatedCurrency)
-            : !s.is_consolidated && s.entity_id === Number(entityId)
+            : !s.is_consolidated && s.entity_id === Number(entityId) && (s.basis ?? "cash") === basis
           return periodOk && scopeOk
         })
         if (!match) {
@@ -412,7 +416,7 @@ function StatementsContent() {
     return () => {
       cancelled = true
     }
-  }, [entityId, year, isConsolidated, entities, periodType, periodValue, consolidatedCurrency])
+  }, [entityId, year, isConsolidated, entities, periodType, periodValue, consolidatedCurrency, basis])
 
   const reloadStatement = useCallback(async () => {
     if (!statementData) return
@@ -492,7 +496,7 @@ function StatementsContent() {
         : "/statements/generate"
       const body = isConsolidated
         ? { fiscal_year: Number(year), start_month: start, end_month: end, base_currency: consolidatedCurrency }
-        : { entity_id: Number(entityId), fiscal_year: Number(year), start_month: start, end_month: end }
+        : { entity_id: Number(entityId), fiscal_year: Number(year), start_month: start, end_month: end, basis, vat_excluded: vatExcluded }
 
       const result = await fetchAPI<GenerateResult>(endpoint, {
         method: "POST",
@@ -517,7 +521,7 @@ function StatementsContent() {
     } finally {
       setGenerating(false)
     }
-  }, [entityId, year, isConsolidated, periodType, periodValue, entities, consolidatedCurrency])
+  }, [entityId, year, isConsolidated, periodType, periodValue, entities, consolidatedCurrency, basis, vatExcluded])
 
   const effectiveTab = isConsolidated ? "consolidated_balance_sheet" : activeTab
   const filteredItems = statementData?.line_items.filter(
@@ -606,6 +610,31 @@ function StatementsContent() {
               <SelectItem value="KRW">KRW (K-GAAP)</SelectItem>
             </SelectContent>
           </Select>
+        )}
+
+        {!isConsolidated && (
+          <>
+            <Select value={basis} onValueChange={(v) => setBasis(v as "cash" | "accrual")}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="cash">현금주의 (운영 view)</SelectItem>
+                <SelectItem value="accrual">발생주의 (K-GAAP)</SelectItem>
+              </SelectContent>
+            </Select>
+            {basis === "accrual" && (
+              <Select value={vatExcluded ? "ex" : "in"} onValueChange={(v) => setVatExcluded(v === "ex")}>
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ex">VAT 제외</SelectItem>
+                  <SelectItem value="in">VAT 포함</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </>
         )}
 
         <Button onClick={handleGenerate} disabled={generating}>
@@ -779,6 +808,30 @@ function StatementsContent() {
           </CardContent>
         </Card>
       )}
+
+      {/* 발생주의 plug 안내 배너 — 자본금 (가정) 또는 기초자본 미입력 plug 항목 있을 때 */}
+      {loadState === "success" && statementData && statementData.basis === "accrual" && (() => {
+        const plugItem = statementData.line_items.find(
+          (item) => item.statement_type === "balance_sheet" && /기초자본 미입력|가정 —.*미입력/.test(item.label || "")
+        )
+        if (!plugItem) return null
+        const plugAmount = plugItem.manual_amount ?? plugItem.auto_amount ?? 0
+        const isCapitalAdd = (plugItem.account_code || "").startsWith("30") && plugAmount > 0
+        return (
+          <Card className="border-amber-500/40 bg-amber-500/5">
+            <CardContent className="flex items-start gap-3 py-3">
+              <AlertTriangle className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />
+              <div className="text-sm">
+                <p className="font-medium text-foreground">발생주의 모드 — 항등식 plug 자동 추가</p>
+                <p className="text-muted-foreground mt-1">
+                  자본 측 <strong>{isCapitalAdd ? "자본금 (가정)" : "기초자본 미입력 plug"}</strong> ₩{Math.abs(plugAmount).toLocaleString()} 항목이 자동 추가되어 자산 = 부채 + 자본 항등식이 균형을 이뤘습니다.
+                  실제 자본금 / 기초자본 / 차입금 데이터를 입력하면 plug 가 줄어듭니다 (수동 보정 가능).
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )
+      })()}
 
       {/* SUCCESS state */}
       {loadState === "success" && statementData && (() => {

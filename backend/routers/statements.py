@@ -18,6 +18,8 @@ class GenerateRequest(BaseModel):
     fiscal_year: int
     start_month: int = 1
     end_month: int = 12
+    basis: str = "cash"  # 'cash' | 'accrual'
+    vat_excluded: bool = True  # accrual 모드 옵션 ②
 
     @classmethod
     def __get_validators__(cls):
@@ -34,6 +36,8 @@ class GenerateRequest(BaseModel):
             raise ValueError("end_month must be 1-12")
         if self.start_month > self.end_month:
             raise ValueError("start_month must be <= end_month")
+        if self.basis not in ("cash", "accrual"):
+            raise ValueError("basis must be 'cash' or 'accrual'")
 
 
 class LineItemUpdate(BaseModel):
@@ -50,6 +54,7 @@ def list_statements(
     entity_id: Optional[int] = None,
     fiscal_year: Optional[int] = None,
     is_consolidated: Optional[bool] = None,
+    basis: Optional[str] = Query(None, pattern="^(cash|accrual)$"),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     conn: PgConnection = Depends(get_db),
@@ -68,6 +73,9 @@ def list_statements(
     if is_consolidated is not None:
         where.append("fs.is_consolidated = %s")
         params.append(is_consolidated)
+    if basis is not None:
+        where.append("fs.basis = %s")
+        params.append(basis)
 
     where_clause = " AND ".join(where)
     offset = (page - 1) * per_page
@@ -80,11 +88,12 @@ def list_statements(
         SELECT fs.id, fs.entity_id, fs.fiscal_year, fs.ki_num,
                fs.start_month, fs.end_month,
                fs.is_consolidated, fs.status, fs.auditor_name, fs.notes,
+               fs.basis,
                e.name AS entity_name
         FROM financial_statements fs
         LEFT JOIN entities e ON fs.entity_id = e.id
         WHERE {where_clause}
-        ORDER BY fs.fiscal_year DESC, fs.ki_num DESC
+        ORDER BY fs.fiscal_year DESC, fs.ki_num DESC, fs.basis
         LIMIT %s OFFSET %s
         """,
         params + [per_page, offset],
@@ -161,14 +170,19 @@ def generate_statements(
     body: GenerateRequest,
     conn: PgConnection = Depends(get_db),
 ):
-    """5종 재무제표 일괄 생성. status='finalized' 면 거부."""
+    """5종 재무제표 일괄 생성. status='finalized' 면 거부.
+
+    basis='cash' (default): 현금주의 — journal_entries base.
+    basis='accrual': K-GAAP 발생주의 — wholesale_sales (매출/매출원가) + journal_entries (판관비 등).
+    """
     cur = conn.cursor()
     cur.execute(
         """SELECT id, status FROM financial_statements
            WHERE entity_id = %s AND fiscal_year = %s
              AND start_month = %s AND end_month = %s
-             AND is_consolidated = false""",
-        [body.entity_id, body.fiscal_year, body.start_month, body.end_month],
+             AND is_consolidated = false
+             AND basis = %s""",
+        [body.entity_id, body.fiscal_year, body.start_month, body.end_month, body.basis],
     )
     existing = cur.fetchone()
     cur.close()
@@ -185,6 +199,8 @@ def generate_statements(
             fiscal_year=body.fiscal_year,
             start_month=body.start_month,
             end_month=body.end_month,
+            basis=body.basis,
+            vat_excluded=body.vat_excluded,
         )
         conn.commit()
         return result

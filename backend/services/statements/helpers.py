@@ -19,21 +19,26 @@ def _get_or_create_statement(
     fiscal_year: int,
     start_month: int,
     end_month: int,
+    basis: str = "cash",
 ) -> int:
-    """financial_statements 헤더 조회 또는 생성. 반환: statement_id."""
+    """financial_statements 헤더 조회 또는 생성. 반환: statement_id.
+
+    basis: 'cash' (현금주의, default) | 'accrual' (발생주의 K-GAAP).
+    동일 entity/period 의 cash + accrual record 공존 가능 (UNIQUE 제약에 basis 포함).
+    """
     cur.execute(
         """
         SELECT id FROM financial_statements
         WHERE entity_id = %s AND fiscal_year = %s
           AND start_month = %s AND end_month = %s
           AND is_consolidated = FALSE
+          AND basis = %s
         """,
-        [entity_id, fiscal_year, start_month, end_month],
+        [entity_id, fiscal_year, start_month, end_month, basis],
     )
     row = cur.fetchone()
     if row:
         stmt_id = row[0]
-        # 기존 라인 삭제 (재생성)
         cur.execute(
             "DELETE FROM financial_statement_line_items WHERE statement_id = %s",
             [stmt_id],
@@ -47,11 +52,11 @@ def _get_or_create_statement(
     cur.execute(
         """
         INSERT INTO financial_statements
-            (entity_id, fiscal_year, start_month, end_month, status)
-        VALUES (%s, %s, %s, %s, 'draft')
+            (entity_id, fiscal_year, start_month, end_month, status, basis)
+        VALUES (%s, %s, %s, %s, 'draft', %s)
         RETURNING id
         """,
-        [entity_id, fiscal_year, start_month, end_month],
+        [entity_id, fiscal_year, start_month, end_month, basis],
     )
     return cur.fetchone()[0]
 

@@ -10,7 +10,9 @@ from backend.services.cta_service import translate_entity_to_usd, translate_enti
 from backend.services.intercompany_service import get_eliminations
 from .helpers import _get_or_create_statement, _insert_line_item
 from .balance_sheet import generate_balance_sheet
+from .balance_sheet_accrual import generate_balance_sheet_accrual
 from .income_statement import generate_income_statement
+from .income_statement_accrual import generate_income_statement_accrual
 from .cash_flow import generate_cash_flow_statement
 from .trial_balance import generate_trial_balance
 from .deficit import generate_deficit_treatment
@@ -31,15 +33,27 @@ def generate_all_statements(
     fiscal_year: int,
     start_month: int = 1,
     end_month: int = 12,
+    basis: str = "cash",
+    vat_excluded: bool = True,
 ) -> dict:
     """5종 재무제표 일괄 생성. financial_statement_line_items에 저장.
 
     HOI (USD) → QBO Report API 사용 (영어, US GAAP 양식).
     한국 entity (KRW) → 분개 기반 자동 생성 (한글, K-GAAP 양식).
 
+    basis:
+      - 'cash' (default): journal_entries (transactions) base — 운영자 직관 view
+      - 'accrual': K-GAAP 발생주의 — 매출/매출원가는 wholesale_sales,
+                   판관비/영업외/세금은 journal_entries (이중 카운팅 방지)
+
+    vat_excluded: 발생주의 + 옵션 ② — supply_amount + is_vat_taxable 활용
+
     Returns:
-        {"statement_id": int, "validation": {...per statement...}}
+        {"statement_id": int, "basis": str, "validation": {...per statement...}}
     """
+    if basis not in ("cash", "accrual"):
+        raise ValueError(f"basis must be 'cash' or 'accrual', got: {basis}")
+
     start_date = date(fiscal_year, start_month, 1)
     if end_month == 12:
         end_date = date(fiscal_year, 12, 31)
@@ -47,9 +61,8 @@ def generate_all_statements(
         end_date = date(fiscal_year, end_month + 1, 1) - timedelta(days=1)
 
     cur = conn.cursor()
-    stmt_id = _get_or_create_statement(cur, entity_id, fiscal_year, start_month, end_month)
+    stmt_id = _get_or_create_statement(cur, entity_id, fiscal_year, start_month, end_month, basis=basis)
 
-    # 기존 line_items 삭제 (재생성 안전)
     cur.execute(
         "DELETE FROM financial_statement_line_items WHERE statement_id = %s",
         [stmt_id],
@@ -59,18 +72,32 @@ def generate_all_statements(
     use_qbo = currency == "USD"
 
     if use_qbo:
-        # HOI (US GAAP) — QBO Report API 사용
+        # HOI (US GAAP) — QBO Report API. basis 무시 (US GAAP 별도 phase).
         bs = generate_qbo_balance_sheet(conn, cur, stmt_id, entity_id, fiscal_year, end_date, start_date)
         inc = generate_qbo_income_statement(conn, cur, stmt_id, entity_id, start_date, end_date)
-        # QBO 는 Cash Flow / Trial Balance / Deficit Treatment 제공 안함 → empty placeholder
         cf = {"opening_cash": 0.0, "cash_inflows": 0.0, "cash_outflows": 0.0,
               "net_cash": 0.0, "ending_cash": 0.0, "loop_valid": True}
         tb = {"total_debit": 0.0, "total_credit": 0.0, "is_balanced": True,
               "difference": 0.0, "account_count": 0}
         dt = {"prior_retained": 0.0, "net_income": float(inc.get("net_income", 0.0)),
               "ending_retained": 0.0, "is_deficit": False}
+    elif basis == "accrual":
+        # K-GAAP 발생주의:
+        #   - IS = wholesale_sales (매출) + wholesale_purchases (매출원가) + journal_entries (판관비/영업외/세금)
+        #   - BS = journal_entries + 외상매출금/매입금/VAT 합성 entries + IS_accrual.net_income override
+        #   - CF/TB/DT 는 cash 와 동일 (journal_entries base) — 이번 phase 비-범위
+        inc = generate_income_statement_accrual(conn, cur, stmt_id, entity_id, start_date, end_date, vat_excluded=vat_excluded)
+        from decimal import Decimal as _D
+        bs = generate_balance_sheet_accrual(
+            conn, cur, stmt_id, entity_id, fiscal_year, end_date, start_date,
+            net_income_override=_D(str(inc["net_income"])),
+            vat_excluded=vat_excluded,
+        )
+        cf = generate_cash_flow_statement(conn, cur, stmt_id, entity_id, start_date, end_date)
+        tb = generate_trial_balance(conn, cur, stmt_id, entity_id, end_date)
+        dt = generate_deficit_treatment(conn, cur, stmt_id, entity_id, fiscal_year, start_date, end_date)
     else:
-        # K-GAAP — 분개 기반 5종 자동 생성
+        # K-GAAP 현금주의 (기존) — 분개 기반 5종 자동 생성
         bs = generate_balance_sheet(conn, cur, stmt_id, entity_id, fiscal_year, end_date, start_date)
         inc = generate_income_statement(conn, cur, stmt_id, entity_id, start_date, end_date)
         cf = generate_cash_flow_statement(conn, cur, stmt_id, entity_id, start_date, end_date)
@@ -91,6 +118,7 @@ def generate_all_statements(
         "start_month": start_month,
         "end_month": end_month,
         "base_currency": currency,
+        "basis": basis,
         "validation": {
             "balance_sheet": bs,
             "income_statement": inc,

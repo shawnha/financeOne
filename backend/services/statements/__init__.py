@@ -5,7 +5,9 @@
 
 from backend.services.statements.helpers import StatementImbalanceError, CashFlowLoopError
 from backend.services.statements.balance_sheet import generate_balance_sheet
+from backend.services.statements.balance_sheet_accrual import generate_balance_sheet_accrual
 from backend.services.statements.income_statement import generate_income_statement
+from backend.services.statements.income_statement_accrual import generate_income_statement_accrual
 from backend.services.statements.cash_flow import generate_cash_flow_statement
 from backend.services.statements.trial_balance import generate_trial_balance
 from backend.services.statements.deficit import generate_deficit_treatment
@@ -15,7 +17,9 @@ __all__ = [
     "StatementImbalanceError",
     "CashFlowLoopError",
     "generate_balance_sheet",
+    "generate_balance_sheet_accrual",
     "generate_income_statement",
+    "generate_income_statement_accrual",
     "generate_cash_flow_statement",
     "generate_trial_balance",
     "generate_deficit_treatment",

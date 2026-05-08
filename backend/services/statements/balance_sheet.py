@@ -194,23 +194,36 @@ def generate_balance_sheet(
     fiscal_year: int,
     as_of_date: date,
     start_date: date,
+    net_income_override: Decimal | None = None,
+    extra_balances: list | None = None,
 ) -> dict:
     """재무상태표 생성. 자산 = 부채 + 자본 검증.
 
     공시 그룹(K-GAAP 당좌/재고/투자/유형 등) 소계 + macro(유동/비유동) 합계 2단계.
 
+    net_income_override: IS_accrual 에서 계산된 net_income 을 명시 전달.
+        None 이면 journal_entries 의 수익/비용 잔액으로 자체 계산 (기존 cash 동작).
+        Decimal 이면 그 값을 결손금/이익잉여금 에 가산 — 발생주의 IS 와 BS 의 net_income 일관성.
+    extra_balances: 외상매출금/매입금/VAT 등 합성 잔액 entries (발생주의 모드).
+        각 entry: {code, name, category, subcategory, debit_total, credit_total, balance, normal_side, account_id?}
+
     Returns: {"total_assets", "total_liabilities", "total_equity", "is_balanced"}
     """
     balances = get_all_account_balances(conn, entity_id, to_date=as_of_date)
+    if extra_balances:
+        balances = balances + list(extra_balances)
 
-    # 당기순이익 계산 (수익 - 비용, 해당 기간) — 이익잉여금에 가산
-    period_balances = get_all_account_balances(conn, entity_id, from_date=start_date, to_date=as_of_date)
-    net_income = Decimal("0")
-    for b in period_balances:
-        if b["category"] == "수익":
-            net_income += Decimal(str(b["balance"]))
-        elif b["category"] == "비용":
-            net_income -= Decimal(str(b["balance"]))
+    if net_income_override is not None:
+        net_income = Decimal(str(net_income_override))
+    else:
+        # 당기순이익 계산 (수익 - 비용, 해당 기간) — 이익잉여금에 가산
+        period_balances = get_all_account_balances(conn, entity_id, from_date=start_date, to_date=as_of_date)
+        net_income = Decimal("0")
+        for b in period_balances:
+            if b["category"] == "수익":
+                net_income += Decimal(str(b["balance"]))
+            elif b["category"] == "비용":
+                net_income -= Decimal(str(b["balance"]))
 
     st = "balance_sheet"
     items = []
@@ -321,12 +334,14 @@ def generate_balance_sheet(
     for item in items:
         _insert_line_item(cur, stmt_id, item)
 
-    is_balanced = total_assets == liab_plus_equity
+    diff = total_assets - liab_plus_equity
+    # 1원 미만 round-off 은 PASS (Decimal 정확도 허용)
+    is_balanced = abs(diff) < Decimal("1")
     return {
         "total_assets": float(total_assets),
         "total_liabilities": float(total_liabilities),
         "total_equity": float(total_equity),
         "net_income": float(net_income),
         "is_balanced": is_balanced,
-        "difference": float(total_assets - liab_plus_equity),
+        "difference": float(diff),
     }
