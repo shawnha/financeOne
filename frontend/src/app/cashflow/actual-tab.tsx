@@ -1039,6 +1039,12 @@ function DailyChart({
       .filter((l) => l.day >= 1 && l.day <= 31)
   }, [detail])
 
+  // 일 평균 잔고 (gap-fill 된 매일의 잔고 평균)
+  const avgBalance = useMemo(() => {
+    if (dailyData.length === 0) return 0
+    return dailyData.reduce((s, d) => s + d.balance, 0) / dailyData.length
+  }, [dailyData])
+
   if (dailyData.length === 0) return null
 
   return (
@@ -1049,6 +1055,7 @@ function DailyChart({
         </h3>
         <p className="text-[11px] text-muted-foreground">
           잔고 추이 + 일별 입금/출금
+          <span className="ml-2 text-amber-400">· 일평균 잔고 {formatByEntity(avgBalance, entityId)}</span>
           {intercompanyLoans.length > 0 && (
             <span className="ml-2 text-violet-300">
               · HOK 차입 {intercompanyLoans.length}건 · <a href="/intercompany" className="underline hover:text-violet-200">자금흐름 분석 →</a>
@@ -1100,6 +1107,22 @@ function DailyChart({
               width={55}
             />
             <RechartsTooltip content={<DailyTooltipContent month={detail.month} entityId={entityId} />} />
+            {/* 일평균 잔고 reference line (가로) */}
+            <ReferenceLine
+              yAxisId="balance"
+              y={avgBalance}
+              stroke="#fbbf24"
+              strokeDasharray="2 4"
+              strokeWidth={1}
+              ifOverflow="extendDomain"
+              label={{
+                value: `평균 ${abbreviateAmount(avgBalance)}`,
+                position: "insideTopRight",
+                fill: "#fbbf24",
+                fontSize: 10,
+                fontWeight: 600,
+              }}
+            />
             {/* HOK (한아원코리아) 차입금 marker (vertical line) */}
             {intercompanyLoans.map((loan, i) => (
               <ReferenceLine
