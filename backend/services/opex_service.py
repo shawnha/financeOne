@@ -32,7 +32,7 @@ def get_opex_summary_data(
 
     cur.execute(
         """
-        SELECT DISTINCT to_char(date_trunc('month', t.date), 'YYYY-MM') AS month
+        SELECT DISTINCT to_char(date_trunc('month', COALESCE(t.pnl_date, t.date)), 'YYYY-MM') AS month
         FROM transactions t
         JOIN standard_accounts s ON s.id = t.standard_account_id
         WHERE t.entity_id = %s
@@ -59,7 +59,7 @@ def get_opex_summary_data(
     cur.execute(
         """
         SELECT
-            to_char(date_trunc('month', t.date), 'YYYY-MM') AS month,
+            to_char(date_trunc('month', COALESCE(t.pnl_date, t.date)), 'YYYY-MM') AS month,
             COALESCE(SUM(t.amount), 0) AS expense,
             COUNT(*) AS tx_count
         FROM transactions t
@@ -70,8 +70,8 @@ def get_opex_summary_data(
           AND t.type = 'out'
           AND t.is_duplicate = false
           AND (t.is_cancel IS NOT TRUE)
-          AND t.date >= %s::date
-        GROUP BY date_trunc('month', t.date)
+          AND COALESCE(t.pnl_date, t.date) >= %s::date
+        GROUP BY date_trunc('month', COALESCE(t.pnl_date, t.date))
         ORDER BY month
         """,
         [entity_id, list(SGA_SUBCATEGORIES), first_date],
@@ -121,7 +121,7 @@ def get_opex_detail(
           AND s.category = '비용'
           AND s.subcategory = ANY(%s)
           AND t.type = 'out'
-          AND t.date >= %s AND t.date < %s
+          AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
           AND t.is_duplicate = false
           AND (t.is_cancel IS NOT TRUE)
         ORDER BY t.date, t.id
@@ -143,7 +143,7 @@ def get_opex_detail(
           AND s.category = '비용'
           AND s.subcategory = ANY(%s)
           AND t.type = 'out'
-          AND t.date >= %s AND t.date < %s
+          AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
           AND t.is_duplicate = false
           AND (t.is_cancel IS NOT TRUE)
         """,
@@ -163,7 +163,7 @@ def get_opex_detail(
           AND s.category = '비용'
           AND s.subcategory = ANY(%s)
           AND t.type = 'out'
-          AND t.date >= %s AND t.date < %s
+          AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
           AND t.is_duplicate = false
           AND (t.is_cancel IS NOT TRUE)
         """,
