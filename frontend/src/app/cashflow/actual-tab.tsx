@@ -10,7 +10,6 @@ import { fetchAPI } from "@/lib/api"
 import { formatByEntity, abbreviateAmount } from "@/lib/format"
 import {
   Bar,
-  Line,
   XAxis,
   YAxis,
   Tooltip as RechartsTooltip,
@@ -1046,12 +1045,14 @@ function DailyChart({
     <Card className="p-6 rounded-2xl">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <h3 className="text-sm font-medium text-muted-foreground">
-          {detail.month}월 일별 현금흐름 + 매출/매입 ({detail.year})
+          {detail.month}월 일별 현금흐름 ({detail.year})
         </h3>
         <p className="text-[11px] text-muted-foreground">
-          잔고 + 통장 입출금 + 발생주의 매출/매입
+          잔고 추이 + 일별 입금/출금
           {intercompanyLoans.length > 0 && (
-            <span className="ml-2 text-violet-300">· HOK 차입 {intercompanyLoans.length}건</span>
+            <span className="ml-2 text-violet-300">
+              · HOK 차입 {intercompanyLoans.length}건 · <a href="/intercompany" className="underline hover:text-violet-200">자금흐름 분석 →</a>
+            </span>
           )}
         </p>
       </div>
@@ -1138,30 +1139,6 @@ function DailyChart({
                 <Cell key={`d-out-${i}`} fill="url(#expenseBarGradDaily)" stroke="#EF4444" strokeWidth={0.5} />
               ))}
             </Bar>
-            {/* 매출 (발생주의) — 청록 dashed line */}
-            <Line
-              yAxisId="amount"
-              type="monotone"
-              dataKey="revenue"
-              name="매출"
-              stroke="#06b6d4"
-              strokeWidth={1.5}
-              strokeDasharray="5 3"
-              dot={{ r: 2, fill: "#06b6d4" }}
-              animationDuration={300}
-            />
-            {/* 매입 (발생주의) — 자홍 dashed line */}
-            <Line
-              yAxisId="amount"
-              type="monotone"
-              dataKey="purchases"
-              name="매입"
-              stroke="#ec4899"
-              strokeWidth={1.5}
-              strokeDasharray="5 3"
-              dot={{ r: 2, fill: "#ec4899" }}
-              animationDuration={300}
-            />
             <Legend
               wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
               formatter={(value: string) => <span style={{ color: "#94a3b8", fontSize: 11 }}>{value}</span>}
