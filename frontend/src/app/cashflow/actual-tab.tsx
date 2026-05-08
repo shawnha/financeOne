@@ -10,6 +10,7 @@ import { fetchAPI } from "@/lib/api"
 import { formatByEntity, abbreviateAmount } from "@/lib/format"
 import {
   Bar,
+  Line,
   XAxis,
   YAxis,
   Tooltip as RechartsTooltip,
@@ -186,6 +187,7 @@ export function ActualTab({ entityId }: { entityId: string | null }) {
   const [detailState, setDetailState] = useState<LoadState>("loading")
   const [error, setError] = useState("")
   const [viewMode, setViewMode] = useState<"time" | "account">("time")
+  const [pnlDaily, setPnlDaily] = useState<PnlDailyResponse | null>(null)
   const [globalMonth, setGlobalMonth, monthReady] = useGlobalMonth()
   const [selectedMonth, setSelectedMonthLocal] = useState(globalMonth)
   const setSelectedMonth = useCallback((m: string) => { setSelectedMonthLocal(m); setGlobalMonth(m) }, [setGlobalMonth])
@@ -238,6 +240,15 @@ export function ActualTab({ entityId }: { entityId: string | null }) {
 
   useEffect(() => { fetchSummary() }, [fetchSummary])
   useEffect(() => { fetchDetail() }, [fetchDetail])
+
+  // 일별 P&L (매출/매입 발생주의) — 차입 이후 흐름 분석용
+  useEffect(() => {
+    if (!entityId || !selectedMonth) return
+    const [y, m] = selectedMonth.split("-").map(Number)
+    fetchAPI<PnlDailyResponse>(`/pnl/daily?entity_id=${entityId}&year=${y}&month=${m}`, { cache: "no-store" })
+      .then(setPnlDaily)
+      .catch(() => setPnlDaily(null))
+  }, [entityId, selectedMonth])
 
   // Tooltip
   function ChartTooltipContent({
@@ -409,6 +420,7 @@ export function ActualTab({ entityId }: { entityId: string | null }) {
               <Bar
                 dataKey="income"
                 name="입금"
+                fill="#22C55E"
                 radius={[6, 6, 0, 0]}
                 animationDuration={300}
                 barSize={20}
@@ -427,6 +439,7 @@ export function ActualTab({ entityId }: { entityId: string | null }) {
               <Bar
                 dataKey="expenseAbs"
                 name="출금"
+                fill="#EF4444"
                 radius={[6, 6, 0, 0]}
                 animationDuration={300}
                 barSize={20}
@@ -479,9 +492,9 @@ export function ActualTab({ entityId }: { entityId: string | null }) {
         />
       </div>
 
-      {/* Daily Chart — 선택된 월의 일별 입금/출금 + 잔고 추이 */}
+      {/* Daily Chart — 선택된 월의 일별 입금/출금 + 잔고 추이 + 매출/매입 line */}
       {detail && detail.rows.length > 2 && (
-        <DailyChart detail={detail} entityId={entityId} />
+        <DailyChart detail={detail} entityId={entityId} pnlDaily={pnlDaily} />
       )}
 
       {/* Transaction List */}
@@ -910,6 +923,16 @@ function DailyTooltipContent({
       ) : (
         <p className="text-muted-foreground italic">거래 없음</p>
       )}
+      {p.revenue > 0 && (
+        <p className="font-mono tabular-nums text-cyan-400">
+          매출: {formatByEntity(p.revenue, entityId)}
+        </p>
+      )}
+      {p.purchases > 0 && (
+        <p className="font-mono tabular-nums text-pink-400">
+          매입: {formatByEntity(p.purchases, entityId)}
+        </p>
+      )}
       <p className="font-mono tabular-nums text-amber-400 pt-0.5 border-t border-border/40 mt-1">
         잔고: {formatByEntity(p.balance, entityId)}
       </p>
@@ -924,6 +947,14 @@ interface DailyPoint {
   expense: number
   balance: number
   hasTx: boolean
+  revenue: number
+  purchases: number
+}
+
+interface PnlDailyResponse {
+  year: number
+  month: number
+  rows: Array<{ day: number; revenue: number; sales_count: number; purchases: number; purchases_count: number }>
 }
 
 interface IntercompanyLoan {
@@ -932,7 +963,15 @@ interface IntercompanyLoan {
   description: string
 }
 
-function DailyChart({ detail, entityId }: { detail: ActualData; entityId: string | null }) {
+function DailyChart({
+  detail,
+  entityId,
+  pnlDaily,
+}: {
+  detail: ActualData
+  entityId: string | null
+  pnlDaily: PnlDailyResponse | null
+}) {
   const dailyData = useMemo<DailyPoint[]>(() => {
     const txRows = detail.rows.filter((r) => r.type === "in" || r.type === "out")
     if (txRows.length === 0) return []
@@ -949,6 +988,14 @@ function DailyChart({ detail, entityId }: { detail: ActualData; entityId: string
       dayMap.set(day, existing)
     }
 
+    // 일별 매출/매입 (발생주의)
+    const pnlMap = new Map<number, { revenue: number; purchases: number }>()
+    if (pnlDaily) {
+      for (const r of pnlDaily.rows) {
+        pnlMap.set(r.day, { revenue: r.revenue, purchases: r.purchases })
+      }
+    }
+
     // Gap-fill all days of month for continuous balance line
     const lastDay = new Date(detail.year, detail.month, 0).getDate()
     const filled: DailyPoint[] = []
@@ -956,18 +1003,26 @@ function DailyChart({ detail, entityId }: { detail: ActualData; entityId: string
     for (let d = 1; d <= lastDay; d++) {
       const dayStr = `${detail.year}-${String(detail.month).padStart(2, "0")}-${String(d).padStart(2, "0")}`
       const found = dayMap.get(dayStr)
+      const pnl = pnlMap.get(d) ?? { revenue: 0, purchases: 0 }
       if (found) {
-        filled.push({ day: dayStr, dayLabel: d, ...found, hasTx: true })
+        filled.push({ day: dayStr, dayLabel: d, ...found, hasTx: true, ...pnl })
         prevBalance = found.balance
       } else {
-        filled.push({ day: dayStr, dayLabel: d, income: 0, expense: 0, balance: prevBalance, hasTx: false })
+        filled.push({
+          day: dayStr,
+          dayLabel: d,
+          income: 0,
+          expense: 0,
+          balance: prevBalance,
+          hasTx: false,
+          ...pnl,
+        })
       }
     }
     return filled
-  }, [detail])
+  }, [detail, pnlDaily])
 
-  // 한아원코리아 차입금 식별 — internal_account_name='차입금' AND counterparty 가 한아원코리아 (개인 차입 제외)
-  // counterparty 패턴: '주식회사 한아' (truncated) / '주식회사 한아원코리아' / '한아원코리아'
+  // HOK (한아원코리아) 차입금 식별 — internal_account_name='차입금' AND counterparty 가 한아원코리아
   const intercompanyLoans = useMemo<IntercompanyLoan[]>(() => {
     return detail.rows
       .filter(
@@ -985,69 +1040,21 @@ function DailyChart({ detail, entityId }: { detail: ActualData; entityId: string
       .filter((l) => l.day >= 1 && l.day <= 31)
   }, [detail])
 
-  const totalLoans = intercompanyLoans.reduce((s, l) => s + l.amount, 0)
-  // 차입 이후 외상매출금 회수 (첫 차입 시점 ~ 월말)
-  const firstLoanDay = intercompanyLoans.length > 0 ? Math.min(...intercompanyLoans.map((l) => l.day)) : null
-  const postLoanReceipts = useMemo(() => {
-    if (firstLoanDay == null) return 0
-    return detail.rows
-      .filter((r) => {
-        if (r.type !== "in") return false
-        if (!r.date) return false
-        const d = parseInt(r.date.slice(8, 10))
-        if (d < firstLoanDay) return false
-        // 차입금 자체는 제외
-        if (r.internal_account_name === "차입금") return false
-        return true
-      })
-      .reduce((s, r) => s + r.amount, 0)
-  }, [detail, firstLoanDay])
-
   if (dailyData.length === 0) return null
 
   return (
     <Card className="p-6 rounded-2xl">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <h3 className="text-sm font-medium text-muted-foreground">
-          {detail.month}월 일별 현금흐름 ({detail.year})
+          {detail.month}월 일별 현금흐름 + 매출/매입 ({detail.year})
         </h3>
         <p className="text-[11px] text-muted-foreground">
-          잔고 추이 + 일별 입금/출금
+          잔고 + 통장 입출금 + 발생주의 매출/매입
           {intercompanyLoans.length > 0 && (
-            <span className="ml-2 text-violet-300">· 한아원코리아 차입 {intercompanyLoans.length}건</span>
+            <span className="ml-2 text-violet-300">· HOK 차입 {intercompanyLoans.length}건</span>
           )}
         </p>
       </div>
-
-      {intercompanyLoans.length > 0 && (
-        <div className="grid grid-cols-3 gap-2 mb-4 max-md:grid-cols-1">
-          <div className="rounded-lg bg-violet-500/[0.06] border border-violet-500/20 px-3 py-2">
-            <p className="text-[10px] uppercase tracking-wider text-violet-300/80">한아원코리아 차입</p>
-            <p className="text-base font-bold font-mono tabular-nums text-violet-200">
-              {formatByEntity(totalLoans, entityId)}
-            </p>
-            <p className="text-[10px] text-muted-foreground mt-0.5">
-              {intercompanyLoans.map((l) => `${l.day}일 ${formatByEntity(l.amount, entityId)}`).join(" · ")}
-            </p>
-          </div>
-          <div className="rounded-lg bg-secondary/40 border border-border/40 px-3 py-2">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">차입 이후 입금 (차입금 제외)</p>
-            <p className="text-base font-bold font-mono tabular-nums text-[hsl(var(--profit))]">
-              +{formatByEntity(postLoanReceipts, entityId)}
-            </p>
-            <p className="text-[10px] text-muted-foreground mt-0.5">
-              {firstLoanDay}일 ~ 월말
-            </p>
-          </div>
-          <div className="rounded-lg bg-secondary/40 border border-border/40 px-3 py-2">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">차입 대비 입금 배수</p>
-            <p className="text-base font-bold font-mono tabular-nums">
-              {totalLoans > 0 ? `${(postLoanReceipts / totalLoans).toFixed(2)}x` : "-"}
-            </p>
-            <p className="text-[10px] text-muted-foreground mt-0.5">투입 자금 회전 효과</p>
-          </div>
-        </div>
-      )}
       <div className="h-[220px] max-md:h-[180px]">
         <ResponsiveContainer width="100%" height="100%" minWidth={0}>
           <ComposedChart data={dailyData} margin={{ top: 20, right: 10, left: 10, bottom: 5 }}>
@@ -1092,7 +1099,7 @@ function DailyChart({ detail, entityId }: { detail: ActualData; entityId: string
               width={55}
             />
             <RechartsTooltip content={<DailyTooltipContent month={detail.month} entityId={entityId} />} />
-            {/* 한아원코리아 차입금 marker (vertical line) */}
+            {/* HOK (한아원코리아) 차입금 marker (vertical line) */}
             {intercompanyLoans.map((loan, i) => (
               <ReferenceLine
                 key={`loan-${i}`}
@@ -1102,7 +1109,7 @@ function DailyChart({ detail, entityId }: { detail: ActualData; entityId: string
                 strokeDasharray="4 4"
                 strokeWidth={1.5}
                 label={{
-                  value: `차입 ${abbreviateAmount(loan.amount)}`,
+                  value: `HOK ${abbreviateAmount(loan.amount)}`,
                   position: "top",
                   fill: "#c4b5fd",
                   fontSize: 10,
@@ -1121,16 +1128,40 @@ function DailyChart({ detail, entityId }: { detail: ActualData; entityId: string
               dot={false}
               animationDuration={300}
             />
-            <Bar yAxisId="amount" dataKey="income" name="입금" radius={[3, 3, 0, 0]} barSize={6} animationDuration={300}>
+            <Bar yAxisId="amount" dataKey="income" name="입금" fill="#22C55E" radius={[3, 3, 0, 0]} barSize={6} animationDuration={300}>
               {dailyData.map((_, i) => (
                 <Cell key={`d-in-${i}`} fill="url(#incomeBarGradDaily)" stroke="#22C55E" strokeWidth={0.5} />
               ))}
             </Bar>
-            <Bar yAxisId="amount" dataKey="expense" name="출금" radius={[3, 3, 0, 0]} barSize={6} animationDuration={300}>
+            <Bar yAxisId="amount" dataKey="expense" name="출금" fill="#EF4444" radius={[3, 3, 0, 0]} barSize={6} animationDuration={300}>
               {dailyData.map((_, i) => (
                 <Cell key={`d-out-${i}`} fill="url(#expenseBarGradDaily)" stroke="#EF4444" strokeWidth={0.5} />
               ))}
             </Bar>
+            {/* 매출 (발생주의) — 청록 dashed line */}
+            <Line
+              yAxisId="amount"
+              type="monotone"
+              dataKey="revenue"
+              name="매출"
+              stroke="#06b6d4"
+              strokeWidth={1.5}
+              strokeDasharray="5 3"
+              dot={{ r: 2, fill: "#06b6d4" }}
+              animationDuration={300}
+            />
+            {/* 매입 (발생주의) — 자홍 dashed line */}
+            <Line
+              yAxisId="amount"
+              type="monotone"
+              dataKey="purchases"
+              name="매입"
+              stroke="#ec4899"
+              strokeWidth={1.5}
+              strokeDasharray="5 3"
+              dot={{ r: 2, fill: "#ec4899" }}
+              animationDuration={300}
+            />
             <Legend
               wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
               formatter={(value: string) => <span style={{ color: "#94a3b8", fontSize: 11 }}>{value}</span>}

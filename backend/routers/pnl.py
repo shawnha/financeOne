@@ -8,6 +8,7 @@ from psycopg2.extensions import connection as PgConnection
 from backend.database.connection import get_db
 from backend.services.pnl_service import (
     get_cogs_breakdown,
+    get_pnl_daily,
     get_pnl_monthly,
     get_pnl_summary,
     get_purchases_breakdown,
@@ -45,6 +46,21 @@ def pnl_monthly(
         return get_pnl_monthly(conn, entity_id, months)
     except Exception as e:
         logger.error("P&L monthly error: %s", e)
+        raise HTTPException(500, detail=str(e))
+
+
+@router.get("/daily")
+def pnl_daily(
+    entity_id: int = Query(...),
+    year: int = Query(...),
+    month: int = Query(...),
+    conn: PgConnection = Depends(get_db),
+):
+    """일별 매출/매입 시리즈 (차입금 효과 분석용)."""
+    try:
+        return get_pnl_daily(conn, entity_id, year, month)
+    except Exception as e:
+        logger.error("P&L daily error: %s", e)
         raise HTTPException(500, detail=str(e))
 
 

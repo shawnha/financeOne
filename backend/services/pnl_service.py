@@ -368,3 +368,52 @@ def get_pnl_monthly(conn: PgConnection, entity_id: int, months: int = 12) -> dic
         })
     cur.close()
     return {"months": result, "available_months": available}
+
+
+def get_pnl_daily(conn: PgConnection, entity_id: int, year: int, month: int) -> dict:
+    """일별 매출/매입 시리즈 — wholesale_sales / wholesale_purchases 발생주의 base.
+
+    cashflow daily chart 와 같은 day axis 로 overlay 가능. 차입금 marker 와 함께
+    "차입 → 매입 → 매출" cycle 시각화.
+    """
+    start, end = build_date_range(year, month)
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT EXTRACT(DAY FROM sales_date)::int AS day,
+               COALESCE(SUM(total_amount), 0) AS revenue,
+               COUNT(*) AS sales_count
+        FROM wholesale_sales
+        WHERE entity_id = %s AND sales_date >= %s AND sales_date < %s
+        GROUP BY day
+        ORDER BY day
+        """,
+        [entity_id, start, end],
+    )
+    sales_by_day = {r[0]: {"revenue": float(r[1]), "sales_count": r[2]} for r in cur.fetchall()}
+
+    cur.execute(
+        """
+        SELECT EXTRACT(DAY FROM purchase_date)::int AS day,
+               COALESCE(SUM(total_amount), 0) AS purchases,
+               COUNT(*) AS purchases_count
+        FROM wholesale_purchases
+        WHERE entity_id = %s AND purchase_date >= %s AND purchase_date < %s
+        GROUP BY day
+        ORDER BY day
+        """,
+        [entity_id, start, end],
+    )
+    pur_by_day = {r[0]: {"purchases": float(r[1]), "purchases_count": r[2]} for r in cur.fetchall()}
+    cur.close()
+
+    # last day of month
+    import calendar
+    last_day = calendar.monthrange(year, month)[1]
+    rows = []
+    for d in range(1, last_day + 1):
+        s = sales_by_day.get(d, {"revenue": 0.0, "sales_count": 0})
+        p = pur_by_day.get(d, {"purchases": 0.0, "purchases_count": 0})
+        rows.append({"day": d, **s, **p})
+    return {"year": year, "month": month, "rows": rows}
