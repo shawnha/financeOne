@@ -19,6 +19,7 @@ import {
   Area,
   ComposedChart,
   Cell,
+  ReferenceLine,
 } from "recharts"
 import { AlertCircle, RefreshCw, Upload, ChevronDown, ChevronUp, Download, List, FolderTree } from "lucide-react"
 import Link from "next/link"
@@ -925,6 +926,12 @@ interface DailyPoint {
   hasTx: boolean
 }
 
+interface IntercompanyLoan {
+  day: number
+  amount: number
+  description: string
+}
+
 function DailyChart({ detail, entityId }: { detail: ActualData; entityId: string | null }) {
   const dailyData = useMemo<DailyPoint[]>(() => {
     const txRows = detail.rows.filter((r) => r.type === "in" || r.type === "out")
@@ -959,18 +966,88 @@ function DailyChart({ detail, entityId }: { detail: ActualData; entityId: string
     return filled
   }, [detail])
 
+  // 한아원코리아 차입금 식별 — internal_account_name='차입금' AND counterparty 가 한아원코리아 (개인 차입 제외)
+  // counterparty 패턴: '주식회사 한아' (truncated) / '주식회사 한아원코리아' / '한아원코리아'
+  const intercompanyLoans = useMemo<IntercompanyLoan[]>(() => {
+    return detail.rows
+      .filter(
+        (r) =>
+          r.type === "in" &&
+          r.internal_account_name === "차입금" &&
+          r.counterparty != null &&
+          /주식회사\s*한아|한아원코리아/.test(r.counterparty),
+      )
+      .map((r) => ({
+        day: parseInt((r.date ?? "").slice(8, 10)),
+        amount: r.amount,
+        description: r.description,
+      }))
+      .filter((l) => l.day >= 1 && l.day <= 31)
+  }, [detail])
+
+  const totalLoans = intercompanyLoans.reduce((s, l) => s + l.amount, 0)
+  // 차입 이후 외상매출금 회수 (첫 차입 시점 ~ 월말)
+  const firstLoanDay = intercompanyLoans.length > 0 ? Math.min(...intercompanyLoans.map((l) => l.day)) : null
+  const postLoanReceipts = useMemo(() => {
+    if (firstLoanDay == null) return 0
+    return detail.rows
+      .filter((r) => {
+        if (r.type !== "in") return false
+        if (!r.date) return false
+        const d = parseInt(r.date.slice(8, 10))
+        if (d < firstLoanDay) return false
+        // 차입금 자체는 제외
+        if (r.internal_account_name === "차입금") return false
+        return true
+      })
+      .reduce((s, r) => s + r.amount, 0)
+  }, [detail, firstLoanDay])
+
   if (dailyData.length === 0) return null
 
   return (
     <Card className="p-6 rounded-2xl">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <h3 className="text-sm font-medium text-muted-foreground">
           {detail.month}월 일별 현금흐름 ({detail.year})
         </h3>
         <p className="text-[11px] text-muted-foreground">
           잔고 추이 + 일별 입금/출금
+          {intercompanyLoans.length > 0 && (
+            <span className="ml-2 text-violet-300">· 한아원코리아 차입 {intercompanyLoans.length}건</span>
+          )}
         </p>
       </div>
+
+      {intercompanyLoans.length > 0 && (
+        <div className="grid grid-cols-3 gap-2 mb-4 max-md:grid-cols-1">
+          <div className="rounded-lg bg-violet-500/[0.06] border border-violet-500/20 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-wider text-violet-300/80">한아원코리아 차입</p>
+            <p className="text-base font-bold font-mono tabular-nums text-violet-200">
+              {formatByEntity(totalLoans, entityId)}
+            </p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              {intercompanyLoans.map((l) => `${l.day}일 ${formatByEntity(l.amount, entityId)}`).join(" · ")}
+            </p>
+          </div>
+          <div className="rounded-lg bg-secondary/40 border border-border/40 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">차입 이후 입금 (차입금 제외)</p>
+            <p className="text-base font-bold font-mono tabular-nums text-[hsl(var(--profit))]">
+              +{formatByEntity(postLoanReceipts, entityId)}
+            </p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              {firstLoanDay}일 ~ 월말
+            </p>
+          </div>
+          <div className="rounded-lg bg-secondary/40 border border-border/40 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">차입 대비 입금 배수</p>
+            <p className="text-base font-bold font-mono tabular-nums">
+              {totalLoans > 0 ? `${(postLoanReceipts / totalLoans).toFixed(2)}x` : "-"}
+            </p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">투입 자금 회전 효과</p>
+          </div>
+        </div>
+      )}
       <div className="h-[220px] max-md:h-[180px]">
         <ResponsiveContainer width="100%" height="100%" minWidth={0}>
           <ComposedChart data={dailyData} margin={{ top: 20, right: 10, left: 10, bottom: 5 }}>
@@ -1015,6 +1092,24 @@ function DailyChart({ detail, entityId }: { detail: ActualData; entityId: string
               width={55}
             />
             <RechartsTooltip content={<DailyTooltipContent month={detail.month} entityId={entityId} />} />
+            {/* 한아원코리아 차입금 marker (vertical line) */}
+            {intercompanyLoans.map((loan, i) => (
+              <ReferenceLine
+                key={`loan-${i}`}
+                yAxisId="amount"
+                x={loan.day}
+                stroke="#a78bfa"
+                strokeDasharray="4 4"
+                strokeWidth={1.5}
+                label={{
+                  value: `차입 ${abbreviateAmount(loan.amount)}`,
+                  position: "top",
+                  fill: "#c4b5fd",
+                  fontSize: 10,
+                  fontWeight: 600,
+                }}
+              />
+            ))}
             <Area
               yAxisId="balance"
               type="monotone"
