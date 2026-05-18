@@ -17,33 +17,93 @@ from backend.utils.db import build_date_range
 
 SGA_SUBS = ("판매관리비", "판매비와관리비")
 
+# wholesale_sales / wholesale_purchases 를 매출/매입 ground truth 로 쓰는 법인.
+# 그 외 법인 (한아원코리아 2, 한아원리테일 3, HOI 1) 은 transactions 의 매출/매출원가
+# subcategory 합산을 매출/매출원가로 사용 — wholesale xlsx import 가 없기 때문.
+_WHOLESALE_ENTITIES = (13,)
+
+
+def _revenue_cogs_summary(cur, entity_id: int, start, end) -> dict:
+    """entity 별 매출/매출원가 집계.
+
+    entity_id ∈ _WHOLESALE_ENTITIES: wholesale_sales 발생주의.
+    그 외: transactions (subcategory='매출' / '매출원가') 현금주의.
+    """
+    if entity_id in _WHOLESALE_ENTITIES:
+        cur.execute(
+            """
+            SELECT
+              COALESCE(SUM(total_amount), 0) AS revenue,
+              COALESCE(SUM(COALESCE(supply_amount, total_amount / 1.1)), 0) AS revenue_excl_vat,
+              COALESCE(SUM(quantity * COALESCE(cogs_unit_price, 0)), 0) AS cogs,
+              COALESCE(SUM(quantity * COALESCE(cogs_unit_price, 0) / 1.1), 0) AS cogs_excl_vat,
+              COUNT(*) AS sales_count
+            FROM wholesale_sales
+            WHERE entity_id = %s AND sales_date >= %s AND sales_date < %s
+            """,
+            [entity_id, start, end],
+        )
+        r = cur.fetchone()
+        return {
+            "revenue": Decimal(str(r[0])), "revenue_excl_vat": Decimal(str(r[1])),
+            "cogs": Decimal(str(r[2])), "cogs_excl_vat": Decimal(str(r[3])),
+            "sales_count": r[4],
+        }
+
+    cur.execute(
+        """
+        SELECT
+          COALESCE(SUM(t.amount), 0) AS revenue,
+          COALESCE(SUM(
+            CASE WHEN s.is_vat_taxable THEN t.amount / 1.1 ELSE t.amount END
+          ), 0) AS revenue_excl_vat,
+          COUNT(*) AS sales_count
+        FROM transactions t
+        JOIN standard_accounts s ON s.id = t.standard_account_id
+        WHERE t.entity_id = %s
+          AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
+          AND s.category = '수익' AND s.subcategory = '매출'
+          AND t.is_duplicate = false AND (t.is_cancel IS NOT TRUE)
+        """,
+        [entity_id, start, end],
+    )
+    rev = cur.fetchone()
+
+    cur.execute(
+        """
+        SELECT
+          COALESCE(SUM(t.amount), 0) AS cogs,
+          COALESCE(SUM(
+            CASE WHEN s.is_vat_taxable THEN t.amount / 1.1 ELSE t.amount END
+          ), 0) AS cogs_excl_vat
+        FROM transactions t
+        JOIN standard_accounts s ON s.id = t.standard_account_id
+        WHERE t.entity_id = %s
+          AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
+          AND s.category = '비용' AND s.subcategory = '매출원가'
+          AND t.is_duplicate = false AND (t.is_cancel IS NOT TRUE)
+        """,
+        [entity_id, start, end],
+    )
+    cogs_row = cur.fetchone()
+    return {
+        "revenue": Decimal(str(rev[0])), "revenue_excl_vat": Decimal(str(rev[1])),
+        "cogs": Decimal(str(cogs_row[0])), "cogs_excl_vat": Decimal(str(cogs_row[1])),
+        "sales_count": rev[2],
+    }
+
 
 def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -> dict:
     start, end = build_date_range(year, month)
     cur = conn.cursor()
 
-    # 매출 + 매출원가 (도매) — VAT 포함/제외 둘 다
-    # supply_amount (xlsx col O) = VAT 제외 매출. NULL 이면 total_amount/1.1 fallback.
-    # cogs_unit_price 는 VAT 포함 단가 (관행) → /1.1 로 VAT 제외 추정
-    cur.execute(
-        """
-        SELECT
-          COALESCE(SUM(total_amount), 0) AS revenue,
-          COALESCE(SUM(COALESCE(supply_amount, total_amount / 1.1)), 0) AS revenue_excl_vat,
-          COALESCE(SUM(quantity * COALESCE(cogs_unit_price, 0)), 0) AS cogs,
-          COALESCE(SUM(quantity * COALESCE(cogs_unit_price, 0) / 1.1), 0) AS cogs_excl_vat,
-          COUNT(*) AS tx_count
-        FROM wholesale_sales
-        WHERE entity_id = %s AND sales_date >= %s AND sales_date < %s
-        """,
-        [entity_id, start, end],
-    )
-    rev_row = cur.fetchone()
-    revenue = Decimal(str(rev_row[0]))
-    revenue_excl_vat = Decimal(str(rev_row[1]))
-    cogs = Decimal(str(rev_row[2]))
-    cogs_excl_vat = Decimal(str(rev_row[3]))
-    sales_count = rev_row[4]
+    # 매출 + 매출원가 — entity 별 source 분기 (wholesale vs transactions)
+    rc = _revenue_cogs_summary(cur, entity_id, start, end)
+    revenue = rc["revenue"]
+    revenue_excl_vat = rc["revenue_excl_vat"]
+    cogs = rc["cogs"]
+    cogs_excl_vat = rc["cogs_excl_vat"]
+    sales_count = rc["sales_count"]
 
     # 매입 (검증용)
     cur.execute(
@@ -223,29 +283,62 @@ def get_revenue_breakdown(
 ) -> dict:
     if group_by not in _GROUP_COLS:
         raise ValueError(f"group_by must be one of {list(_GROUP_COLS)}")
-    col = _GROUP_COLS[group_by]
     start, end = build_date_range(year, month)
     cur = conn.cursor()
-    cur.execute(
-        f"""
-        SELECT {col}, COUNT(*), COALESCE(SUM(total_amount), 0)
-        FROM wholesale_sales
-        WHERE entity_id = %s AND sales_date >= %s AND sales_date < %s
-        GROUP BY {col}
-        ORDER BY SUM(total_amount) DESC NULLS LAST
-        """,
-        [entity_id, start, end],
-    )
-    rows = cur.fetchall()
-    cur.execute(
-        """
-        SELECT COUNT(*), COALESCE(SUM(total_amount), 0)
-        FROM wholesale_sales
-        WHERE entity_id = %s AND sales_date >= %s AND sales_date < %s
-        """,
-        [entity_id, start, end],
-    )
-    tot_count, tot_amount = cur.fetchone()
+
+    if entity_id in _WHOLESALE_ENTITIES:
+        col = _GROUP_COLS[group_by]
+        cur.execute(
+            f"""
+            SELECT {col}, COUNT(*), COALESCE(SUM(total_amount), 0)
+            FROM wholesale_sales
+            WHERE entity_id = %s AND sales_date >= %s AND sales_date < %s
+            GROUP BY {col}
+            ORDER BY SUM(total_amount) DESC NULLS LAST
+            """,
+            [entity_id, start, end],
+        )
+        rows = cur.fetchall()
+        cur.execute(
+            """
+            SELECT COUNT(*), COALESCE(SUM(total_amount), 0)
+            FROM wholesale_sales
+            WHERE entity_id = %s AND sales_date >= %s AND sales_date < %s
+            """,
+            [entity_id, start, end],
+        )
+        tot_count, tot_amount = cur.fetchone()
+    else:
+        # transactions 기반 — product 단위 정보 없음. payee=counterparty, product=표준계정명.
+        col = "s.name" if group_by == "product" else "t.counterparty"
+        cur.execute(
+            f"""
+            SELECT {col}, COUNT(*), COALESCE(SUM(t.amount), 0)
+            FROM transactions t
+            JOIN standard_accounts s ON s.id = t.standard_account_id
+            WHERE t.entity_id = %s
+              AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
+              AND s.category = '수익' AND s.subcategory = '매출'
+              AND t.is_duplicate = false AND (t.is_cancel IS NOT TRUE)
+            GROUP BY {col}
+            ORDER BY SUM(t.amount) DESC NULLS LAST
+            """,
+            [entity_id, start, end],
+        )
+        rows = cur.fetchall()
+        cur.execute(
+            """
+            SELECT COUNT(*), COALESCE(SUM(t.amount), 0)
+            FROM transactions t
+            JOIN standard_accounts s ON s.id = t.standard_account_id
+            WHERE t.entity_id = %s
+              AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
+              AND s.category = '수익' AND s.subcategory = '매출'
+              AND t.is_duplicate = false AND (t.is_cancel IS NOT TRUE)
+            """,
+            [entity_id, start, end],
+        )
+        tot_count, tot_amount = cur.fetchone()
     cur.close()
     return {"group_by": group_by, **_breakdown_rows(rows, tot_count, Decimal(str(tot_amount)), limit)}
 
@@ -254,32 +347,68 @@ def get_cogs_breakdown(
     conn: PgConnection, entity_id: int, year: int, month: int,
     group_by: str = "product", limit: int = 20,
 ) -> dict:
-    """매출원가 = 매출 row 의 quantity × cogs_unit_price. payee = 매출 거래처 (=고객)."""
+    """매출원가 = 매출 row 의 quantity × cogs_unit_price. payee = 매출 거래처 (=고객).
+
+    wholesale entity: wholesale_sales 의 cogs_unit_price 기반.
+    그 외: transactions (subcategory='매출원가') 기반 — counterparty = 매입처.
+    """
     if group_by not in _GROUP_COLS:
         raise ValueError(f"group_by must be one of {list(_GROUP_COLS)}")
-    col = _GROUP_COLS[group_by]
     start, end = build_date_range(year, month)
     cur = conn.cursor()
-    cur.execute(
-        f"""
-        SELECT {col}, COUNT(*), COALESCE(SUM(quantity * COALESCE(cogs_unit_price, 0)), 0)
-        FROM wholesale_sales
-        WHERE entity_id = %s AND sales_date >= %s AND sales_date < %s
-        GROUP BY {col}
-        ORDER BY SUM(quantity * COALESCE(cogs_unit_price, 0)) DESC NULLS LAST
-        """,
-        [entity_id, start, end],
-    )
-    rows = cur.fetchall()
-    cur.execute(
-        """
-        SELECT COUNT(*), COALESCE(SUM(quantity * COALESCE(cogs_unit_price, 0)), 0)
-        FROM wholesale_sales
-        WHERE entity_id = %s AND sales_date >= %s AND sales_date < %s
-        """,
-        [entity_id, start, end],
-    )
-    tot_count, tot_amount = cur.fetchone()
+
+    if entity_id in _WHOLESALE_ENTITIES:
+        col = _GROUP_COLS[group_by]
+        cur.execute(
+            f"""
+            SELECT {col}, COUNT(*), COALESCE(SUM(quantity * COALESCE(cogs_unit_price, 0)), 0)
+            FROM wholesale_sales
+            WHERE entity_id = %s AND sales_date >= %s AND sales_date < %s
+            GROUP BY {col}
+            ORDER BY SUM(quantity * COALESCE(cogs_unit_price, 0)) DESC NULLS LAST
+            """,
+            [entity_id, start, end],
+        )
+        rows = cur.fetchall()
+        cur.execute(
+            """
+            SELECT COUNT(*), COALESCE(SUM(quantity * COALESCE(cogs_unit_price, 0)), 0)
+            FROM wholesale_sales
+            WHERE entity_id = %s AND sales_date >= %s AND sales_date < %s
+            """,
+            [entity_id, start, end],
+        )
+        tot_count, tot_amount = cur.fetchone()
+    else:
+        col = "s.name" if group_by == "product" else "t.counterparty"
+        cur.execute(
+            f"""
+            SELECT {col}, COUNT(*), COALESCE(SUM(t.amount), 0)
+            FROM transactions t
+            JOIN standard_accounts s ON s.id = t.standard_account_id
+            WHERE t.entity_id = %s
+              AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
+              AND s.category = '비용' AND s.subcategory = '매출원가'
+              AND t.is_duplicate = false AND (t.is_cancel IS NOT TRUE)
+            GROUP BY {col}
+            ORDER BY SUM(t.amount) DESC NULLS LAST
+            """,
+            [entity_id, start, end],
+        )
+        rows = cur.fetchall()
+        cur.execute(
+            """
+            SELECT COUNT(*), COALESCE(SUM(t.amount), 0)
+            FROM transactions t
+            JOIN standard_accounts s ON s.id = t.standard_account_id
+            WHERE t.entity_id = %s
+              AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
+              AND s.category = '비용' AND s.subcategory = '매출원가'
+              AND t.is_duplicate = false AND (t.is_cancel IS NOT TRUE)
+            """,
+            [entity_id, start, end],
+        )
+        tot_count, tot_amount = cur.fetchone()
     cur.close()
     return {"group_by": group_by, **_breakdown_rows(rows, tot_count, Decimal(str(tot_amount)), limit)}
 
@@ -379,18 +508,36 @@ def get_pnl_daily(conn: PgConnection, entity_id: int, year: int, month: int) -> 
     start, end = build_date_range(year, month)
     cur = conn.cursor()
 
-    cur.execute(
-        """
-        SELECT EXTRACT(DAY FROM sales_date)::int AS day,
-               COALESCE(SUM(total_amount), 0) AS revenue,
-               COUNT(*) AS sales_count
-        FROM wholesale_sales
-        WHERE entity_id = %s AND sales_date >= %s AND sales_date < %s
-        GROUP BY day
-        ORDER BY day
-        """,
-        [entity_id, start, end],
-    )
+    if entity_id in _WHOLESALE_ENTITIES:
+        cur.execute(
+            """
+            SELECT EXTRACT(DAY FROM sales_date)::int AS day,
+                   COALESCE(SUM(total_amount), 0) AS revenue,
+                   COUNT(*) AS sales_count
+            FROM wholesale_sales
+            WHERE entity_id = %s AND sales_date >= %s AND sales_date < %s
+            GROUP BY day
+            ORDER BY day
+            """,
+            [entity_id, start, end],
+        )
+    else:
+        cur.execute(
+            """
+            SELECT EXTRACT(DAY FROM COALESCE(t.pnl_date, t.date))::int AS day,
+                   COALESCE(SUM(t.amount), 0) AS revenue,
+                   COUNT(*) AS sales_count
+            FROM transactions t
+            JOIN standard_accounts s ON s.id = t.standard_account_id
+            WHERE t.entity_id = %s
+              AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
+              AND s.category = '수익' AND s.subcategory = '매출'
+              AND t.is_duplicate = false AND (t.is_cancel IS NOT TRUE)
+            GROUP BY day
+            ORDER BY day
+            """,
+            [entity_id, start, end],
+        )
     sales_by_day = {r[0]: {"revenue": float(r[1]), "sales_count": r[2]} for r in cur.fetchall()}
 
     cur.execute(

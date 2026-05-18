@@ -2,6 +2,33 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-05-18 — P&L entity 분기 (wholesale vs transactions)
+
+### Fixed
+- `backend/services/pnl_service.py` — 한아원코리아 (entity 2) / 한아원리테일 (3) / HOI (1) P&L 매출 0 으로 표시되던 버그
+  - 기존: 매출/매출원가를 `wholesale_sales` 테이블에서만 조회 (entity_id=13 한아원홀세일 전용)
+  - 수정: `_WHOLESALE_ENTITIES = (13,)` 도입, wholesale entity 외 법인은 `transactions` 의
+    `s.category='수익' AND s.subcategory='매출'` (매출), `s.category='비용' AND s.subcategory='매출원가'` (매출원가) 합산
+  - 영향 함수: `get_pnl_summary`, `get_pnl_daily`, `get_revenue_breakdown`, `get_cogs_breakdown`
+  - VAT 처리: `standard_accounts.is_vat_taxable` 기반 (opex 와 동일 패턴), 과세 항목 /1.1
+- breakdown group_by:
+  - wholesale entity: 기존 `wholesale_sales.product_name` / `payee_name`
+  - 그 외 entity: `transactions.counterparty` (payee), `standard_accounts.name` (product proxy)
+
+### Verified
+- 한아원코리아 2026-04: 매출 ₩25,539,480 (임성재(이수마트약국) 1건), 매출원가 ₩519,013 (주식회사 빌드 1건)
+- 한아원홀세일 2026-04 회귀: 매출 ₩3,299,687,404 / 매출원가 ₩3,261,338,377 / 1,073건 변동 없음
+
+### Notes
+- 동반 DB row 변경 3건 (git untracked):
+  - tx 21732 (2026-05-11 ₩100M 한아원홀세일 대여): standard_account 96000 잡손실 → 11400 단기대여금
+  - tx 9053 (2026-04-03 채효리 ₩1.17M 상품매출): `is_cancel=true` + note (마진 0 의심 검토 보류)
+  - tx 22178 (2026-04-13 주식회사 빌드 ₩519,013): 신규 insert (45100 상품매출원가, 임성재 매출 대응)
+- 후속 작업 (별도):
+  - `internal_accounts.id=510 "대여금"` default `standard_account_id=321 (잡손실)` → 단기대여금 (10900 / 11400) 으로 변경 필요. 결산자료 cross-check 후
+  - 5월 entity 2 codef dedup: 14603/14604 (out, 하나임성재) — 14605/14606 (in, 임성재) 합쳐서 들어온 단일 거래의 중복. ₩45M 가짜 매출원가 inflation
+  - entity 3 (한아원리테일) 매출 데이터 자체 부재 — P&L 0 정상
+
 ## [Unreleased] - 2026-05-08 — 외상매출금 페이지 신설 (payee_aliases 활용)
 
 ### Added
