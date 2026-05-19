@@ -137,6 +137,8 @@ interface CashGap {
   funding_needed: number
   funding_needed_by_day: number
   funding_needed_by_date: string
+  d_day: number
+  d_day_label: string
 }
 
 interface CardProjection {
@@ -349,13 +351,8 @@ function CashOutflowSchedule({
       )} 전까지 자금 마련 필요`
     : `${entries.length}건 예정 · 잔고 부족 없음`
 
-  // D-day 계산 (오늘 → 마감일)
-  const dDay = cashGap ? (() => {
-    const today = new Date(); today.setHours(0,0,0,0)
-    const deadline = new Date(cashGap.funding_needed_by_date + "T00:00:00")
-    const diff = Math.round((deadline.getTime() - today.getTime()) / 86400000)
-    return diff <= 0 ? "D-day" : `D-${diff}`
-  })() : ""
+  // D-day — backend 가 KST 기준으로 계산 (해외 출장 시 클라이언트 타임존 불일치 방지)
+  const dDay = cashGap?.d_day_label ?? ""
 
   return (
     <Card className={`rounded-xl overflow-hidden ${cashGap ? "border-red-500/40 shadow-[0_0_0_1px_rgba(239,68,68,0.15)]" : ""}`}>

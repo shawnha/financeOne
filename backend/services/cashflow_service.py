@@ -1675,16 +1675,21 @@ def generate_daily_schedule(
     if deficit_days:
         first = deficit_days[0]
         max_def = max(d["deficit"] for d in deficit_days)
+        deadline_date = date(year, month, first["day"])
+        days_to_deadline = (deadline_date - today_kst()).days
         cash_gap = {
             "first_deficit_day": first["day"],
-            "first_deficit_date": date(year, month, first["day"]).isoformat(),
+            "first_deficit_date": deadline_date.isoformat(),
             "first_deficit_amount": first["deficit"],
             "max_deficit_amount": max_def,
             "deficit_day_count": len(deficit_days),
             # 사용자가 실제로 필요한 금액: 첫 부족일 전까지 max_deficit 만큼 자금 마련
             "funding_needed": max_def,
             "funding_needed_by_day": first["day"],
-            "funding_needed_by_date": date(year, month, first["day"]).isoformat(),
+            "funding_needed_by_date": deadline_date.isoformat(),
+            # D-day 는 KST 기준으로 backend 가 계산 (해외 출장 시 클라이언트 타임존 불일치 방지)
+            "d_day": max(days_to_deadline, 0),
+            "d_day_label": "D-day" if days_to_deadline <= 0 else f"D-{days_to_deadline}",
         }
 
     return {
