@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>자금 마련 필요 KPI 시안</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --card: #111111;
+    --card-hover: #1a1a1a;
+    --border: rgba(255,255,255,0.08);
+    --fg: #fafafa;
+    --muted: rgba(250,250,250,0.55);
+    --muted-2: rgba(250,250,250,0.4);
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --success: #10b981;
+    --shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 1px 12px rgba(0,0,0,0.3);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px;
+    background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", system-ui, sans-serif;
+    font-feature-settings: "tnum" 1;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px 0; }
+  h2 { font-size: 13px; margin: 28px 0 10px 0; color: var(--muted); font-weight: 500; letter-spacing: 0.02em; }
+  .desc { font-size: 12px; color: var(--muted-2); margin-bottom: 16px; line-height: 1.6; }
+  .grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  .grid-6 { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+  .kpi {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    box-shadow: var(--shadow);
+  }
+  .kpi .label {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.01em;
+    margin-bottom: 6px;
+  }
+  .kpi .value {
+    font-size: 20px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  .kpi .subtext {
+    font-size: 10px;
+    color: var(--muted-2);
+    margin-top: 4px;
+  }
+  .kpi.gray .value { color: #71717a; }
+  .kpi.warning .value { color: var(--warning); }
+  .kpi.danger { border-color: rgba(239,68,68,0.3); background: linear-gradient(180deg, rgba(239,68,68,0.06), var(--card)); }
+  .kpi.danger .label { color: rgba(239,68,68,0.85); font-weight: 600; }
+  .kpi.danger .value { color: var(--danger); }
+  .kpi.danger .subtext { color: rgba(239,68,68,0.7); }
+
+  /* Variant B — alert banner above KPI row */
+  .alert-banner {
+    background: linear-gradient(90deg, rgba(239,68,68,0.1), rgba(239,68,68,0.02));
+    border: 1px solid rgba(239,68,68,0.3);
+    border-radius: 12px;
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+  .alert-banner .icon {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: rgba(239,68,68,0.15);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+  }
+  .alert-banner .text-block { flex: 1; }
+  .alert-banner .title {
+    font-size: 13px; color: var(--danger); font-weight: 600; letter-spacing: 0.01em;
+  }
+  .alert-banner .body {
+    font-size: 12px; color: rgba(250,250,250,0.8); margin-top: 2px;
+  }
+  .alert-banner .amount {
+    font-size: 22px; font-weight: 700; color: var(--danger);
+    font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+  }
+  .alert-banner .deadline {
+    font-size: 11px; color: var(--muted); margin-top: 2px; text-align: right;
+  }
+
+  /* Variant C — gauge bar */
+  .kpi.gauge .gauge-bar {
+    height: 6px; background: rgba(255,255,255,0.06);
+    border-radius: 3px; overflow: hidden;
+    margin: 8px 0 4px 0;
+  }
+  .kpi.gauge .gauge-fill {
+    height: 100%; background: linear-gradient(90deg, var(--danger), #b91c1c);
+    width: 100%;
+  }
+  .kpi.gauge .gauge-meta {
+    display: flex; justify-content: space-between;
+    font-size: 10px; color: var(--muted-2);
+  }
+
+  .pill {
+    display: inline-block;
+    background: rgba(239,68,68,0.12);
+    color: var(--danger);
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+
+  hr { border: 0; border-top: 1px solid var(--border); margin: 36px 0; }
+  .label-strong { color: var(--fg); font-weight: 500; }
+  .num { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+<h1>자금 마련 필요 — KPI 노출 시안 3가지</h1>
+<div class="desc">
+  2026-05 한아원코리아 (entity=2) 데이터 기준 · funding_needed ₩44,797,718 · 마감일 2026-05-22 (D-7) · 첫 부족일 = 5/22 (급여 ₩33M)<br>
+  현재 KPI 행은 5칸 (기초 / 원래 예상 기말 / 예상 기말 (합성) / 실제 기말 / 차이). 시안 A·B·C 비교.
+</div>
+
+<h2>현재 (변경 전) — 비교용</h2>
+<div class="grid-5">
+  <div class="kpi">
+    <div class="label">기초 (4월 확정)</div>
+    <div class="value num">₩44,547,375</div>
+  </div>
+  <div class="kpi gray">
+    <div class="label">원래 예상 기말</div>
+    <div class="value num">₩-17,612,460</div>
+  </div>
+  <div class="kpi warning">
+    <div class="label">예상 기말 (05-15 합성)</div>
+    <div class="value num">₩-44,797,718</div>
+  </div>
+  <div class="kpi">
+    <div class="label">실제 기말</div>
+    <div class="value num">₩25,061,381</div>
+    <div class="subtext">5/13 기준 + 예상</div>
+  </div>
+  <div class="kpi warning">
+    <div class="label">차이 (실제 vs 예상)</div>
+    <div class="value num">+₩69,859,099</div>
+    <div class="subtext">실제가 예상보다 높음</div>
+  </div>
+</div>
+
+<hr>
+
+<h2>시안 A — 6번째 KPI 카드 추가 (가장 작은 변화)</h2>
+<div class="desc">
+  기존 5칸 옆에 빨간색 6번째 카드. 늘 같은 위치에 노출되므로 사용자가 매일 같은 자리에서 확인. 그리드가 6열로 바뀜 (좁은 폭에선 자동 줄바꿈).
+</div>
+<div class="grid-6">
+  <div class="kpi">
+    <div class="label">기초 (4월 확정)</div>
+    <div class="value num">₩44,547,375</div>
+  </div>
+  <div class="kpi gray">
+    <div class="label">원래 예상 기말</div>
+    <div class="value num">₩-17,612,460</div>
+  </div>
+  <div class="kpi warning">
+    <div class="label">예상 기말 (05-15 합성)</div>
+    <div class="value num">₩-44,797,718</div>
+  </div>
+  <div class="kpi">
+    <div class="label">실제 기말</div>
+    <div class="value num">₩25,061,381</div>
+    <div class="subtext">5/13 기준 + 예상</div>
+  </div>
+  <div class="kpi warning">
+    <div class="label">차이 (실제 vs 예상)</div>
+    <div class="value num">+₩69,859,099</div>
+  </div>
+  <div class="kpi danger">
+    <div class="label">⚠️ 자금 마련 필요</div>
+    <div class="value num">₩44,797,718</div>
+    <div class="subtext">5/22 (금) 전까지 · 7일 부족</div>
+  </div>
+</div>
+
+<hr>
+
+<h2>시안 B — KPI 상단 단독 alert 배너 (가장 강조)</h2>
+<div class="desc">
+  자금 부족이 있을 때만 KPI 위에 배너로 등장. 부족이 없으면 안 보임 (가독성↑, 노이즈↓). 사용자가 페이지 들어오자마자 가장 먼저 보이는 위치.
+</div>
+<div class="alert-banner">
+  <div class="icon">⚠️</div>
+  <div class="text-block">
+    <div class="title">자금 마련 필요</div>
+    <div class="body">
+      2026-05-22 (금) 전까지 자금 마련 필요 · 첫 부족일에 급여 ₩33M 출금 예정 · 7일 부족 예상
+    </div>
+  </div>
+  <div>
+    <div class="amount num">₩44,797,718</div>
+    <div class="deadline">D-7 · 5/22까지</div>
+  </div>
+</div>
+<div class="grid-5">
+  <div class="kpi">
+    <div class="label">기초 (4월 확정)</div>
+    <div class="value num">₩44,547,375</div>
+  </div>
+  <div class="kpi gray">
+    <div class="label">원래 예상 기말</div>
+    <div class="value num">₩-17,612,460</div>
+  </div>
+  <div class="kpi warning">
+    <div class="label">예상 기말 (05-15 합성)</div>
+    <div class="value num">₩-44,797,718</div>
+  </div>
+  <div class="kpi">
+    <div class="label">실제 기말</div>
+    <div class="value num">₩25,061,381</div>
+    <div class="subtext">5/13 기준 + 예상</div>
+  </div>
+  <div class="kpi warning">
+    <div class="label">차이 (실제 vs 예상)</div>
+    <div class="value num">+₩69,859,099</div>
+  </div>
+</div>
+
+<hr>
+
+<h2>시안 C — 6번째 카드 + gauge 바 (deficit 강도 시각화)</h2>
+<div class="desc">
+  6번째 카드에 gauge 바를 추가해 부족 규모를 한눈에. funding_needed / 기초잔고 비율로 막대 색·길이를 채움.
+</div>
+<div class="grid-6">
+  <div class="kpi">
+    <div class="label">기초 (4월 확정)</div>
+    <div class="value num">₩44,547,375</div>
+  </div>
+  <div class="kpi gray">
+    <div class="label">원래 예상 기말</div>
+    <div class="value num">₩-17,612,460</div>
+  </div>
+  <div class="kpi warning">
+    <div class="label">예상 기말 (05-15 합성)</div>
+    <div class="value num">₩-44,797,718</div>
+  </div>
+  <div class="kpi">
+    <div class="label">실제 기말</div>
+    <div class="value num">₩25,061,381</div>
+  </div>
+  <div class="kpi warning">
+    <div class="label">차이 (실제 vs 예상)</div>
+    <div class="value num">+₩69,859,099</div>
+  </div>
+  <div class="kpi danger gauge">
+    <div class="label">⚠️ 자금 마련 필요</div>
+    <div class="value num">₩44,797,718</div>
+    <div class="gauge-bar"><div class="gauge-fill" style="width:100%"></div></div>
+    <div class="gauge-meta"><span>5/22 (D-7)</span><span class="pill">100% of 기초</span></div>
+  </div>
+</div>
+
+<hr>
+
+<h2>비교 요약</h2>
+<table style="font-size: 12px; color: var(--muted); border-collapse: collapse; min-width: 600px;">
+  <thead>
+    <tr style="text-align: left; color: var(--fg);">
+      <th style="padding: 8px 14px; border-bottom: 1px solid var(--border);">시안</th>
+      <th style="padding: 8px 14px; border-bottom: 1px solid var(--border);">강도</th>
+      <th style="padding: 8px 14px; border-bottom: 1px solid var(--border);">코드 변경</th>
+      <th style="padding: 8px 14px; border-bottom: 1px solid var(--border);">노이즈 (부족 없을 때)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="padding: 8px 14px;">A — 6번째 KPI 카드</td>
+      <td style="padding: 8px 14px;">중</td>
+      <td style="padding: 8px 14px;">grid-cols-5 → 6, KPICard 1개 추가</td>
+      <td style="padding: 8px 14px;">카드 자리에 "부족 없음 ✓" 표시 가능</td>
+    </tr>
+    <tr>
+      <td style="padding: 8px 14px;">B — 상단 alert 배너</td>
+      <td style="padding: 8px 14px;">강 (가장 눈에 띔)</td>
+      <td style="padding: 8px 14px;">새 컴포넌트 추가 (조건부 렌더)</td>
+      <td style="padding: 8px 14px;">없음 (배너 자체가 안 보임)</td>
+    </tr>
+    <tr>
+      <td style="padding: 8px 14px;">C — 6번째 카드 + gauge</td>
+      <td style="padding: 8px 14px;">중 (시각적 임팩트 추가)</td>
+      <td style="padding: 8px 14px;">A + gauge SVG/CSS bar</td>
+      <td style="padding: 8px 14px;">카드 자리에 빈 gauge</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="desc" style="margin-top: 20px;">
+  <strong class="label-strong">추천</strong> — <strong style="color: var(--danger)">시안 B (상단 alert 배너)</strong>.
+  이유: 사용자 발언 "그 이후에도 괜찮다는 것으로 보이지자나" 를 반영하면 "부족 발생 여부"를 가장 즉시 인지해야 함.
+  배너는 부족 시에만 등장 → 안 보이면 안전, 보이면 빨강. 이진(0/1) 시각적 신호가 가장 명확.
+  KPI 6칸으로 늘리면 모바일/좁은 폭에서 줄바꿈되며 7번째 라인 차지 → 일관성 떨어짐.
+</div>
+
+</body>
+</html>

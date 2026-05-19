@@ -2,6 +2,32 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-05-19 — 자금소요 일정 + 휴일 보정 + 자금 마련 필요 KPI
+
+### Added
+- `backend/utils/business_day.py` — 한국 영업일 보정 유틸 (`adjust_to_business_day`, `is_business_day`, `default_rule_for_account`)
+  - `holidays==0.60` 패키지 의존, 연도별 `_kr_holidays` lru_cache
+  - 룰 3가지: `none` / `before` (급여 통례, 휴일이면 앞당김) / `after` (4대보험·세금·카드결제, 휴일이면 미룸)
+  - 다른 월로 넘어가면 같은 월 안의 반대 방향 영업일로 fallback
+  - `default_rule_for_account` — 내부계정 이름 키워드 매칭으로 룰 자동 추정
+- `forecasts.holiday_rule` 컬럼 (마이그레이션 `f2g3h4i5j6k7`) — `'none'|'before'|'after'` CHECK 제약
+- `generate_daily_schedule` 응답에 `outflow_schedule[]`, `cash_gap`, `card_projection[]`, `last_actual_day` 신규 필드
+  - `outflow_schedule`: 일별 출금 이벤트 + running balance + 휴일 보정 정보 (original_date/adjusted_date/shifted)
+  - `cash_gap`: 첫 부족일 / 누적 최대 부족액 / `funding_needed` (월 전체 deficit 회피에 필요한 금액) / `funding_needed_by_date` (마감일)
+  - `card_projection`: 전월 실제 사용액 기반 카드별 결제 추정
+- `frontend/src/app/cashflow/forecast-tab.tsx` — `CashOutflowSchedule` 컴포넌트
+  - cashGap 있을 때 빨간 그라데이션 헤더 + "⚠️ 자금소요 일정" + 자금 마련 필요 금액 + D-day 배지
+  - 카드 결제 추정 inline display + 일별 출금 이벤트 펼치기/접기
+  - 휴일 보정 적용된 항목은 `shifted` 플래그로 표시
+
+### Financial accuracy
+- `cash_gap` 계산은 출금 이벤트가 없는 날도 검사 (daily_undated_out 누적으로 잔고가 음수로 갈 수 있음)
+- `funding_needed = max(deficit over remaining month)` — 한 번 마련하면 모든 부족일이 해결되는 최소 금액
+- `running_balance` = 오늘까지 실제 잔고 + 오늘 이후 forecast 이벤트 누적
+
+### Refactor
+- `_build_forecast_item` 헬퍼 추출 — `_holiday_dates` 호출을 item당 1회로 통합 (기존 3회)
+
 ## [Unreleased] - 2026-05-18 — P&L entity 분기 (wholesale vs transactions)
 
 ### Fixed

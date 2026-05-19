@@ -61,6 +61,9 @@ interface ForecastItem {
   actual_from_transactions: number | null
   expected_day: number | null
   payment_method: string
+  holiday_rule?: "none" | "before" | "after"
+  original_date?: string | null
+  adjusted_date?: string | null
   line_items: ForecastLineItem[] | null
 }
 
@@ -105,6 +108,46 @@ interface DailyAlert {
   message: string
 }
 
+interface OutflowEvent {
+  name: string
+  amount: number
+  type: string
+  original_date?: string
+  adjusted_date?: string
+  holiday_rule?: "none" | "before" | "after"
+  shifted?: boolean
+}
+
+interface OutflowScheduleEntry {
+  day: number
+  date: string
+  events: OutflowEvent[]
+  day_total: number
+  running_balance: number
+  is_deficit: boolean
+  is_projection?: boolean
+}
+
+interface CashGap {
+  first_deficit_day: number
+  first_deficit_date: string
+  first_deficit_amount: number
+  max_deficit_amount: number
+  deficit_day_count: number
+  funding_needed: number
+  funding_needed_by_day: number
+  funding_needed_by_date: string
+}
+
+interface CardProjection {
+  source_type: string
+  card_name: string
+  payment_day: number
+  payment_date: string
+  amount: number
+  source: string
+}
+
 interface DailyScheduleData {
   year: number
   month: number
@@ -115,6 +158,10 @@ interface DailyScheduleData {
   worst_case_points?: Array<{ day: number; balance: number }>
   card_settings: CardSetting[]
   min_balance_threshold: number
+  outflow_schedule?: OutflowScheduleEntry[]
+  cash_gap?: CashGap | null
+  card_projection?: CardProjection[]
+  last_actual_day?: number
 }
 
 interface ForecastData {
@@ -269,6 +316,170 @@ const CARD_COLORS: Record<string, { stroke: string; fill: string; label: string 
 const DEFAULT_CARD_COLOR = { stroke: "#8B5CF6", fill: "rgba(139,92,246,0.3)", label: "카드 결제일" }
 
 // ── Forecast Balance Chart (daily-schedule API) ──────
+
+// ── Cash Outflow Schedule (자금소요 일정 — 일별 출금) ─────────
+
+function CashOutflowSchedule({
+  schedule,
+  entityId,
+  formatByEntity,
+}: {
+  schedule: DailyScheduleData | null
+  entityId: string | null
+  formatByEntity: (amount: number, entityId: string | null) => string
+}) {
+  const [expanded, setExpanded] = useState(true)
+  const entries = schedule?.outflow_schedule ?? []
+  const cashGap = schedule?.cash_gap
+  const cardProjection = schedule?.card_projection ?? []
+
+  if (entries.length === 0) return null
+
+  const formatDate = (iso: string) => {
+    const d = new Date(iso + "T00:00:00")
+    const wk = ["일", "월", "화", "수", "목", "금", "토"][d.getDay()]
+    return `${d.getMonth() + 1}/${d.getDate()} (${wk})`
+  }
+
+  // 접힌 상태 요약 — 부족시점 + 마련 필요 금액 + 마지막 기준일
+  const lastEntry = entries[entries.length - 1]
+  const summaryLine = cashGap
+    ? `${formatDate(lastEntry.date)}까지 총 ${formatByEntity(cashGap.funding_needed, entityId)} 부족 — ${formatDate(
+        cashGap.funding_needed_by_date,
+      )} 전까지 자금 마련 필요`
+    : `${entries.length}건 예정 · 잔고 부족 없음`
+
+  // D-day 계산 (오늘 → 마감일)
+  const dDay = cashGap ? (() => {
+    const today = new Date(); today.setHours(0,0,0,0)
+    const deadline = new Date(cashGap.funding_needed_by_date + "T00:00:00")
+    const diff = Math.round((deadline.getTime() - today.getTime()) / 86400000)
+    return diff <= 0 ? "D-day" : `D-${diff}`
+  })() : ""
+
+  return (
+    <Card className={`rounded-xl overflow-hidden ${cashGap ? "border-red-500/40 shadow-[0_0_0_1px_rgba(239,68,68,0.15)]" : ""}`}>
+      {/* Header — toggles expand. Gradient red bg when cashGap. */}
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className={`w-full px-5 py-3.5 flex items-center justify-between border-b transition-colors ${
+          cashGap
+            ? "bg-gradient-to-r from-red-500/[0.10] to-red-500/[0.02] hover:from-red-500/[0.14] hover:to-red-500/[0.04]"
+            : "hover:bg-muted/30"
+        }`}
+        aria-expanded={expanded}
+      >
+        <div className="flex items-center gap-3">
+          <ChevronDown
+            className={`h-4 w-4 transition-transform ${expanded ? "" : "-rotate-90"} ${
+              cashGap ? "text-red-500" : "text-muted-foreground"
+            }`}
+          />
+          <div className="text-left">
+            <h3 className={`text-sm font-semibold ${cashGap ? "text-red-600" : ""}`}>
+              {cashGap ? "⚠️ 자금소요 일정" : "자금소요 일정"}
+            </h3>
+            {!expanded && (
+              <p className={`text-xs mt-0.5 ${cashGap ? "text-red-600/90 font-medium" : "text-muted-foreground/80"}`}>
+                {summaryLine}
+              </p>
+            )}
+            {expanded && (
+              <p className="text-[11px] text-muted-foreground/80 mt-0.5">
+                오늘부터 말일까지의 출금 예정 · 휴일 보정 적용 · 잔고 = 오늘까지 실제 + 이후 예상
+              </p>
+            )}
+          </div>
+        </div>
+        {cashGap && (
+          <div className="text-right flex items-center gap-4">
+            <div className="text-right">
+              <div className="text-[10px] uppercase tracking-wide text-red-500/80 font-semibold mb-0.5">
+                자금 마련 필요
+              </div>
+              <div className="text-2xl font-mono text-red-600 font-bold tabular-nums leading-none">
+                {formatByEntity(cashGap.funding_needed, entityId)}
+              </div>
+              <div className="text-[11px] text-muted-foreground/80 mt-1">
+                {formatDate(cashGap.funding_needed_by_date)}까지 · {cashGap.deficit_day_count}일 부족
+              </div>
+            </div>
+            <span className="inline-flex items-center justify-center min-w-[52px] px-2.5 py-1.5 rounded-md bg-red-500 text-white text-sm font-bold tabular-nums">
+              {dDay}
+            </span>
+          </div>
+        )}
+      </button>
+
+      {expanded && (
+        <>
+          {/* Card projection — 카드별 결제 추정액 */}
+          {cardProjection.length > 0 && (
+            <div className="px-5 py-2.5 bg-muted/20 border-b flex flex-wrap gap-x-5 gap-y-1.5 text-xs">
+              <span className="text-muted-foreground/70 font-medium">카드 결제 추정:</span>
+              {cardProjection.map((c) => (
+                <span key={c.source_type} className="flex items-center gap-1.5">
+                  <span className="text-muted-foreground">{c.card_name}</span>
+                  <span className="font-mono">{formatDate(c.payment_date)}</span>
+                  <span className="font-mono font-medium text-foreground">
+                    {formatByEntity(c.amount, entityId)}
+                  </span>
+                </span>
+              ))}
+              <span className="text-[10px] text-muted-foreground/60 ml-auto">전월 실제 사용액 기준</span>
+            </div>
+          )}
+
+          <div className="divide-y">
+            {entries.map((entry) => (
+              <div
+                key={entry.day}
+                className={`px-5 py-2.5 grid grid-cols-[90px_1fr_120px_120px] gap-3 items-start text-xs ${
+                  entry.is_deficit ? "bg-red-500/[0.06]" : ""
+                }`}
+              >
+                <div className="font-mono font-medium text-foreground">{formatDate(entry.date)}</div>
+                <div className="space-y-0.5">
+                  {entry.events.map((ev, i) => (
+                    <div key={i} className="flex items-center gap-1.5">
+                      <span className="text-foreground/90">{ev.name}</span>
+                      {ev.shifted && (
+                        <span
+                          className="text-[10px] px-1.5 py-px rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 font-medium"
+                          title={`원래 ${ev.original_date} → ${ev.adjusted_date}로 보정 (${
+                            ev.holiday_rule === "before" ? "앞당김" : "미룸"
+                          })`}
+                        >
+                          휴일보정 {ev.holiday_rule === "before" ? "↞" : "↠"}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="text-right font-mono text-foreground/80">
+                  -{formatByEntity(entry.day_total, entityId)}
+                </div>
+                <div
+                  className={`text-right font-mono font-semibold ${
+                    entry.is_deficit ? "text-red-600" : "text-foreground/90"
+                  }`}
+                >
+                  {formatByEntity(entry.running_balance, entityId)}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="px-5 py-2 bg-muted/30 grid grid-cols-[90px_1fr_120px_120px] gap-3 text-[10px] uppercase tracking-wide text-muted-foreground/60">
+            <span>일자</span>
+            <span>항목</span>
+            <span className="text-right">당일 출금</span>
+            <span className="text-right">잔고</span>
+          </div>
+        </>
+      )}
+    </Card>
+  )
+}
 
 // ── Warnings Card (잔고 부족 + 예산 초과 통합) ─────────
 
@@ -958,6 +1169,9 @@ function ForecastModal({
   const [recurring, setRecurring] = useState(editItem?.is_recurring || false)
   const [expectedDay, setExpectedDay] = useState(editItem?.expected_day ? String(editItem.expected_day) : "")
   const [paymentMethod, setPaymentMethod] = useState<"bank" | "card">((editItem?.payment_method as "bank" | "card") || "bank")
+  const [holidayRule, setHolidayRule] = useState<"none" | "before" | "after">(
+    (editItem?.holiday_rule as "none" | "before" | "after") || "none",
+  )
   const [note, setNote] = useState(editItem?.note ?? "")
   const [lineItems, setLineItems] = useState<ForecastLineItem[]>(editItem?.line_items ?? [])
   const [saving, setSaving] = useState(false)
@@ -972,6 +1186,7 @@ function ForecastModal({
       setRecurring(editItem.is_recurring)
       setExpectedDay(editItem.expected_day ? String(editItem.expected_day) : "")
       setPaymentMethod((editItem.payment_method as "bank" | "card") || "bank")
+      setHolidayRule((editItem.holiday_rule as "none" | "before" | "after") || "none")
       setNote(editItem.note ?? "")
       setLineItems(editItem.line_items ?? [])
     }
@@ -1076,6 +1291,7 @@ function ForecastModal({
             is_recurring: recurring,
             expected_day: expectedDay ? Number(expectedDay) : null,
             payment_method: paymentMethod,
+            holiday_rule: holidayRule,
             note: note.trim() || null,
             line_items: lineItemsPayload,
           }),
@@ -1102,6 +1318,7 @@ function ForecastModal({
               internal_account_id: child.id,
               expected_day: expectedDay ? Number(expectedDay) : null,
               payment_method: paymentMethod,
+              holiday_rule: holidayRule,
             }),
           })
         }
@@ -1120,6 +1337,7 @@ function ForecastModal({
             internal_account_id: selectedAccountId ? Number(selectedAccountId) : null,
             expected_day: expectedDay ? Number(expectedDay) : null,
             payment_method: paymentMethod,
+            holiday_rule: holidayRule,
             note: note.trim() || null,
             line_items: lineItemsPayload,
           }),
@@ -1390,6 +1608,23 @@ function ForecastModal({
               </select>
             </div>
           </div>
+          {paymentMethod === "bank" && expectedDay && (
+            <div>
+              <label className="text-xs text-muted-foreground">휴일 보정 — 예상일이 휴일/주말일 때</label>
+              <select
+                value={holidayRule}
+                onChange={(e) => setHolidayRule(e.target.value as "none" | "before" | "after")}
+                className="mt-1 w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="none">보정 안 함</option>
+                <option value="before">앞당겨 지급 (직전 영업일) — 급여 통례</option>
+                <option value="after">미뤄 지급 (다음 영업일) — 4대보험·세금 통례</option>
+              </select>
+              <p className="text-[10px] text-muted-foreground/70 mt-1">
+                일별 자금소요 스케줄에만 영향 — 월 합계는 그대로
+              </p>
+            </div>
+          )}
           <div>
             <label className="text-xs text-muted-foreground">메모</label>
             <textarea
@@ -2098,6 +2333,9 @@ export function ForecastTab({ entityId }: { entityId: string | null }) {
           formatByEntity={formatByEntity}
         />
       )}
+
+      {/* Cash outflow schedule — 일별 자금소요 + 휴일 보정 */}
+      <CashOutflowSchedule schedule={schedule} entityId={entityId} formatByEntity={formatByEntity} />
 
       {/* Forecast vs Actual balance chart (daily-schedule API) */}
       <ForecastBalanceChart schedule={schedule} forecastData={data} entityId={entityId} month={m} onClosingBalances={setClosingBalances} />

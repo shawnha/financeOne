@@ -35,6 +35,7 @@ class ForecastCreate(BaseModel):
     note: Optional[str] = None
     expected_day: Optional[int] = Field(None, ge=1, le=31)  # CQ-2
     payment_method: str = "bank"
+    holiday_rule: str = Field("none", pattern="^(none|before|after)$")
     line_items: Optional[list[ForecastLineItem]] = None
 
 
@@ -49,6 +50,7 @@ class ForecastUpdate(BaseModel):
     note: Optional[str] = None
     expected_day: Optional[int] = Field(None, ge=1, le=31)
     payment_method: Optional[str] = None
+    holiday_rule: Optional[str] = Field(None, pattern="^(none|before|after)$")
     line_items: Optional[list[ForecastLineItem]] = None
 
 
@@ -79,7 +81,7 @@ def list_forecasts(
             SELECT f.id, f.entity_id, f.year, f.month, f.category, f.subcategory, f.type,
                    f.forecast_amount, f.actual_amount, f.is_recurring,
                    f.internal_account_id, ia.name AS internal_account_name,
-                   f.note, f.expected_day, f.payment_method, f.line_items,
+                   f.note, f.expected_day, f.payment_method, f.holiday_rule, f.line_items,
                    f.created_at, f.updated_at
             FROM forecasts f
             LEFT JOIN internal_accounts ia ON f.internal_account_id = ia.id
@@ -94,7 +96,7 @@ def list_forecasts(
             SELECT f.id, f.entity_id, f.year, f.month, f.category, f.subcategory, f.type,
                    f.forecast_amount, f.actual_amount, f.is_recurring,
                    f.internal_account_id, ia.name AS internal_account_name,
-                   f.note, f.expected_day, f.payment_method, f.line_items,
+                   f.note, f.expected_day, f.payment_method, f.holiday_rule, f.line_items,
                    f.created_at, f.updated_at
             FROM forecasts f
             LEFT JOIN internal_accounts ia ON f.internal_account_id = ia.id
@@ -129,8 +131,8 @@ def create_forecast(
         INSERT INTO forecasts
             (entity_id, year, month, category, subcategory, type,
              forecast_amount, is_recurring, internal_account_id, note,
-             expected_day, payment_method, line_items)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+             expected_day, payment_method, holiday_rule, line_items)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
         ON CONFLICT (entity_id, year, month, internal_account_id, type)
           WHERE internal_account_id IS NOT NULL
         DO UPDATE SET forecast_amount = EXCLUDED.forecast_amount,
@@ -139,6 +141,7 @@ def create_forecast(
                       note = EXCLUDED.note,
                       expected_day = EXCLUDED.expected_day,
                       payment_method = EXCLUDED.payment_method,
+                      holiday_rule = EXCLUDED.holiday_rule,
                       line_items = EXCLUDED.line_items,
                       updated_at = NOW()
         RETURNING id
@@ -146,7 +149,7 @@ def create_forecast(
         [body.entity_id, body.year, body.month, body.category,
          body.subcategory, body.type, effective_amount,
          body.is_recurring, body.internal_account_id, body.note,
-         body.expected_day, body.payment_method, line_json],
+         body.expected_day, body.payment_method, body.holiday_rule, line_json],
     )
     forecast_id = cur.fetchone()[0]
     conn.commit()
@@ -200,6 +203,9 @@ def update_forecast(
     if body.payment_method is not None:
         updates.append("payment_method = %s")
         params.append(body.payment_method)
+    if body.holiday_rule is not None:
+        updates.append("holiday_rule = %s")
+        params.append(body.holiday_rule)
     if body.line_items is not None:
         # line_items 업데이트 시 forecast_amount도 자동 재계산 (명시적 forecast_amount 있으면 존중)
         updates.append("line_items = %s::jsonb")

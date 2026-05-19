@@ -161,6 +161,7 @@ CREATE TABLE IF NOT EXISTS forecasts (
   note                TEXT,
   expected_day        INTEGER,
   payment_method      TEXT NOT NULL DEFAULT 'bank' CHECK (payment_method IN ('bank', 'card')),
+  holiday_rule        TEXT NOT NULL DEFAULT 'none' CHECK (holiday_rule IN ('none', 'before', 'after')),
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

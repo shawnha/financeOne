@@ -12,6 +12,7 @@ from typing import Optional
 
 from psycopg2.extensions import connection as PgConnection
 
+from backend.utils.business_day import adjust_to_business_day, default_rule_for_account
 from backend.utils.db import build_date_range, fetch_all
 from backend.utils.timezone import today_kst
 
@@ -757,7 +758,7 @@ def get_forecast_cashflow(
         """
         SELECT f.id, f.category, f.subcategory, f.type, f.forecast_amount, f.actual_amount,
                f.is_recurring, f.note, f.internal_account_id, f.expected_day, f.payment_method,
-               f.line_items,
+               f.holiday_rule, f.line_items,
                ia.name AS internal_account_name, ia.parent_id AS internal_account_parent_id,
                parent_ia.name AS parent_account_name
         FROM forecasts f
@@ -1128,28 +1129,69 @@ def get_forecast_cashflow(
         "unmapped_count": unmapped_count,
         "warnings": warnings,
         "items": [
-            {
-                "id": i["id"],
-                "category": i["category"],
-                "subcategory": i["subcategory"],
-                "type": i["type"],
-                "forecast_amount": float(i["forecast_amount"]),
-                "actual_amount": float(i["actual_amount"]) if i["actual_amount"] else None,
-                "is_recurring": i["is_recurring"],
-                "note": i["note"],
-                "internal_account_id": i.get("internal_account_id"),
-                "internal_account_name": i.get("internal_account_name"),
-                "internal_account_parent_id": i.get("internal_account_parent_id"),
-                "parent_account_name": i.get("parent_account_name"),
-                "expected_day": i.get("expected_day"),
-                "payment_method": i.get("payment_method", "bank"),
-                "line_items": i.get("line_items"),
-                "actual_from_transactions": actual_by_account.get(
-                    (i.get("internal_account_id"), i["type"]), {}
-                ).get("total", 0.0) if i.get("internal_account_id") else None,
-            }
+            _build_forecast_item(i, year, month, actual_by_account)
             for i in items
         ],
+    }
+
+
+def _build_forecast_item(i: dict, year: int, month: int, actual_by_account: dict) -> dict:
+    hd = _holiday_dates(year, month, i)
+    return {
+        "id": i["id"],
+        "category": i["category"],
+        "subcategory": i["subcategory"],
+        "type": i["type"],
+        "forecast_amount": float(i["forecast_amount"]),
+        "actual_amount": float(i["actual_amount"]) if i["actual_amount"] else None,
+        "is_recurring": i["is_recurring"],
+        "note": i["note"],
+        "internal_account_id": i.get("internal_account_id"),
+        "internal_account_name": i.get("internal_account_name"),
+        "internal_account_parent_id": i.get("internal_account_parent_id"),
+        "parent_account_name": i.get("parent_account_name"),
+        "expected_day": i.get("expected_day"),
+        "payment_method": i.get("payment_method", "bank"),
+        "holiday_rule": i.get("holiday_rule") or "none",
+        "effective_holiday_rule": hd.get("effective_rule"),
+        "original_date": hd.get("original"),
+        "adjusted_date": hd.get("adjusted"),
+        "line_items": i.get("line_items"),
+        "actual_from_transactions": actual_by_account.get(
+            (i.get("internal_account_id"), i["type"]), {}
+        ).get("total", 0.0) if i.get("internal_account_id") else None,
+    }
+
+
+def effective_holiday_rule(item: dict) -> str:
+    """저장된 holiday_rule 이 'none' 이면 계정명 기반 default 로 폴백.
+    급여→before, 4대보험·세금·임대→after, 그 외 none.
+    """
+    stored = item.get("holiday_rule") or "none"
+    if stored != "none":
+        return stored
+    # 계정명 후보 (display 우선순위)
+    name = (
+        item.get("internal_account_name")
+        or item.get("category")
+        or item.get("parent_account_name")
+    )
+    return default_rule_for_account(name)
+
+
+def _holiday_dates(year: int, month: int, item: dict) -> dict:
+    """forecast item 의 expected_day 를 holiday_rule(effective) 로 보정.
+    expected_day 가 None 이면 둘 다 None.
+    """
+    day = item.get("expected_day")
+    if not day:
+        return {"original": None, "adjusted": None, "effective_rule": "none"}
+    rule = effective_holiday_rule(item)
+    original, adjusted = adjust_to_business_day(year, month, day, rule)
+    return {
+        "original": original.isoformat(),
+        "adjusted": adjusted.isoformat(),
+        "effective_rule": rule,
     }
 
 
@@ -1425,22 +1467,41 @@ def generate_daily_schedule(
     # 날짜별 이벤트 매핑
     day_events: dict[int, list[dict]] = defaultdict(list)
 
-    # 1. expected_day 지정 bank 항목 — P1-5 clamp_day_to_month 사용
+    # 1. expected_day 지정 bank 항목 — holiday_rule(effective) 보정 후 일자에 배치
     for item in items:
         if item.get("payment_method", "bank") == "bank" and item.get("expected_day"):
-            day = clamp_day_to_month(item["expected_day"], year, month)
+            stored_rule = item.get("holiday_rule") or "none"
+            rule = effective_holiday_rule(item)
+            original, adjusted = adjust_to_business_day(
+                year, month, item["expected_day"], rule,
+            )
+            day = adjusted.day
             day_events[day].append({
-                "name": item["category"],
+                "name": item.get("category") or item.get("internal_account_name") or "",
                 "amount": item["forecast_amount"],
                 "type": item["type"],
+                "original_date": original.isoformat(),
+                "adjusted_date": adjusted.isoformat(),
+                "holiday_rule": rule,
+                "rule_is_default": stored_rule == "none" and rule != "none",
+                "shifted": original != adjusted,
             })
 
     # 2. 카드 결제일 (card_settings 기반) — P1-5 clamp_day_to_month 사용
+    card_projection: list[dict] = []
     for card in cards:
         prev_card = get_card_total_net(
             conn, entity_id, prev_year, prev_month, source_type=card["source_type"],
         )
         day = clamp_day_to_month(card["payment_day"], year, month)
+        card_projection.append({
+            "source_type": card["source_type"],
+            "card_name": card["card_name"],
+            "payment_day": day,
+            "payment_date": date(year, month, day).isoformat(),
+            "amount": float(prev_card),
+            "source": "prev_month_actual",
+        })
         if prev_card > 0:
             day_events[day].append({
                 "name": f"{card['card_name']} 결제",
@@ -1540,6 +1601,92 @@ def generate_daily_schedule(
             "balance": round(worst_balance),
         })
 
+    # 자금소요 일정 — 실제(오늘까지) + 예상(오늘 이후) 합성 running balance.
+    # 6-bis 의 actual_daily_points 를 활용해 오늘까지의 실제 잔고를 그대로 사용,
+    # 오늘 이후는 실제 잔고에서 출발해 forecast 이벤트로 진행.
+    last_actual_day: int = forecast_data.get("last_actual_day", 0)
+    actual_balance_by_day = {
+        p["day"]: p["balance"] for p in forecast_data.get("actual_daily_points", [])
+    }
+    # 마지막 실제일까지 forward-fill: 거래 없는 날도 전일 잔고 유지
+    last_actual_balance = forecast_data["opening_balance"]
+    actual_running: dict[int, float] = {}
+    for d in range(1, days_in_month + 1):
+        if d in actual_balance_by_day:
+            last_actual_balance = actual_balance_by_day[d]
+        if d <= last_actual_day:
+            actual_running[d] = last_actual_balance
+
+    # 오늘 이후의 예상 잔고는 last_actual_balance 에서 시작해 forecast event 누적
+    projected_running: dict[int, float] = {}
+    cur_proj = last_actual_balance
+    for d in range(last_actual_day + 1, days_in_month + 1):
+        day_change = sum(
+            -e["amount"] if e["type"] == "out" else e["amount"]
+            for e in day_events.get(d, [])
+        ) - daily_undated_out + daily_undated_in
+        cur_proj += day_change
+        projected_running[d] = cur_proj
+
+    def _running_balance(d: int) -> float:
+        if d <= last_actual_day:
+            return actual_running.get(d, last_actual_balance)
+        return projected_running.get(d, last_actual_balance)
+
+    # 보는 날 기준으로 업데이트 — 지난 일자는 스케줄에서 제외 (오늘 포함 이후만 표시).
+    today_day = forecast_data.get("today_day_in_month") or 1
+    if today_day is None or today_day < 1:
+        schedule_start_day = 1
+    else:
+        schedule_start_day = today_day
+
+    # deficit_days — 출금 이벤트 유무와 무관하게 모든 날을 검사.
+    # daily_undated_out 누적으로 출금 이벤트가 없는 날에도 잔고가 음수로 갈 수 있음.
+    deficit_days = []
+    for d in range(schedule_start_day, days_in_month + 1):
+        rb = round(_running_balance(d))
+        if rb < min_balance_threshold:
+            deficit_days.append({"day": d, "balance": rb, "deficit": abs(rb)})
+
+    # outflow_schedule — UI 표시용. 출금 이벤트가 있는 날만 표시.
+    outflow_schedule = []
+    deficit_day_set = {d["day"] for d in deficit_days}
+    for d in range(schedule_start_day, days_in_month + 1):
+        evts = day_events.get(d, [])
+        out_evts = [e for e in evts if e["type"] == "out"]
+        if not out_evts:
+            continue
+        day_outflow = sum(e["amount"] for e in out_evts)
+        rb = round(_running_balance(d))
+        outflow_schedule.append({
+            "day": d,
+            "date": date(year, month, d).isoformat(),
+            "events": out_evts,
+            "day_total": round(day_outflow),
+            "running_balance": rb,
+            "is_deficit": d in deficit_day_set,
+            "is_projection": d > last_actual_day,
+        })
+
+    # cash_gap — 말일까지 누적 최대 부족액 기준.
+    # funding_needed = 월 전체에 걸쳐 잔고가 절대 음수로 가지 않도록 미리 마련해야 하는 금액
+    # = max(deficit over remaining month). first_deficit_day 가 "이 시점 전까지" 마련해야 함.
+    cash_gap = None
+    if deficit_days:
+        first = deficit_days[0]
+        max_def = max(d["deficit"] for d in deficit_days)
+        cash_gap = {
+            "first_deficit_day": first["day"],
+            "first_deficit_date": date(year, month, first["day"]).isoformat(),
+            "first_deficit_amount": first["deficit"],
+            "max_deficit_amount": max_def,
+            "deficit_day_count": len(deficit_days),
+            # 사용자가 실제로 필요한 금액: 첫 부족일 전까지 max_deficit 만큼 자금 마련
+            "funding_needed": max_def,
+            "funding_needed_by_day": first["day"],
+            "funding_needed_by_date": date(year, month, first["day"]).isoformat(),
+        }
+
     return {
         "year": year,
         "month": month,
@@ -1557,4 +1704,8 @@ def generate_daily_schedule(
             for c in cards
         ],
         "min_balance_threshold": min_balance_threshold,
+        "outflow_schedule": outflow_schedule,
+        "cash_gap": cash_gap,
+        "card_projection": card_projection,
+        "last_actual_day": last_actual_day,
     }
