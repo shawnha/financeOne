@@ -111,10 +111,15 @@ class WooriCardParser(BaseParser):
                 # 이용가맹점명
                 counterparty = str(sheet.cell_value(row_idx, col["counterparty"])).strip()
 
-                # 승인금액
-                raw_amount = sheet.cell_value(row_idx, col["amount"])
-                amount = parse_amount(str(raw_amount))
-                if amount is None or amount == 0:
+                # 승인금액 — "10,400  (-10,400)" 같이 원금 + 취소금이 한 셀에 함께 표시될 수 있음.
+                # 정규식으로 원금/취소금 분리 (취소금 있으면 별도 행으로 split).
+                raw_amount_str = str(sheet.cell_value(row_idx, col["amount"])).strip()
+                amount_match = re.match(r"^([\d,]+)(?:\s*\(\s*-?\s*([\d,]+)\s*\))?", raw_amount_str)
+                if not amount_match:
+                    continue
+                original_amount = parse_amount(amount_match.group(1))
+                cancel_amount = parse_amount(amount_match.group(2)) if amount_match.group(2) else None
+                if original_amount is None or original_amount == 0:
                     continue
 
                 # 매출구분 — check for 체크계좌
@@ -126,19 +131,40 @@ class WooriCardParser(BaseParser):
                 for col_name, col_idx in col.items():
                     raw[col_name] = str(sheet.cell_value(row_idx, col_idx)).strip()
 
+                # 승인 행 (원금) — 접수/취소 status 무관하게 원금은 항상 승인으로 기록.
+                # status='취소' 이면 전체 취소 → 원금=out + 취소금=in 으로 net=0 표현.
                 results.append(ParsedTransaction(
                     date=tx_date,
-                    amount=abs(amount),
+                    amount=abs(original_amount),
                     currency="KRW",
-                    type="in" if is_cancel else "out",
-                    description=counterparty + (" (취소)" if is_cancel else ""),
+                    type="out",
+                    description=counterparty,
                     counterparty=counterparty,
                     source_type="woori_card",
                     is_check_card=is_check_card,
-                    is_cancel=is_cancel,
+                    is_cancel=False,
                     raw_data=raw,
                     row_number=row_idx + 1,
                 ))
+
+                # 부분/전체 취소 행 — 별도 행으로 split (회계상 환불 = type='in')
+                effective_cancel = cancel_amount if cancel_amount else (
+                    original_amount if is_cancel else None
+                )
+                if effective_cancel and effective_cancel > 0:
+                    results.append(ParsedTransaction(
+                        date=tx_date,
+                        amount=abs(effective_cancel),
+                        currency="KRW",
+                        type="in",
+                        description=counterparty + " (취소)",
+                        counterparty=counterparty,
+                        source_type="woori_card",
+                        is_check_card=is_check_card,
+                        is_cancel=True,
+                        raw_data=raw,
+                        row_number=row_idx + 1,
+                    ))
             except Exception as e:
                 logger.warning("Parse row failed (row %d): %s", row_idx, e)
                 continue
