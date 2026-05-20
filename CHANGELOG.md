@@ -2,6 +2,21 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-05-20 — 거래내역 Excel 다운로드: 은행/카드 분리 + 한글 출처 라벨
+
+### Added
+- `backend/services/export.py` — `export_transactions_excel(conn, entity_id, year, month, kind='all'|'bank'|'card')`
+  - `EXPORT_BANK_SOURCES` / `EXPORT_CARD_SOURCES` 상수 (cashflow_service 와 동일)
+  - kind 별 SQL `source_type = ANY(%s)` 필터
+  - 워크북 sheet 타이틀 / 상단 제목에 종류 표시 ("— 은행" / "— 카드")
+- `SOURCE_LABELS` 매핑 — Excel 출처 컬럼에 한글 라벨 표시
+  - `codef_woori_bank` → "우리은행" / `codef_lotte_card` → "롯데카드" 등
+  - `codef_` 접두사 사라지고 사용자 친화적 명칭 (우리은행/IBK기업은행/신한은행/Mercury/수기입력/우리카드/롯데카드/신한카드)
+- `backend/routers/transactions.py` `/export` — `kind` 쿼리 파라미터 추가
+  - 파일명 suffix: `_은행` / `_카드` (all 은 suffix 없음)
+- `frontend/src/app/transactions/page.tsx` — 드롭다운 메뉴 3개로 분리
+  - "Excel 다운로드 (전체)" / "Excel 다운로드 (은행만)" / "Excel 다운로드 (카드만)"
+
 ## [Unreleased] - 2026-05-19 — 자금소요 일정 + 휴일 보정 + 자금 마련 필요 KPI
 
 ### Added

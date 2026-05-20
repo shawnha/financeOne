@@ -1,17 +1,50 @@
 """거래내역 API"""
 
 from fastapi import APIRouter, Query, HTTPException, Depends
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import date
+from urllib.parse import quote
+import io
+
 from psycopg2.extensions import connection as PgConnection
 
 from backend.database.connection import get_db
 from backend.utils.db import fetch_all
 from backend.services.bookkeeping_engine import create_journal_from_transaction
 from backend.services.mapping_service import learn_mapping_rule, auto_map_transaction
+from backend.services.export import export_transactions_excel
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
+
+
+@router.get("/export")
+def export_transactions(
+    entity_id: int = Query(...),
+    year: int = Query(...),
+    month: int = Query(..., ge=1, le=12),
+    kind: str = Query("all", pattern="^(all|bank|card)$"),
+    conn: PgConnection = Depends(get_db),
+):
+    """월별 거래내역 Excel Export (회계법인 전달용).
+
+    kind: 'all' (전체, 기본) | 'bank' (은행만) | 'card' (카드만)
+    파일명 suffix: _은행 / _카드 (all 은 suffix 없음)
+    """
+    xlsx_bytes = export_transactions_excel(conn, entity_id, year, month, kind=kind)
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM entities WHERE id = %s", [entity_id])
+    row = cur.fetchone()
+    cur.close()
+    entity_name = (row[0] if row else f"entity_{entity_id}").replace(" ", "_")
+    suffix = {"bank": "_은행", "card": "_카드"}.get(kind, "")
+    fname = f"{entity_name}_{year}-{month:02d}{suffix}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(xlsx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(fname)}"},
+    )
 
 
 class TransactionUpdate(BaseModel):

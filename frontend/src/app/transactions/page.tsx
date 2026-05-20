@@ -824,36 +824,92 @@ export default function TransactionsPage() {
     if (!detailTx) return
     setSaving(true)
     try {
-      const body: Record<string, unknown> = {}
-      if (detailForm.internal_account_id) body.internal_account_id = Number(detailForm.internal_account_id)
-      if (detailForm.standard_account_id) body.standard_account_id = Number(detailForm.standard_account_id)
-      if (detailForm.note !== (detailTx.note || "")) body.note = detailForm.note || null
-
-      if (Object.keys(body).length === 0) {
-        setDetailTx(null)
-        return
+      // 1) split 검증 + 저장
+      if (splitsEnabled) {
+        const cleanRows = splitRows.filter(r => r.standard_account_id && Number(r.amount) > 0)
+        if (cleanRows.length < 2) {
+          toast.error("분개 split 은 최소 2개 라인 필요. 1개면 split 해제하세요.")
+          return
+        }
+        const sum = cleanRows.reduce((acc, r) => acc + Number(r.amount), 0)
+        const target = Number(detailTx.amount)
+        if (Math.abs(sum - target) > 0.01) {
+          toast.error(`split 합계 ${sum} ≠ 거래 금액 ${target}`)
+          return
+        }
+        setSplitsSaving(true)
+        try {
+          await fetchAPI(`/transactions/${detailTx.id}/splits`, {
+            method: "PUT",
+            body: JSON.stringify({
+              splits: cleanRows.map(r => ({
+                standard_account_id: Number(r.standard_account_id),
+                amount: Number(r.amount),
+                description: r.description || null,
+              })),
+            }),
+          })
+        } finally {
+          setSplitsSaving(false)
+        }
+      } else if (detailTx.has_splits) {
+        // 원래 split 이었는데 해제 → DELETE
+        await fetchAPI(`/transactions/${detailTx.id}/splits`, { method: "DELETE" })
       }
 
-      await fetchAPI(`/transactions/${detailTx.id}`, {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      })
-      toast.success("거래 정보가 저장되었습니다.")
+      // 2) 일반 필드 (split 활성 시 sa 는 서버가 첫 split 으로 덮어쓰므로 ia/note 만)
+      const body: Record<string, unknown> = {}
+      if (detailForm.internal_account_id) body.internal_account_id = Number(detailForm.internal_account_id)
+      if (!splitsEnabled && detailForm.standard_account_id) body.standard_account_id = Number(detailForm.standard_account_id)
+      if (detailForm.note !== (detailTx.note || "")) body.note = detailForm.note || null
+
+      if (Object.keys(body).length > 0) {
+        await fetchAPI(`/transactions/${detailTx.id}`, {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        })
+      }
+
+      toast.success(splitsEnabled ? "분개 split 저장 완료" : "거래 정보가 저장되었습니다.")
       setDetailTx(null)
       fetchTransactions(true)
-    } catch {
-      toast.error("저장에 실패했습니다.")
+    } catch (err) {
+      const msg = err instanceof APIError ? err.message : "저장에 실패했습니다."
+      toast.error(msg)
     } finally {
       setSaving(false)
     }
-  }, [detailTx, detailForm, fetchTransactions])
+  }, [detailTx, detailForm, splitsEnabled, splitRows, fetchTransactions])
 
-  // CSV download placeholder
-  const handleCSVDownload = useCallback(() => {
-    // eslint-disable-next-line no-console
-    console.log("CSV download - to be implemented in Phase 2")
-    toast.info("CSV 다운로드는 Phase 2에서 제공됩니다.")
-  }, [])
+  // Excel 다운로드 (회계법인 전달용) — kind: 'all' | 'bank' | 'card'
+  const handleExcelDownload = useCallback(async (kind: "all" | "bank" | "card" = "all") => {
+    if (!entityId) return
+    try {
+      const [y, m] = globalMonth.split("-").map(Number)
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"
+      const url = `${apiBase}/transactions/export?entity_id=${entityId}&year=${y}&month=${m}&kind=${kind}`
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(await res.text())
+      const blob = await res.blob()
+      const cd = res.headers.get("Content-Disposition") || ""
+      const m1 = cd.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/)
+      const suffix = kind === "bank" ? "_은행" : kind === "card" ? "_카드" : ""
+      const fname = m1
+        ? decodeURIComponent(m1[1])
+        : `transactions_${y}-${String(m).padStart(2, "0")}${suffix}.xlsx`
+      const a = document.createElement("a")
+      a.href = URL.createObjectURL(blob)
+      a.download = fname
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(a.href)
+      toast.success(`${fname} 다운로드 완료`)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "다운로드 실패"
+      toast.error(msg)
+    }
+  }, [entityId, globalMonth])
 
   // 자동 매핑
   const [autoMapping, setAutoMapping] = useState(false)
@@ -1173,9 +1229,22 @@ export default function TransactionsPage() {
                   {bulkConfirming ? "확정 중..." : "이 달 일괄 확정"}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleCSVDownload} className="rounded-xl">
+                <DropdownMenuItem onClick={toggleShowStandardAccount} className="rounded-xl">
+                  <SlidersHorizontal className="h-4 w-4 mr-2" />
+                  표준계정 컬럼 {showStandardAccount ? "숨기기" : "표시"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => handleExcelDownload("all")} className="rounded-xl">
                   <Download className="h-4 w-4 mr-2" />
-                  CSV 다운로드
+                  Excel 다운로드 (전체)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExcelDownload("bank")} className="rounded-xl">
+                  <Download className="h-4 w-4 mr-2" />
+                  Excel 다운로드 (은행만)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExcelDownload("card")} className="rounded-xl">
+                  <Download className="h-4 w-4 mr-2" />
+                  Excel 다운로드 (카드만)
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
