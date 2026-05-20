@@ -66,9 +66,20 @@ interface Transaction {
   standard_account_code: string | null
   standard_account_name: string | null
   has_slack_match: boolean
+  has_splits: boolean
   expense_id: string | null
   expense_submitted_by: string | null
   expense_title: string | null
+}
+
+interface TransactionSplit {
+  id: number
+  standard_account_id: number
+  standard_account_code: string
+  standard_account_name: string
+  amount: number
+  description: string | null
+  sort_order: number
 }
 
 interface PaginatedResponse {
@@ -367,6 +378,26 @@ export default function TransactionsPage() {
   const [eoMatch, setEoMatch] = useState<ExpenseOneMatchInfo | null>(null)
   const [eoMatchLoading, setEoMatchLoading] = useState(false)
   const [tier2Open, setTier2Open] = useState(false)
+
+  // 분개 split state
+  const [splitsEnabled, setSplitsEnabled] = useState(false)
+  const [splitRows, setSplitRows] = useState<Array<{ standard_account_id: string; amount: string; description: string }>>([])
+  const [splitsLoading, setSplitsLoading] = useState(false)
+  const [splitsSaving, setSplitsSaving] = useState(false)
+
+  // 표준계정 컬럼 표시 여부 (default: hide). 거래내역=현금흐름 / 계정별원장=회계 분리
+  const [showStandardAccount, setShowStandardAccount] = useState(false)
+  useEffect(() => {
+    const saved = localStorage.getItem("transactions.showStandardAccount")
+    if (saved === "true") setShowStandardAccount(true)
+  }, [])
+  const toggleShowStandardAccount = useCallback(() => {
+    setShowStandardAccount(prev => {
+      const next = !prev
+      localStorage.setItem("transactions.showStandardAccount", String(next))
+      return next
+    })
+  }, [])
 
   // URL query에서 month 왔으면 globalMonth 동기화
   useEffect(() => {
@@ -1406,7 +1437,9 @@ export default function TransactionsPage() {
                     <TableHead className="w-[90px] text-right">수입</TableHead>
                     <TableHead className="w-[90px] text-right">지출</TableHead>
                     <TableHead className="w-[80px]">내부 계정</TableHead>
-                    <TableHead className="w-[80px]">표준 계정</TableHead>
+                    {showStandardAccount && (
+                      <TableHead className="w-[80px]">표준 계정</TableHead>
+                    )}
                     <TableHead className="w-[80px] text-center">신뢰</TableHead>
                   </TableRow>
                 </thead>
@@ -1540,27 +1573,29 @@ export default function TransactionsPage() {
                         )}
                       </TableCell>
 
-                      {/* Standard Account */}
-                      <TableCell
-                        data-account-cell
-                        className="p-2 overflow-hidden cursor-pointer hover:bg-muted/20 transition-colors"
-                        onClick={e => { e.stopPropagation(); if (!(editingCell?.txId === tx.id && editingCell?.field === "standard_account_id")) setEditingCell({ txId: tx.id, field: "standard_account_id" }) }}
-                      >
-                        {editingCell?.txId === tx.id && editingCell?.field === "standard_account_id" ? (
-                          <AccountCombobox
-                            options={standardAccounts}
-                            value={tx.standard_account_id ? String(tx.standard_account_id) : ""}
-                            onChange={v => { handleInlineEdit(tx.id, "standard_account_id", v); setEditingCell(null) }}
-                            placeholder="선택..."
-                            compact
-                            autoOpen
-                          />
-                        ) : (
-                          <span className={cn("text-xs truncate block", tx.standard_account_name ? "text-foreground" : "text-muted-foreground")}>
-                            {tx.standard_account_name || "-"}
-                          </span>
-                        )}
-                      </TableCell>
+                      {/* Standard Account (옵션) */}
+                      {showStandardAccount && (
+                        <TableCell
+                          data-account-cell
+                          className="p-2 overflow-hidden cursor-pointer hover:bg-muted/20 transition-colors"
+                          onClick={e => { e.stopPropagation(); if (!(editingCell?.txId === tx.id && editingCell?.field === "standard_account_id")) setEditingCell({ txId: tx.id, field: "standard_account_id" }) }}
+                        >
+                          {editingCell?.txId === tx.id && editingCell?.field === "standard_account_id" ? (
+                            <AccountCombobox
+                              options={standardAccounts}
+                              value={tx.standard_account_id ? String(tx.standard_account_id) : ""}
+                              onChange={v => { handleInlineEdit(tx.id, "standard_account_id", v); setEditingCell(null) }}
+                              placeholder="선택..."
+                              compact
+                              autoOpen
+                            />
+                          ) : (
+                            <span className={cn("text-xs truncate block", tx.standard_account_name ? "text-foreground" : "text-muted-foreground")}>
+                              {tx.standard_account_name || "-"}
+                            </span>
+                          )}
+                        </TableCell>
+                      )}
 
                       {/* Confidence */}
                       <TableCell className="p-2 text-center">
