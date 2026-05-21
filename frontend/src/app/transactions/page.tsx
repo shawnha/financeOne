@@ -1062,33 +1062,12 @@ export default function TransactionsPage() {
             allowFuture
           />
 
-          {/* Codef 동기화 — 현재 entity 연결 기관에 대해 선택월 sync */}
-          {codefHasConnections && (
-            <div className="inline-flex items-center gap-2">
-              <button
-                onClick={handleCodefSync}
-                disabled={codefSyncing}
-                className={cn(
-                  "h-9 px-3 rounded-full border text-xs font-medium transition-colors inline-flex items-center gap-1.5",
-                  codefSyncing
-                    ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-400"
-                    : "border-white/10 text-muted-foreground hover:bg-white/[0.04] hover:text-cyan-400",
-                )}
-                title={codefLastSync ? `마지막: ${new Date(codefLastSync.replace(" ","T")).toLocaleString("ko-KR")}` : "선택한 월의 Codef 거래를 가져옵니다"}
-              >
-                {codefSyncing ? (
-                  <RefreshCw className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Download className="h-3 w-3" />
-                )}
-                Codef 동기화
-              </button>
-              {codefLastSync && !codefSyncing && (
-                <span className="text-[11px] text-muted-foreground/70">
-                  마지막: {formatRelative(codefLastSync)}
-                </span>
-              )}
-            </div>
+          {/* Codef 동기화 버튼은 우측 ⋯ 드롭다운으로 이동 (실수 클릭 방지). 진행 중 표시만 inline */}
+          {codefSyncing && (
+            <span className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 text-xs font-medium">
+              <RefreshCw className="h-3 w-3 animate-spin" />
+              Codef 동기화 중...
+            </span>
           )}
 
           {/* Search */}
@@ -1264,6 +1243,24 @@ export default function TransactionsPage() {
                   <SlidersHorizontal className="h-4 w-4 mr-2" />
                   표준계정 컬럼 {showStandardAccount ? "숨기기" : "표시"}
                 </DropdownMenuItem>
+                {codefHasConnections && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={handleCodefSync}
+                      disabled={codefSyncing}
+                      className="rounded-xl"
+                    >
+                      <RefreshCw className={cn("h-4 w-4 mr-2", codefSyncing && "animate-spin")} />
+                      <span className="flex-1">Codef 동기화</span>
+                      {codefLastSync && !codefSyncing && (
+                        <span className="text-[10px] text-muted-foreground/60 ml-2">
+                          {formatRelative(codefLastSync)}
+                        </span>
+                      )}
+                    </DropdownMenuItem>
+                  </>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => handleExcelDownload("all")} className="rounded-xl">
                   <Download className="h-4 w-4 mr-2" />
