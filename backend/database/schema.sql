@@ -424,6 +424,22 @@ CREATE TABLE IF NOT EXISTS journal_entry_lines (
 CREATE INDEX IF NOT EXISTS idx_jel_entry ON journal_entry_lines(journal_entry_id);
 CREATE INDEX IF NOT EXISTS idx_jel_account ON journal_entry_lines(standard_account_id);
 
+-- 18b. transaction_splits — 한 거래를 여러 표준계정으로 분개 split (옵션)
+-- 없으면 transactions.standard_account_id 단일 매핑 사용 (기존 호환).
+CREATE TABLE IF NOT EXISTS transaction_splits (
+  id                   SERIAL PRIMARY KEY,
+  transaction_id       INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+  entity_id            INTEGER NOT NULL REFERENCES entities(id),
+  standard_account_id  INTEGER NOT NULL REFERENCES standard_accounts(id),
+  amount               NUMERIC(18,2) NOT NULL CHECK (amount > 0),
+  description          TEXT,
+  sort_order           INTEGER NOT NULL DEFAULT 0,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tx_splits_transaction ON transaction_splits(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_tx_splits_entity ON transaction_splits(entity_id);
+CREATE INDEX IF NOT EXISTS idx_tx_splits_sa ON transaction_splits(standard_account_id);
+
 -- 19. intercompany_pairs — 내부거래 매칭
 CREATE TABLE IF NOT EXISTS intercompany_pairs (
   id               SERIAL PRIMARY KEY,

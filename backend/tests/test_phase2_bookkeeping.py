@@ -286,3 +286,151 @@ class TestValidateTrialBalance:
         result = validate_trial_balance(conn, entity_id=1)
         assert result["is_balanced"] is False
         assert result["difference"] == 1.0
+
+
+class TestTransactionSplits:
+    """Phase 4 분개 split — splits 있을 때 multi-line 분개 + 합계 검증."""
+
+    def _make_conn_with_tx_and_splits(
+        self,
+        tx_type="out",
+        source_type="woori_card",
+        splits=None,
+        ap_lookup=True,
+    ):
+        """splits 있는 tx 에 대한 create_journal_from_transaction mock.
+
+        fetchone 순서: tx select → splits fetchall → existing journal None → cash sa → ap (선택) → INSERT je RETURNING.
+        """
+        conn = MagicMock()
+        cur = MagicMock()
+        conn.cursor.return_value = cur
+
+        amount = sum(Decimal(str(s["amount"])) for s in (splits or []))
+        responses = [
+            (1, 1, date(2026, 1, 15), amount, tx_type,
+             "desc", "Vendor", None, True, source_type),  # std_account_id NULL OK (splits 사용)
+            None,  # existing journal_entries
+            (1,),  # cash account id
+        ]
+        if ap_lookup:
+            responses.append((291,))
+        responses.append((99,))
+
+        idx = [0]
+        def fetchone_se():
+            i = idx[0]; idx[0] += 1
+            return responses[i] if i < len(responses) else None
+        cur.fetchone = fetchone_se
+
+        # _load_transaction_splits 의 fetchall → splits rows
+        cur.fetchall.return_value = [
+            (s["standard_account_id"], Decimal(str(s["amount"])), s.get("description", ""))
+            for s in (splits or [])
+        ]
+        return conn, cur
+
+    @staticmethod
+    def _capture_lines(cur):
+        """INSERT journal_entry_lines call 들 추출 (sa_id, debit, credit) tuple list."""
+        lines = []
+        for call in cur.execute.call_args_list:
+            sql = call.args[0] if call.args else ""
+            if "INSERT INTO journal_entry_lines" in sql:
+                params = call.args[1]
+                # (je_id, sa_id, debit, credit, desc, sort_order)
+                lines.append((params[1], params[2], params[3]))
+        return lines
+
+    def test_split_card_out_multi_debit_single_ap_credit(self):
+        """카드 사용 + 3-way split: (차) sa1/sa2/sa3 / (대) AP 26200 단일."""
+        splits = [
+            {"standard_account_id": 100, "amount": 30000},
+            {"standard_account_id": 101, "amount": 15000},
+            {"standard_account_id": 102, "amount": 5000},
+        ]
+        conn, cur = self._make_conn_with_tx_and_splits(
+            tx_type="out", source_type="codef_woori_card", splits=splits,
+        )
+        je_id = create_journal_from_transaction(conn, transaction_id=1)
+        assert je_id == 99
+
+        lines = self._capture_lines(cur)
+        # 3 debit splits + 1 credit AP
+        assert len(lines) == 4
+        # 차변 (split)
+        assert (100, Decimal("30000.00"), Decimal("0.00")) in lines
+        assert (101, Decimal("15000.00"), Decimal("0.00")) in lines
+        assert (102, Decimal("5000.00"), Decimal("0.00")) in lines
+        # 대변 (AP 291, 총액)
+        assert (291, Decimal("0.00"), Decimal("50000.00")) in lines
+
+        # 시산표 균형
+        total_d = sum(l[1] for l in lines)
+        total_c = sum(l[2] for l in lines)
+        assert total_d == total_c == Decimal("50000.00")
+
+    def test_split_card_refund_multi_credit_single_ap_debit(self):
+        """카드 환불 + split: (차) AP / (대) sa1/sa2."""
+        splits = [
+            {"standard_account_id": 100, "amount": 30000},
+            {"standard_account_id": 101, "amount": 20000},
+        ]
+        conn, cur = self._make_conn_with_tx_and_splits(
+            tx_type="in", source_type="codef_lotte_card", splits=splits,
+        )
+        je_id = create_journal_from_transaction(conn, transaction_id=1)
+        assert je_id == 99
+
+        lines = self._capture_lines(cur)
+        assert len(lines) == 3
+        # 차변 AP
+        assert (291, Decimal("50000.00"), Decimal("0.00")) in lines
+        # 대변 splits
+        assert (100, Decimal("0.00"), Decimal("30000.00")) in lines
+        assert (101, Decimal("0.00"), Decimal("20000.00")) in lines
+
+        total_d = sum(l[1] for l in lines)
+        total_c = sum(l[2] for l in lines)
+        assert total_d == total_c == Decimal("50000.00")
+
+    def test_split_sum_mismatch_raises(self):
+        """splits 합계 != tx.amount 면 ValueError (서버 측 방어선)."""
+        # tx amount 가 splits 합과 다른 케이스 — 직접 tx amount 만 다르게 mock.
+        conn = MagicMock()
+        cur = MagicMock()
+        conn.cursor.return_value = cur
+
+        responses = [
+            (1, 1, date(2026, 1, 15), Decimal("50000"), "out",
+             "desc", "Vendor", None, True, "codef_woori_card"),
+        ]
+        idx = [0]
+        def fetchone_se():
+            i = idx[0]; idx[0] += 1
+            return responses[i] if i < len(responses) else None
+        cur.fetchone = fetchone_se
+
+        cur.fetchall.return_value = [
+            (100, Decimal("30000"), ""),
+            (101, Decimal("19000"), ""),  # 합 49000 != 50000
+        ]
+        with pytest.raises(ValueError, match="splits total"):
+            create_journal_from_transaction(conn, transaction_id=1)
+
+    def test_split_decimal_precision_balanced(self):
+        """USD 같은 소수점 splits — quantize 후 합이 거래금액과 같으면 통과."""
+        splits = [
+            {"standard_account_id": 100, "amount": "33.33"},
+            {"standard_account_id": 101, "amount": "33.33"},
+            {"standard_account_id": 102, "amount": "33.34"},
+        ]
+        conn, cur = self._make_conn_with_tx_and_splits(
+            tx_type="out", source_type="codef_woori_card", splits=splits,
+        )
+        je_id = create_journal_from_transaction(conn, transaction_id=1)
+        assert je_id == 99
+        lines = self._capture_lines(cur)
+        total_d = sum(l[1] for l in lines)
+        total_c = sum(l[2] for l in lines)
+        assert total_d == total_c == Decimal("100.00")

@@ -31,7 +31,7 @@ import {
   DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu"
 import {
-  Search, Download, ChevronLeft, ChevronRight, X, AlertTriangle, AlertCircle, Upload, RotateCw, RefreshCw, Wand2, MessageSquare, SlidersHorizontal, ChevronDown, CheckCircle2, Receipt,
+  Search, Download, ChevronLeft, ChevronRight, X, AlertTriangle, AlertCircle, Upload, RotateCw, RefreshCw, Wand2, MessageSquare, SlidersHorizontal, ChevronDown, CheckCircle2, Receipt, BookOpen,
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -111,6 +111,38 @@ interface Member {
   id: number
   name: string
   role: string
+}
+
+// 표준계정 code 앞자리로 트리 카테고리 라벨 결정 (K-GAAP)
+function saCategoryLabel(code: string): string {
+  const p = code[0]
+  if (p === '1') return '자산'
+  if (p === '2') return '부채'
+  if (p === '3') return '자본'
+  if (p === '4') return '매출'
+  if (p === '5') return '매출원가/제조'
+  if (p === '6' || p === '7') return '기타'
+  if (p === '8') return '판관비'
+  if (p === '9') return '영업외'
+  return '기타'
+}
+
+// SearchableSelect 옵션 라벨 — 카테고리 + 코드 + 이름 (검색·식별 동시)
+function formatSAOption(sa: { code: string; name: string }): string {
+  return `[${saCategoryLabel(sa.code)}] ${sa.code} ${sa.name}`
+}
+
+// 내부계정 옵션 라벨 — 상위 카테고리(자식 있음) 는 "📁 X (전체)" 로 구분
+function formatIAOption(
+  ia: { id: number; name: string; parent_id: number | null; code?: string },
+  all: { id: number; name: string; parent_id: number | null; code?: string }[],
+): string {
+  const hasChildren = all.some(a => a.parent_id === ia.id)
+  if (!ia.parent_id) return ia.name  // INC/EXP root
+  if (hasChildren) return `📁 ${ia.name} (전체)`
+  const parent = all.find(a => a.id === ia.parent_id)
+  const isRootParent = parent && (parent.code === "INC" || parent.code === "EXP")
+  return parent && !isRootParent ? `${parent.name} > ${ia.name}` : ia.name
 }
 
 interface SlackMatchInfo {
@@ -336,6 +368,10 @@ export default function TransactionsPage() {
   const [codefSyncMsg, setCodefSyncMsg] = useState<string | null>(null)
   const [codefLastSync, setCodefLastSync] = useState<string | null>(null)
   const [codefHasConnections, setCodefHasConnections] = useState(false)
+  // 동기화 확인 모달 + 원복(undo) 상태
+  const [codefConfirmOpen, setCodefConfirmOpen] = useState(false)
+  const [codefSyncPreview, setCodefSyncPreview] = useState<{ orgs: string[]; rangeLabel: string } | null>(null)
+  const [codefUndo, setCodefUndo] = useState<{ ids: number[]; count: number; expiresAt: number } | null>(null)
   const [globalMonth, setGlobalMonth] = useGlobalMonth() // ready handled via globalMonth sync effect
   const [filters, setFilters] = useState<Filters>(() => {
     // URL query에서 year/month/filter 읽기
@@ -442,6 +478,21 @@ export default function TransactionsPage() {
     fetchAPI<StandardAccount[]>("/accounts/standard")
       .then(setStandardAccounts)
       .catch(() => {})
+  }, [])
+
+  // Cross-link from ledger: ?sa_code=XXXX → standardAccount filter + 컬럼 표시 + tier2 열기
+  useEffect(() => {
+    if (standardAccounts.length === 0) return
+    const saCode = searchParams.get("sa_code")
+    if (!saCode) return
+    const match = standardAccounts.find(a => a.code === saCode)
+    if (!match) return
+    setFilters(f => f.standardAccountId === String(match.id) ? f : { ...f, standardAccountId: String(match.id) })
+    setShowStandardAccount(true)
+    setTier2Open(true)
+  }, [standardAccounts, searchParams])
+
+  useEffect(() => {
 
     if (entityId) {
       fetchAPI<InternalAccount[]>(`/accounts/internal?entity_id=${entityId}`)
@@ -639,13 +690,13 @@ export default function TransactionsPage() {
     return `${Math.floor(diffSec / 86400)}일 전`
   }
 
-  // Codef 동기화 (현재 entity, 선택 월의 1일 ~ 월말 또는 오늘)
-  const handleCodefSync = useCallback(async () => {
+  // Codef 동기화 — 실제 실행 (확인 모달에서 호출)
+  const executeCodefSync = useCallback(async () => {
     if (!entityId || entityId < 0) return
     setCodefSyncing(true)
     setCodefSyncMsg(null)
+    setCodefUndo(null)
     try {
-      // 1) connections 조회
       const status = await fetchAPI<{
         configured: boolean
         connections: Record<string, string>
@@ -659,7 +710,6 @@ export default function TransactionsPage() {
         toast.error("이 법인에 연결된 Codef 계정이 없습니다 (설정 → Codef)")
         return
       }
-      // 2) 날짜 범위 결정 — 현재 선택 월
       const sel =
         filters.dateFrom && filters.dateFrom.slice(0, 7) === filters.dateTo.slice(0, 7)
           ? filters.dateFrom.slice(0, 7)
@@ -671,7 +721,6 @@ export default function TransactionsPage() {
       const startStr = `${y}${String(m).padStart(2, "0")}01`
       const endStr = `${y}${String(m).padStart(2, "0")}${String(lastDay).padStart(2, "0")}`
 
-      // 3) 기관별 sync 병렬 실행
       const results = await Promise.all(
         orgs.map(async (org) => {
           try {
@@ -691,6 +740,7 @@ export default function TransactionsPage() {
               auto_mapped?: number
               unmapped?: number
               total_fetched: number
+              inserted_ids?: number[]
             }>(path, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -705,25 +755,34 @@ export default function TransactionsPage() {
               synced: 0,
               total_fetched: 0,
               duplicates: 0,
+              inserted_ids: [] as number[],
             }
           }
         }),
       )
 
-      // 4) 결과 메시지
       const totalSynced = results.reduce((s, r) => s + (r.synced || 0), 0)
       const totalDup = results.reduce((s, r) => s + (r.duplicates || 0), 0)
       const totalAuto = results.reduce(
         (s, r) => s + ((r as { auto_mapped?: number }).auto_mapped ?? 0),
         0,
       )
+      const allInsertedIds = results.flatMap((r) => (r as { inserted_ids?: number[] }).inserted_ids ?? [])
       const errs = results.filter((r) => !r.ok)
       const summary = `${sel} 동기화: 신규 ${totalSynced}, 자동매핑 ${totalAuto}, 중복 ${totalDup}` +
         (errs.length > 0 ? ` (실패 ${errs.length})` : "")
       setCodefSyncMsg(summary)
       if (errs.length === 0) toast.success(summary)
       else toast.error(`일부 실패: ${errs.map((e) => `${e.org}=${(e as {error?:string}).error}`).join(", ")}`)
-      // 5) 거래내역 새로고침
+
+      // 신규 import 가 있으면 30초간 원복 가능
+      if (allInsertedIds.length > 0) {
+        setCodefUndo({
+          ids: allInsertedIds,
+          count: allInsertedIds.length,
+          expiresAt: Date.now() + 30_000,
+        })
+      }
       await fetchTransactions(true)
     } catch (err) {
       const msg = err instanceof Error ? err.message : "동기화 실패"
@@ -733,6 +792,76 @@ export default function TransactionsPage() {
       setCodefSyncing(false)
     }
   }, [entityId, filters.dateFrom, filters.dateTo, globalMonth, fetchTransactions])
+
+  // Codef 동기화 — 확인 모달 오픈 (실제 sync 는 confirm 후)
+  const handleCodefSync = useCallback(async () => {
+    if (!entityId || entityId < 0) return
+    // 연결 기관 / 범위 preview 만 미리 조회
+    try {
+      const status = await fetchAPI<{
+        configured: boolean
+        connections: Record<string, string>
+      }>(`/integrations/codef/status?entity_id=${entityId}`)
+      if (!status.configured) {
+        toast.error("Codef 미설정")
+        return
+      }
+      const orgs = Object.keys(status.connections || {})
+      if (orgs.length === 0) {
+        toast.error("이 법인에 연결된 Codef 계정이 없습니다 (설정 → Codef)")
+        return
+      }
+      const sel =
+        filters.dateFrom && filters.dateFrom.slice(0, 7) === filters.dateTo.slice(0, 7)
+          ? filters.dateFrom.slice(0, 7)
+          : globalMonth
+      const [y, m] = sel.split("-").map(Number)
+      const today = new Date()
+      const isCurrentMonth = today.getFullYear() === y && today.getMonth() + 1 === m
+      const lastDay = isCurrentMonth ? today.getDate() : new Date(y, m, 0).getDate()
+      const rangeLabel = `${y}-${String(m).padStart(2,"0")}-01 ~ ${y}-${String(m).padStart(2,"0")}-${String(lastDay).padStart(2,"0")}`
+      setCodefSyncPreview({ orgs, rangeLabel })
+      setCodefConfirmOpen(true)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "상태 조회 실패"
+      toast.error(msg)
+    }
+  }, [entityId, filters.dateFrom, filters.dateTo, globalMonth])
+
+  // 원복 (직전 sync 의 inserted_ids 만 삭제)
+  const handleCodefUndo = useCallback(async () => {
+    if (!codefUndo || !entityId) return
+    try {
+      const r = await fetchAPI<{ deleted: number; skipped: number; reason_if_skipped?: string }>(
+        "/transactions/codef/undo-sync",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entity_id: entityId, ids: codefUndo.ids }),
+        },
+      )
+      if (r.deleted > 0) toast.success(`${r.deleted}건 원복 완료${r.skipped > 0 ? ` (제외 ${r.skipped})` : ""}`)
+      else toast.error(`원복 불가 — 모두 제외됨 (${r.reason_if_skipped})`)
+      setCodefUndo(null)
+      await fetchTransactions(true)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "원복 실패")
+    }
+  }, [codefUndo, entityId, fetchTransactions])
+
+  // Undo 자동 만료 — 30초 카운트다운
+  const [undoSecondsLeft, setUndoSecondsLeft] = useState(0)
+  useEffect(() => {
+    if (!codefUndo) { setUndoSecondsLeft(0); return }
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((codefUndo.expiresAt - Date.now()) / 1000))
+      setUndoSecondsLeft(left)
+      if (left === 0) setCodefUndo(null)
+    }
+    tick()
+    const id = setInterval(tick, 500)
+    return () => clearInterval(id)
+  }, [codefUndo])
 
   // Bulk cancel
   const [bulkCancelling, setBulkCancelling] = useState(false)
@@ -835,6 +964,25 @@ export default function TransactionsPage() {
       standard_account_id: tx.standard_account_id ? String(tx.standard_account_id) : "",
       note: tx.note || "",
     })
+    // Fetch splits
+    setSplitsEnabled(false)
+    setSplitRows([])
+    if (tx.has_splits) {
+      setSplitsLoading(true)
+      fetchAPI<TransactionSplit[]>(`/transactions/${tx.id}/splits`)
+        .then(rows => {
+          if (rows.length > 0) {
+            setSplitsEnabled(true)
+            setSplitRows(rows.map(r => ({
+              standard_account_id: String(r.standard_account_id),
+              amount: String(r.amount),
+              description: r.description || "",
+            })))
+          }
+        })
+        .catch(() => {})
+        .finally(() => setSplitsLoading(false))
+    }
     // Fetch slack match info
     setSlackMatch(null)
     setSlackMatchLoading(true)
@@ -862,10 +1010,11 @@ export default function TransactionsPage() {
           toast.error("분개 split 은 최소 2개 라인 필요. 1개면 split 해제하세요.")
           return
         }
-        const sum = cleanRows.reduce((acc, r) => acc + Number(r.amount), 0)
-        const target = Number(detailTx.amount)
-        if (Math.abs(sum - target) > 0.01) {
-          toast.error(`split 합계 ${sum} ≠ 거래 금액 ${target}`)
+        // cents 정수 비교 — float 누적 오차 회피 (KRW/USD 모두 안전)
+        const sumCents = cleanRows.reduce((acc, r) => acc + Math.round(Number(r.amount) * 100), 0)
+        const targetCents = Math.round(Number(detailTx.amount) * 100)
+        if (sumCents !== targetCents) {
+          toast.error(`split 합계 ${sumCents / 100} ≠ 거래 금액 ${targetCents / 100}`)
           return
         }
         setSplitsSaving(true)
@@ -1286,7 +1435,9 @@ export default function TransactionsPage() {
             <SearchableSelect
               value={filters.internalAccountId}
               onChange={v => updateFilter("internalAccountId", v)}
-              options={internalAccounts.filter(a => a.code !== "INC" && a.code !== "EXP").map(a => ({ value: String(a.id), label: a.name }))}
+              options={internalAccounts
+                .filter(a => a.code !== "INC" && a.code !== "EXP")
+                .map(a => ({ value: String(a.id), label: formatIAOption(a, internalAccounts) }))}
               placeholder="내부계정"
               searchPlaceholder="내부계정 검색..."
               className="w-36 rounded-full"
@@ -1296,9 +1447,9 @@ export default function TransactionsPage() {
             <SearchableSelect
               value={filters.standardAccountId}
               onChange={v => updateFilter("standardAccountId", v)}
-              options={standardAccounts.map(a => ({ value: String(a.id), label: a.name }))}
+              options={standardAccounts.map(a => ({ value: String(a.id), label: formatSAOption(a) }))}
               placeholder="표준 계정"
-              searchPlaceholder="표준 계정 검색..."
+              searchPlaceholder="카테고리/코드/이름 검색..."
               className="w-36 rounded-full"
             />
 
@@ -1472,12 +1623,15 @@ export default function TransactionsPage() {
                       {/* Date */}
                       <TableCell className="p-2 text-sm whitespace-nowrap">{tx.date}</TableCell>
 
-                      {/* Source + Slack match indicator */}
+                      {/* Source + Slack match + Split indicator */}
                       <TableCell className="p-2 whitespace-nowrap">
                         <span className="inline-flex items-center gap-1.5">
                           {sourceLabel(tx.source_type)}
                           {tx.has_slack_match && (
                             <span className="inline-block w-2 h-2 rounded-full bg-indigo-400" title="Slack 매칭됨" />
+                          )}
+                          {tx.has_splits && (
+                            <span className="inline-block w-2 h-2 rounded-full bg-amber-400" title="분개 split (여러 계정)" />
                           )}
                         </span>
                       </TableCell>
@@ -1913,15 +2067,172 @@ export default function TransactionsPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-sm text-muted-foreground mb-1 block">표준 계정</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-sm text-muted-foreground">표준 계정</label>
+                    {detailTx.standard_account_code && (
+                      <a
+                        href={`/accounts/ledger?entity=${entityId ?? 1}&code=${detailTx.standard_account_code}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-blue-400 hover:text-blue-300 inline-flex items-center gap-1"
+                      >
+                        <BookOpen className="h-3 w-3" />
+                        계정별원장 보기
+                      </a>
+                    )}
+                  </div>
                   <AccountCombobox
                     options={standardAccounts}
                     value={detailForm.standard_account_id}
                     onChange={v => setDetailForm(p => ({ ...p, standard_account_id: v }))}
                     placeholder="표준 계정 검색..."
                     showCode
+                    disabled={splitsEnabled}
                   />
+                  {splitsEnabled && (
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      분개 split 사용 중 — 단일 계정 편집 비활성화
+                    </p>
+                  )}
                 </div>
+
+                {/* 분개 split */}
+                <div className="space-y-2 rounded-lg border border-border/50 p-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-foreground inline-flex items-center gap-2">
+                      <Checkbox
+                        checked={splitsEnabled}
+                        onCheckedChange={checked => {
+                          const next = !!checked
+                          setSplitsEnabled(next)
+                          if (next && splitRows.length === 0) {
+                            // 시작 시 1행 prefill: 현재 sa + 전체 금액
+                            const fullAmt = String(detailTx.amount)
+                            setSplitRows([{
+                              standard_account_id: detailForm.standard_account_id,
+                              amount: fullAmt,
+                              description: "",
+                            }, {
+                              standard_account_id: "",
+                              amount: "",
+                              description: "",
+                            }])
+                          }
+                        }}
+                        disabled={splitsLoading || splitsSaving}
+                      />
+                      분개 split (여러 계정으로 나누기)
+                    </label>
+                    {splitsEnabled && (
+                      <span className="text-xs text-muted-foreground">
+                        총액 {formatByEntity(detailTx.amount, String(entityId ?? 1))}
+                      </span>
+                    )}
+                  </div>
+
+                  {splitsEnabled && (
+                    <>
+                      <div className="space-y-2">
+                        {splitRows.map((row, i) => (
+                          <div key={i} className="flex items-start gap-2">
+                            <div className="flex-1 min-w-0">
+                              <AccountCombobox
+                                options={standardAccounts}
+                                value={row.standard_account_id}
+                                onChange={v => setSplitRows(prev => prev.map((r, idx) => idx === i ? { ...r, standard_account_id: v } : r))}
+                                placeholder="표준 계정"
+                                showCode
+                              />
+                            </div>
+                            <Input
+                              type="number"
+                              value={row.amount}
+                              onChange={e => setSplitRows(prev => prev.map((r, idx) => idx === i ? { ...r, amount: e.target.value } : r))}
+                              placeholder="금액"
+                              className="h-9 w-32 font-mono text-right"
+                            />
+                            <Input
+                              value={row.description}
+                              onChange={e => setSplitRows(prev => prev.map((r, idx) => idx === i ? { ...r, description: e.target.value } : r))}
+                              placeholder="라인 설명"
+                              className="h-9 w-32"
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-9 w-9 shrink-0 text-muted-foreground hover:text-red-400"
+                              onClick={() => setSplitRows(prev => prev.filter((_, idx) => idx !== i))}
+                              disabled={splitRows.length <= 1}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 pt-1">
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setSplitRows(prev => [...prev, { standard_account_id: "", amount: "", description: "" }])}
+                            className="h-8"
+                          >
+                            + 라인 추가
+                          </Button>
+                          {(() => {
+                            // 센트(정수) 기준 합산 — KRW/USD 모두 float 누적 오차 회피
+                            const sumCents = splitRows.reduce((acc, r) => acc + Math.round((Number(r.amount) || 0) * 100), 0)
+                            const targetCents = Math.round((Number(detailTx.amount) || 0) * 100)
+                            const diffCents = targetCents - sumCents
+                            if (diffCents === 0 || splitRows.length === 0) return null
+                            return (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 text-xs text-amber-400"
+                                onClick={() => {
+                                  setSplitRows(prev => prev.map((r, idx) => {
+                                    if (idx !== prev.length - 1) return r
+                                    const lastCents = Math.round((Number(r.amount) || 0) * 100)
+                                    const adjusted = (lastCents + diffCents) / 100
+                                    return { ...r, amount: adjusted > 0 ? String(adjusted) : "" }
+                                  }))
+                                }}
+                              >
+                                마지막 라인에 차액 분배
+                              </Button>
+                            )
+                          })()}
+                        </div>
+                        {(() => {
+                          const sumCents = splitRows.reduce((acc, r) => acc + Math.round((Number(r.amount) || 0) * 100), 0)
+                          const targetCents = Math.round((Number(detailTx.amount) || 0) * 100)
+                          const diffCents = targetCents - sumCents
+                          const sum = sumCents / 100
+                          const diff = diffCents / 100
+                          return (
+                            <div className="text-xs font-mono tabular-nums">
+                              <span className="text-muted-foreground">합계 </span>
+                              <span className={diffCents === 0 ? "text-emerald-400" : "text-amber-400"}>
+                                {formatByEntity(sum, String(entityId ?? 1))}
+                              </span>
+                              {diffCents !== 0 && (
+                                <span className="text-amber-400 ml-2">
+                                  (차액 {formatByEntity(diff, String(entityId ?? 1))})
+                                </span>
+                              )}
+                            </div>
+                          )
+                        })()}
+                      </div>
+                    </>
+                  )}
+                </div>
+
                 <div>
                   <label className="text-sm text-muted-foreground mb-1 block">메모</label>
                   <Input
@@ -1942,6 +2253,70 @@ export default function TransactionsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Codef 동기화 확인 모달 — 실수 클릭 방지 */}
+      <Dialog open={codefConfirmOpen} onOpenChange={setCodefConfirmOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Codef 동기화 확인</DialogTitle>
+            <DialogDescription>
+              아래 범위·기관에서 거래내역을 가져옵니다. 새 거래가 transactions 테이블에 INSERT 됩니다.
+              완료 후 30초간 원복 버튼이 표시됩니다.
+            </DialogDescription>
+          </DialogHeader>
+          {codefSyncPreview && (
+            <div className="space-y-2 text-sm">
+              <div className="flex gap-2"><span className="text-muted-foreground w-16 shrink-0">범위</span><span className="font-mono">{codefSyncPreview.rangeLabel}</span></div>
+              <div className="flex gap-2"><span className="text-muted-foreground w-16 shrink-0">기관</span>
+                <span className="flex flex-wrap gap-1">
+                  {codefSyncPreview.orgs.map((o) => (
+                    <span key={o} className="text-[11px] px-2 py-0.5 rounded-full bg-muted/40 border">{o}</span>
+                  ))}
+                </span>
+              </div>
+              <div className="text-[11px] text-muted-foreground/70 pt-1">
+                ⚠️ 월별 동기화 — 다른 월은 영향받지 않습니다.
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCodefConfirmOpen(false)}>취소</Button>
+            <Button
+              onClick={() => {
+                setCodefConfirmOpen(false)
+                void executeCodefSync()
+              }}
+              disabled={codefSyncing}
+            >
+              {codefSyncing ? "동기화 중..." : "동기화 진행"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Codef 원복(undo) 배너 — 직전 sync 직후 30초간 */}
+      {codefUndo && undoSecondsLeft > 0 && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg bg-foreground text-background border border-foreground/20">
+          <Download className="h-4 w-4" />
+          <span className="text-sm">
+            방금 <strong className="font-semibold">{codefUndo.count}건</strong> import 완료
+          </span>
+          <button
+            onClick={handleCodefUndo}
+            className="text-sm font-semibold underline underline-offset-2 hover:opacity-80"
+          >
+            원복
+          </button>
+          <span className="text-[11px] opacity-70 tabular-nums">({undoSecondsLeft}s)</span>
+          <button
+            onClick={() => setCodefUndo(null)}
+            className="ml-1 text-base opacity-60 hover:opacity-100"
+            aria-label="dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
     </div>
   )
 }

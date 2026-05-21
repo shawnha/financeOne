@@ -59,6 +59,16 @@ class BulkConfirm(BaseModel):
     ids: list[int]
 
 
+class SplitItem(BaseModel):
+    standard_account_id: int
+    amount: float  # NUMERIC(18,2)
+    description: Optional[str] = None
+
+
+class SetSplitsBody(BaseModel):
+    splits: list[SplitItem]
+
+
 @router.get("")
 def list_transactions(
     entity_id: Optional[int] = None,
@@ -150,19 +160,37 @@ def list_transactions(
     need_join_for_search = False
     if search:
         # 숫자만이면 금액 검색 (±3%), 아니면 텍스트 검색 (내역/거래처/메모/내부계정명/날짜)
+        # 띄어쓰기 무시: 검색어 + 컬럼 둘 다 공백 제거 후 ILIKE 매칭
         clean = search.replace(",", "").strip()
         need_join_for_search = True
         try:
             amount_val = float(clean)
             lo = round(amount_val * 0.97, 2)
             hi = round(amount_val * 1.03, 2)
-            where.append("(t.amount BETWEEN %s AND %s OR t.description ILIKE %s OR t.counterparty ILIKE %s OR t.note ILIKE %s OR t.transfer_memo ILIKE %s OR ia.name ILIKE %s OR CAST(t.date AS TEXT) ILIKE %s)")
-            q = f"%{search}%"
-            params.extend([lo, hi, q, q, q, q, q, q])
+            where.append(
+                "(t.amount BETWEEN %s AND %s OR "
+                "REPLACE(COALESCE(t.description,''),' ','') ILIKE %s OR "
+                "REPLACE(COALESCE(t.counterparty,''),' ','') ILIKE %s OR "
+                "REPLACE(COALESCE(t.note,''),' ','') ILIKE %s OR "
+                "REPLACE(COALESCE(t.transfer_memo,''),' ','') ILIKE %s OR "
+                "REPLACE(COALESCE(ia.name,''),' ','') ILIKE %s OR "
+                "CAST(t.date AS TEXT) ILIKE %s)"
+            )
+            q_nospace = f"%{search.replace(' ', '')}%"
+            q_raw = f"%{search}%"
+            params.extend([lo, hi, q_nospace, q_nospace, q_nospace, q_nospace, q_nospace, q_raw])
         except ValueError:
-            where.append("(t.description ILIKE %s OR t.counterparty ILIKE %s OR t.note ILIKE %s OR t.transfer_memo ILIKE %s OR ia.name ILIKE %s OR CAST(t.date AS TEXT) ILIKE %s)")
-            q = f"%{search}%"
-            params.extend([q, q, q, q, q, q])
+            where.append(
+                "(REPLACE(COALESCE(t.description,''),' ','') ILIKE %s OR "
+                "REPLACE(COALESCE(t.counterparty,''),' ','') ILIKE %s OR "
+                "REPLACE(COALESCE(t.note,''),' ','') ILIKE %s OR "
+                "REPLACE(COALESCE(t.transfer_memo,''),' ','') ILIKE %s OR "
+                "REPLACE(COALESCE(ia.name,''),' ','') ILIKE %s OR "
+                "CAST(t.date AS TEXT) ILIKE %s)"
+            )
+            q_nospace = f"%{search.replace(' ', '')}%"
+            q_raw = f"%{search}%"
+            params.extend([q_nospace, q_nospace, q_nospace, q_nospace, q_nospace, q_raw])
 
     where_clause = " AND ".join(where)
     offset = (page - 1) * per_page
@@ -186,14 +214,15 @@ def list_transactions(
                ia.code AS internal_account_code, ia.name AS internal_account_name,
                pia.name AS internal_account_parent_name,
                sa.code AS standard_account_code, sa.name AS standard_account_name,
-               EXISTS(SELECT 1 FROM transaction_slack_match tsm WHERE tsm.transaction_id = t.id) AS has_slack_match
+               EXISTS(SELECT 1 FROM transaction_slack_match tsm WHERE tsm.transaction_id = t.id) AS has_slack_match,
+               EXISTS(SELECT 1 FROM transaction_splits ts WHERE ts.transaction_id = t.id) AS has_splits
         FROM transactions t
         LEFT JOIN members m ON t.member_id = m.id
         LEFT JOIN internal_accounts ia ON t.internal_account_id = ia.id
         LEFT JOIN internal_accounts pia ON pia.id = ia.parent_id
         LEFT JOIN standard_accounts sa ON t.standard_account_id = sa.id
         WHERE {where_clause}
-        ORDER BY t.date DESC, t.id DESC
+        ORDER BY t.date DESC, t.time DESC NULLS LAST, t.id DESC
         LIMIT %s OFFSET %s
         """,
         params + [per_page, offset],
@@ -223,6 +252,18 @@ def update_transaction(
         data = body.model_dump(exclude_none=True)
         if not data:
             raise HTTPException(400, "No fields to update")
+
+        # splits 보호: split 사용 중인 거래는 sa 단일 변경 거부 (stale 방지)
+        if body.standard_account_id is not None:
+            cur.execute(
+                "SELECT 1 FROM transaction_splits WHERE transaction_id = %s LIMIT 1",
+                [tx_id],
+            )
+            if cur.fetchone():
+                raise HTTPException(
+                    409,
+                    "이 거래는 분개 split 사용 중. 단일 표준계정 변경 불가 — 먼저 split 을 해제하세요.",
+                )
 
         for key, val in data.items():
             sets.append(f"{key} = %s")
@@ -468,6 +509,37 @@ class BulkMap(BaseModel):
     internal_account_id: int
 
 
+class BulkUpdateMember(BaseModel):
+    ids: list[int]
+    member_id: Optional[int] = None  # null = 미배정
+
+
+@router.post("/bulk-update-member")
+def bulk_update_member(body: BulkUpdateMember, conn: PgConnection = Depends(get_db)):
+    """선택한 거래들에 담당자(member_id) 일괄 변경. member_id=None 이면 미배정."""
+    if not body.ids:
+        raise HTTPException(400, "No IDs provided")
+    cur = conn.cursor()
+    try:
+        placeholders = ",".join(["%s"] * len(body.ids))
+        cur.execute(
+            f"""
+            UPDATE transactions
+            SET member_id = %s, updated_at = NOW()
+            WHERE id IN ({placeholders})
+            RETURNING id
+            """,
+            [body.member_id] + body.ids,
+        )
+        updated = cur.fetchall()
+        conn.commit()
+        cur.close()
+        return {"updated": len(updated)}
+    except Exception:
+        conn.rollback()
+        raise
+
+
 @router.post("/bulk-map")
 def bulk_map(body: BulkMap, conn: PgConnection = Depends(get_db)):
     """선택한 거래들에 내부계정 일괄 매핑 + 매핑 규칙 학습"""
@@ -512,6 +584,64 @@ def bulk_map(body: BulkMap, conn: PgConnection = Depends(get_db)):
         conn.commit()
         cur.close()
         return {"mapped": len(updated), "rules_learned": len(learned)}
+    except Exception:
+        conn.rollback()
+        raise
+
+
+class CodefUndoBody(BaseModel):
+    entity_id: int
+    ids: list[int]  # 직전 sync 가 반환한 inserted ids 만 삭제
+
+
+@router.post("/codef/undo-sync")
+def codef_undo_sync(body: CodefUndoBody, conn: PgConnection = Depends(get_db)):
+    """직전 Codef 동기화에서 들어온 거래만 안전하게 삭제.
+
+    안전장치:
+      - source_type LIKE 'codef_%' 만 허용
+      - entity_id 일치 필수
+      - created_at NOW() - 10분 이내만 (실수 직후 원복용)
+      - 사용자 확정(is_confirmed=true) 된 거래는 삭제 금지
+      - 분개(journal_entries) 와 연결됐으면 삭제 금지
+    """
+    if not body.ids:
+        raise HTTPException(400, "No IDs provided")
+    cur = conn.cursor()
+    try:
+        placeholders = ",".join(["%s"] * len(body.ids))
+        # 안전 조건에 맞는 ID 만 필터링
+        cur.execute(
+            f"""SELECT t.id FROM transactions t
+                LEFT JOIN journal_entries je ON je.transaction_id = t.id
+                WHERE t.id IN ({placeholders})
+                  AND t.entity_id = %s
+                  AND t.source_type LIKE 'codef_%%'
+                  AND t.is_confirmed = false
+                  AND t.created_at > NOW() - INTERVAL '10 minutes'
+                  AND je.id IS NULL""",
+            [*body.ids, body.entity_id],
+        )
+        deletable_ids = [r[0] for r in cur.fetchall()]
+        skipped = len(body.ids) - len(deletable_ids)
+
+        if deletable_ids:
+            ph2 = ",".join(["%s"] * len(deletable_ids))
+            cur.execute(
+                f"DELETE FROM transactions WHERE id IN ({ph2}) RETURNING id",
+                deletable_ids,
+            )
+            deleted = len(cur.fetchall())
+        else:
+            deleted = 0
+
+        conn.commit()
+        cur.close()
+        return {
+            "deleted": deleted,
+            "skipped": skipped,
+            "reason_if_skipped": "확정·분개연결·10분 초과·다른entity·non-codef 는 제외",
+        }
     except Exception:
         conn.rollback()
         raise
@@ -660,11 +790,205 @@ def get_transaction(
         [tx_id],
     )
     row = cur.fetchone()
+    cols = [d[0] for d in cur.description] if cur.description else []
     cur.close()
     if not row:
         raise HTTPException(404, "Transaction not found")
-    cols = [d[0] for d in cur.description]
     return dict(zip(cols, row))
+
+
+@router.get("/{tx_id}/splits")
+def get_transaction_splits(
+    tx_id: int,
+    conn: PgConnection = Depends(get_db),
+):
+    """거래의 분개 split 라인 조회. 없으면 빈 배열."""
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT ts.id, ts.standard_account_id, sa.code, sa.name,
+               ts.amount, ts.description, ts.sort_order
+          FROM transaction_splits ts
+          JOIN standard_accounts sa ON sa.id = ts.standard_account_id
+         WHERE ts.transaction_id = %s
+         ORDER BY ts.sort_order ASC, ts.id ASC
+        """,
+        [tx_id],
+    )
+    rows = cur.fetchall()
+    cur.close()
+    return [
+        {
+            "id": r[0],
+            "standard_account_id": r[1],
+            "standard_account_code": r[2],
+            "standard_account_name": r[3],
+            "amount": float(r[4]),
+            "description": r[5],
+            "sort_order": r[6],
+        }
+        for r in rows
+    ]
+
+
+@router.put("/{tx_id}/splits")
+def set_transaction_splits(
+    tx_id: int,
+    body: SetSplitsBody,
+    conn: PgConnection = Depends(get_db),
+):
+    """거래의 분개 split 일괄 교체. 합계 == tx.amount 검증 + atomic.
+
+    안전성:
+    - 거래 row 를 FOR UPDATE 로 lock (동시 PUT 직렬화)
+    - 분개 재생성 실패 시 전체 rollback (splits 만 저장된 채 journal 누락 방지)
+    - is_adjusting / is_closing 분개는 보존 (수동 결산 분개 보호)
+    """
+    from decimal import Decimal
+
+    if not body.splits:
+        raise HTTPException(400, "splits 가 비어있습니다. 비우려면 DELETE 사용.")
+
+    cur = conn.cursor()
+    try:
+        # row lock — 동시 PUT/DELETE/PATCH 직렬화
+        cur.execute(
+            "SELECT id, entity_id, amount, is_confirmed FROM transactions WHERE id = %s FOR UPDATE",
+            [tx_id],
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "Transaction not found")
+        _tx_id, entity_id, tx_amount, is_confirmed = row
+        tx_amount_q = Decimal(str(tx_amount)).quantize(Decimal("0.01"))
+
+        # 합계 검증 (quantize 후)
+        total = sum(Decimal(str(s.amount)).quantize(Decimal("0.01")) for s in body.splits)
+        if total != tx_amount_q:
+            raise HTTPException(
+                400,
+                f"splits 합계 {total} != 거래 금액 {tx_amount_q}",
+            )
+
+        # sa 존재 검증
+        sa_ids = [s.standard_account_id for s in body.splits]
+        cur.execute(
+            "SELECT id FROM standard_accounts WHERE id = ANY(%s)",
+            [sa_ids],
+        )
+        found = {r[0] for r in cur.fetchall()}
+        missing = [s for s in sa_ids if s not in found]
+        if missing:
+            raise HTTPException(400, f"존재하지 않는 standard_account_id: {missing}")
+
+        # 기존 splits 제거 + 새 splits 삽입
+        cur.execute("DELETE FROM transaction_splits WHERE transaction_id = %s", [tx_id])
+        for i, s in enumerate(body.splits):
+            amt = Decimal(str(s.amount)).quantize(Decimal("0.01"))
+            if amt <= 0:
+                raise HTTPException(400, f"split amount must be > 0 (line {i + 1})")
+            cur.execute(
+                """
+                INSERT INTO transaction_splits
+                    (transaction_id, entity_id, standard_account_id, amount, description, sort_order)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                [tx_id, entity_id, s.standard_account_id, amt, s.description, i],
+            )
+
+        # 기존 자동 분개 삭제 (수동 결산 분개 is_adjusting/is_closing 은 보존)
+        cur.execute(
+            """
+            DELETE FROM journal_entries
+             WHERE transaction_id = %s
+               AND is_adjusting = false
+               AND is_closing = false
+            """,
+            [tx_id],
+        )
+
+        # 첫 split sa 를 transactions.standard_account_id 에 반영 (legacy 표시 호환)
+        cur.execute(
+            "UPDATE transactions SET standard_account_id = %s, updated_at = NOW() WHERE id = %s",
+            [body.splits[0].standard_account_id, tx_id],
+        )
+
+        # 분개 재생성 — 실패 시 전체 rollback (splits 만 저장된 inconsistent state 방지)
+        journal_entry_id = None
+        if is_confirmed:
+            try:
+                journal_entry_id = create_journal_from_transaction(conn, tx_id)
+            except ValueError as e:
+                raise HTTPException(409, f"분개 재생성 실패 — splits 저장 취소: {e}")
+
+        conn.commit()
+        return {
+            "id": tx_id,
+            "splits_count": len(body.splits),
+            "journal_entry_id": journal_entry_id,
+        }
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(500, f"splits 저장 실패: {e}")
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+
+
+@router.delete("/{tx_id}/splits")
+def clear_transaction_splits(
+    tx_id: int,
+    conn: PgConnection = Depends(get_db),
+):
+    """분개 split 제거 → 단일 sa 매핑으로 복귀. journal 재생성."""
+    cur = conn.cursor()
+    try:
+        # row lock — 동시 PUT/DELETE/PATCH 직렬화
+        cur.execute(
+            "SELECT id, is_confirmed, standard_account_id FROM transactions WHERE id = %s FOR UPDATE",
+            [tx_id],
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "Transaction not found")
+        _tx_id, is_confirmed, std_account_id = row
+
+        cur.execute("DELETE FROM transaction_splits WHERE transaction_id = %s", [tx_id])
+        cur.execute(
+            """
+            DELETE FROM journal_entries
+             WHERE transaction_id = %s
+               AND is_adjusting = false
+               AND is_closing = false
+            """,
+            [tx_id],
+        )
+
+        journal_entry_id = None
+        if is_confirmed and std_account_id:
+            try:
+                journal_entry_id = create_journal_from_transaction(conn, tx_id)
+            except ValueError as e:
+                raise HTTPException(409, f"분개 재생성 실패 — splits 삭제 취소: {e}")
+
+        conn.commit()
+        return {"id": tx_id, "cleared": True, "journal_entry_id": journal_entry_id}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(500, f"splits 삭제 실패: {e}")
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
 
 
 @router.get("/{tx_id}/slack-match")

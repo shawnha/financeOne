@@ -162,20 +162,39 @@ def create_journal_entry(
     return je_id
 
 
+def _load_transaction_splits(cur, transaction_id: int) -> list[tuple]:
+    """transaction_splits 조회. 합계 검증은 호출자.
+
+    Returns:
+        [(standard_account_id, amount Decimal, description), ...] sort_order ASC
+    """
+    cur.execute(
+        """
+        SELECT standard_account_id, amount, description
+          FROM transaction_splits
+         WHERE transaction_id = %s
+         ORDER BY sort_order ASC, id ASC
+        """,
+        [transaction_id],
+    )
+    return [(r[0], _quantize(r[1]), r[2] or "") for r in cur.fetchall()]
+
+
 def create_journal_from_transaction(
     conn: PgConnection,
     transaction_id: int,
 ) -> int:
     """확정된 거래 → 분개 자동 생성.
 
-    - type='out' (지출): 차변 비용계정, 대변 현금
-    - type='in' (수입): 차변 현금, 대변 수익계정
+    - splits 있으면 multi-line: 각 split sa 가 하나의 차변(또는 대변) line.
+    - splits 없으면 기존 단일 매핑 (transactions.standard_account_id).
+    - 분기 (카드/은행카드결제/일반)는 splits 유무와 무관하게 동일.
 
     Returns:
         journal_entry.id
 
     Raises:
-        ValueError: 미확정, 미매핑, 이미 분개 존재
+        ValueError: 미확정, 미매핑, 이미 분개 존재, splits 합계 불일치
     """
     cur = conn.cursor()
 
@@ -201,9 +220,20 @@ def create_journal_from_transaction(
         cur.close()
         raise ValueError(f"Transaction {transaction_id} is not confirmed")
 
-    if not std_account_id:
+    # splits 우선. 없으면 단일 sa.
+    splits = _load_transaction_splits(cur, transaction_id)
+    if not splits and not std_account_id:
         cur.close()
         raise ValueError(f"Transaction {transaction_id} has no standard_account_id")
+
+    amount = _quantize(amount)
+    if splits:
+        total_splits = sum(s[1] for s in splits)
+        if total_splits != amount:
+            cur.close()
+            raise ValueError(
+                f"Transaction {transaction_id} splits total {total_splits} != amount {amount}"
+            )
 
     # 이미 분개가 있는지 확인
     cur.execute(
@@ -216,14 +246,9 @@ def create_journal_from_transaction(
 
     # P3-4: source_type 별 cash 분개 — 은행 거래는 보통예금(10300), 그 외 현금(10100).
     cash_account_id = _get_cash_account_id(cur, source_type=source_type)
-    amount = _quantize(amount)
     je_desc = f"{counterparty or ''} - {desc}".strip(" -")
 
     # P3-1: 발생주의 분개 분기.
-    # 1) 카드 사용 (out)        : (차) 비용/std        / (대) 미지급비용 26200
-    # 2) 카드 환불/취소 (in)    : (차) 미지급비용 26200 / (대) 비용/std (역분개)
-    # 3) 은행→카드사 결제 (out): (차) 미지급비용 26200 / (대) 현금
-    # 4) 그 외                  : 기존 (차)std/(대)현금 또는 (차)현금/(대)std
     is_card_source = source_type in CARD_SOURCE_TYPES
     is_bank_card_payment = (
         not is_card_source
@@ -231,35 +256,50 @@ def create_journal_from_transaction(
         and _is_card_payment(counterparty)
     )
 
-    if is_card_source:
-        ap_id = _get_accounts_payable_id(cur)
-        if tx_type == "out":
-            lines = [
-                {"standard_account_id": std_account_id, "debit_amount": amount, "credit_amount": Decimal("0")},
-                {"standard_account_id": ap_id,         "debit_amount": Decimal("0"), "credit_amount": amount},
-            ]
-        else:  # in: 카드 환불 = 미지급비용 감소 + 비용 reverse
-            lines = [
-                {"standard_account_id": ap_id,         "debit_amount": amount, "credit_amount": Decimal("0")},
-                {"standard_account_id": std_account_id, "debit_amount": Decimal("0"), "credit_amount": amount},
-            ]
-    elif is_bank_card_payment:
-        # 카드대금 출금: (차) 미지급비용 / (대) 현금
+    # 은행→카드사 결제는 AP/cash clearing — split 적용 안 함 (AP 단일).
+    if is_bank_card_payment:
         ap_id = _get_accounts_payable_id(cur)
         lines = [
             {"standard_account_id": ap_id,           "debit_amount": amount, "credit_amount": Decimal("0")},
             {"standard_account_id": cash_account_id, "debit_amount": Decimal("0"), "credit_amount": amount},
         ]
-    elif tx_type == "out":
-        lines = [
-            {"standard_account_id": std_account_id, "debit_amount": amount, "credit_amount": Decimal("0")},
-            {"standard_account_id": cash_account_id, "debit_amount": Decimal("0"), "credit_amount": amount},
-        ]
-    else:  # 'in'
-        lines = [
-            {"standard_account_id": cash_account_id, "debit_amount": amount, "credit_amount": Decimal("0")},
-            {"standard_account_id": std_account_id, "debit_amount": Decimal("0"), "credit_amount": amount},
-        ]
+    else:
+        # std side / opposite side 분기:
+        # - 카드 out: split → 차변,  AP → 대변
+        # - 카드 in : split → 대변,  AP → 차변
+        # - 일반 out: split → 차변,  cash → 대변
+        # - 일반 in : split → 대변,  cash → 차변
+        if is_card_source:
+            opposite_account_id = _get_accounts_payable_id(cur)
+        else:
+            opposite_account_id = cash_account_id
+        std_on_debit = (tx_type == "out")
+
+        if splits:
+            std_lines = [
+                {
+                    "standard_account_id": sa_id,
+                    "debit_amount": amt if std_on_debit else Decimal("0"),
+                    "credit_amount": Decimal("0") if std_on_debit else amt,
+                    "description": line_desc,
+                }
+                for sa_id, amt, line_desc in splits
+            ]
+        else:
+            std_lines = [{
+                "standard_account_id": std_account_id,
+                "debit_amount": amount if std_on_debit else Decimal("0"),
+                "credit_amount": Decimal("0") if std_on_debit else amount,
+            }]
+
+        opposite_line = {
+            "standard_account_id": opposite_account_id,
+            "debit_amount": Decimal("0") if std_on_debit else amount,
+            "credit_amount": amount if std_on_debit else Decimal("0"),
+        }
+
+        # 기존 line 순서 호환: in (std on credit) 케이스는 차변 line 을 먼저.
+        lines = std_lines + [opposite_line] if std_on_debit else [opposite_line] + std_lines
 
     cur.close()
 

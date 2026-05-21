@@ -23,7 +23,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { BookOpen, RefreshCw } from "lucide-react"
+import { BookOpen, RefreshCw, Download, ListChecks } from "lucide-react"
+import Link from "next/link"
+import { SearchableSelect } from "@/components/searchable-select"
+import { toast } from "sonner"
+
+// 표준계정 코드 앞자리로 카테고리 라벨
+function saCategoryLabel(code: string): string {
+  const p = code[0]
+  if (p === "1") return "자산"
+  if (p === "2") return "부채"
+  if (p === "3") return "자본"
+  if (p === "4") return "매출"
+  if (p === "5") return "매출원가"
+  if (p === "8") return "판관비"
+  if (p === "9") return "영업외"
+  return "기타"
+}
+
+// 카테고리 정렬 순서 (K-GAAP 손익계산서/대차대조표 순서)
+const CATEGORY_ORDER: Record<string, number> = {
+  자산: 1, 부채: 2, 자본: 3, 매출: 4, 매출원가: 5, 판관비: 6, 영업외: 7, 기타: 8,
+}
 
 interface StandardAccount {
   id: number
@@ -154,13 +175,69 @@ function LedgerContent() {
     }
   }, [selectedCode]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Group accounts by category for dropdown
+  // Group accounts by category for dropdown (legacy Select 용; AccountCombobox 는 사용 안 함)
   const grouped: Record<string, StandardAccount[]> = {}
   for (const a of accounts) {
     const cat = a.category || "기타"
     grouped[cat] = grouped[cat] || []
     grouped[cat].push(a)
   }
+  // SearchableSelect 용 옵션 — entity 통화 기반 필터링 + 카테고리 우선 정렬
+  // 한국 entity (KRW) = K-GAAP (코드 숫자 시작) 만, HOI (USD) = US GAAP (HOI- prefix) 만
+  const filteredAccounts = accounts.filter((a) => {
+    const isKgaap = /^\d/.test(a.code)
+    const isHoi = a.code.startsWith("HOI-")
+    if (currency === "KRW") return isKgaap
+    if (currency === "USD") return isHoi
+    return true
+  })
+  const sortedAccounts = [...filteredAccounts].sort((x, y) => {
+    const cx = CATEGORY_ORDER[saCategoryLabel(x.code)] ?? 99
+    const cy = CATEGORY_ORDER[saCategoryLabel(y.code)] ?? 99
+    if (cx !== cy) return cx - cy
+    return x.code.localeCompare(y.code)
+  })
+  const saOptions = sortedAccounts.map((a) => ({
+    value: a.code,
+    label: `[${saCategoryLabel(a.code)}] ${a.code} ${a.name}`,
+  }))
+
+  // Excel 다운로드
+  const handleExcelDownload = useCallback(async () => {
+    if (!selectedCode) return
+    try {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"
+      const params = new URLSearchParams({ entity_id: entityId })
+      if (month !== "all") {
+        const m = Number(month)
+        const startDate = `${year}-${String(m).padStart(2, "0")}-01`
+        const lastDay = new Date(Number(year), m, 0).getDate()
+        const endDate = `${year}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
+        params.set("start_date", startDate)
+        params.set("end_date", endDate)
+      } else {
+        params.set("start_date", `${year}-01-01`)
+        params.set("end_date", `${year}-12-31`)
+      }
+      const url = `${apiBase}/accounts/${selectedCode}/ledger/export?${params.toString()}`
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(await res.text())
+      const blob = await res.blob()
+      const cd = res.headers.get("Content-Disposition") || ""
+      const m1 = cd.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/)
+      const fname = m1 ? decodeURIComponent(m1[1]) : `ledger_${selectedCode}_${year}.xlsx`
+      const a = document.createElement("a")
+      a.href = URL.createObjectURL(blob)
+      a.download = fname
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(a.href)
+      toast.success(`${fname} 다운로드 완료`)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "다운로드 실패")
+    }
+  }, [selectedCode, entityId, year, month])
 
   return (
     <div className="p-6 space-y-6">
@@ -174,23 +251,14 @@ function LedgerContent() {
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
-        <Select value={selectedCode} onValueChange={setSelectedCode}>
-          <SelectTrigger className="w-[260px]">
-            <SelectValue placeholder="계정 선택" />
-          </SelectTrigger>
-          <SelectContent>
-            {Object.entries(grouped).map(([cat, accts]) => (
-              <div key={cat}>
-                <div className="px-2 py-1 text-xs text-muted-foreground font-semibold">{cat}</div>
-                {accts.map((a) => (
-                  <SelectItem key={a.code} value={a.code}>
-                    {a.code} {a.name}
-                  </SelectItem>
-                ))}
-              </div>
-            ))}
-          </SelectContent>
-        </Select>
+        <SearchableSelect
+          value={selectedCode}
+          onChange={(v) => setSelectedCode(v)}
+          options={saOptions}
+          placeholder="계정 선택"
+          searchPlaceholder="이름/코드/카테고리 검색..."
+          className="w-[340px]"
+        />
 
         <Select value={year} onValueChange={setYear}>
           <SelectTrigger className="w-[120px]">
@@ -217,6 +285,35 @@ function LedgerContent() {
         <Button variant="outline" size="sm" onClick={loadLedger} disabled={loading}>
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           새로고침
+        </Button>
+
+        {selectedCode && (
+          <Button
+            asChild
+            variant="outline"
+            size="sm"
+            className="ml-auto"
+          >
+            <Link
+              href={`/transactions?entity=${entityId}&sa_code=${selectedCode}${month !== "all" ? `&year=${year}&month=${month}` : ""}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <ListChecks className="h-4 w-4 mr-1" />
+              거래내역에서 보기
+            </Link>
+          </Button>
+        )}
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleExcelDownload}
+          disabled={!selectedCode || loading}
+          className={selectedCode ? "" : "ml-auto"}
+        >
+          <Download className="h-4 w-4 mr-1" />
+          Excel 다운로드
         </Button>
       </div>
 
