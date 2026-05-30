@@ -2,6 +2,14 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-05-31 — 그룹 대시보드 환율 합산 하드닝 (가짜 $123M 총액 수정)
+
+### Fixed
+- 그룹 대시보드 환율 합산: 환율이 stale(>7일)일 때 `dashboard_service._fx_rate`가 `Decimal("1")`을 반환해 원화 잔고를 달러 총액에 1:1로 더하던 버그 수정. 그룹 총액이 가짜로 **$123,196,125**로 표시되던 것을 실제 환산값(**$87,765.97**)으로 정정
+  - 이제 `ExchangeRateNotFoundError` 시 `get_historical_rate`(가용 환율 중 최근접, 역환율 1/rate 지원)로 폴백하고, 환율쌍 자체가 없을 때만 명시적으로 실패 (조용한 1:1 위조 금지)
+  - `backend/tests/test_dashboard_service_unit.py` — 회귀 테스트 3건 추가 (same-currency / stale-uses-real-rate / no-rows-raises)
+- (데이터) 프로덕션 환율 갱신 — 수출입은행 API로 5/13~5/29 backfill (USD/KRW 1505.80 @ 2026-05-29). 코드 diff 외 별도 데이터 작업
+
 ## [Unreleased] - 2026-05-20 — 거래내역 Excel 다운로드: 은행/카드 분리 + 한글 출처 라벨
 
 ### Added

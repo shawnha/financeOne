@@ -32,6 +32,7 @@ from backend.routers.dashboard_schemas import (
 from backend.services.exchange_rate_service import (
     ExchangeRateNotFoundError,
     get_closing_rate,
+    get_historical_rate,
 )
 
 # Gating threshold (verify_bs_against_ledger PASS count cutoff)
@@ -40,8 +41,14 @@ ACCRUAL_TOTAL_CHECKS = 19
 
 
 def _fx_rate(conn: PgConnection, from_curr: str, to_curr: str, as_of: date | None = None) -> Decimal:
-    """Real FX via exchange_rate_service. Fallback to 1.0 if rate missing (logs warn).
+    """Real FX via exchange_rate_service.
 
+    Hardening (2026-05-31): when currencies differ and no fresh (<=7d) rate exists,
+    NEVER fall back to 1.0 (which would sum KRW into the USD total at 1:1 — the
+    $123M phantom group-total bug). First try get_closing_rate (<=7d fresh); on
+    failure use get_historical_rate (nearest available rate, past/future, inverse
+    1/rate supported) so a stale-but-real rate is used. Propagate the error only
+    when the currency pair has no rows at all (no silent 1:1 fabrication).
     Used for cross-currency aggregation (Group view total). Per-entity values stay native.
     """
     if from_curr == to_curr:
@@ -52,10 +59,12 @@ def _fx_rate(conn: PgConnection, from_curr: str, to_curr: str, as_of: date | Non
         return get_closing_rate(conn, from_curr, to_curr, as_of)
     except ExchangeRateNotFoundError:
         import logging
+        rate = get_historical_rate(conn, from_curr, to_curr, as_of)
         logging.getLogger(__name__).warning(
-            "FX %s→%s missing as of %s, falling back to 1.0", from_curr, to_curr, as_of
+            "FX %s→%s fresh rate unavailable as of %s; using nearest available rate %s",
+            from_curr, to_curr, as_of, rate,
         )
-        return Decimal("1")
+        return rate
 
 
 # ─────────────────────────────────────────────────────────────

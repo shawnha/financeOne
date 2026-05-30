@@ -9,7 +9,7 @@ Phase 1C 핵심 검증:
 - AI cascade 통계 분포 매핑
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from unittest.mock import MagicMock
 
@@ -81,6 +81,70 @@ def test_has_table_checks_schema_and_name():
     args = cur.execute.call_args[0]
     assert "information_schema.tables" in args[0]
     assert args[1] == ["financeone", "dashboard_accrual_health"]
+
+
+# ───────────────────────────── _fx_rate 하드닝 (재무 정확성) ─────────────────────────────
+# 회귀 방지: 그룹 총액 $123M 가짜 숫자 버그 (₩ 잔고를 $ 총액에 1:1 합산).
+# 근본원인은 stale 환율 시 _fx_rate 가 Decimal("1") 을 반환한 것. 절대 재발 금지.
+
+class _RateCursor:
+    """exchange_rate_service 쿼리에 미리 정한 행을 순서대로 돌려주는 fake cursor.
+
+    rows: 각 execute() 호출에 대응하는 fetchone() 결과 (None = 행 없음).
+    """
+    def __init__(self, rows):
+        self._rows = list(rows)
+        self._i = -1
+
+    def execute(self, *a, **k):
+        self._i += 1
+
+    def fetchone(self):
+        if 0 <= self._i < len(self._rows):
+            return self._rows[self._i]
+        return None
+
+    def close(self):
+        pass
+
+
+def _rate_conn(rows):
+    conn = MagicMock()
+    conn.cursor.return_value = _RateCursor(rows)
+    return conn
+
+
+def test_fx_rate_same_currency_is_one():
+    # 동일 통화는 1 (환산 불필요).
+    assert ds._fx_rate(_rate_conn([]), "USD", "USD") == Decimal("1")
+
+
+def test_fx_rate_uses_stale_real_rate_not_one(caplog):
+    """하드닝 핵심: fresh(<=7d) 환율이 없어도 1.0 이 아니라 실제(역)환율을 쓴다.
+
+    get_closing_rate: KRW→USD 직접 없음 → 역방향 USD→KRW 1473 발견하지만 stale(>7d)
+      → ExchangeRateNotFoundError.
+    get_historical_rate: KRW→USD 직접 없음 → 역방향 USD→KRW 1473 → 1/1473 반환.
+    """
+    stale = date(2026, 5, 12)  # >7일 전
+    rows = [
+        None,                       # closing: KRW→USD 직접 (없음)
+        (Decimal("1473"), stale),   # closing: 역방향 USD→KRW (stale → raise)
+        None,                       # historical: KRW→USD 직접 (없음)
+        (Decimal("1473"), stale),   # historical: 역방향 USD→KRW → inverse
+    ]
+    with caplog.at_level("WARNING"):
+        rate = ds._fx_rate(_rate_conn(rows), "KRW", "USD", date(2026, 5, 31))
+    expected = (Decimal("1") / Decimal("1473")).quantize(Decimal("0.00000001"))
+    assert rate == expected
+    assert rate != Decimal("1")  # 1:1 합산 절대 금지
+    assert "nearest available rate" in caplog.text
+
+
+def test_fx_rate_no_rows_raises_not_one():
+    """환율쌍이 DB 에 전혀 없으면 1.0 으로 위조하지 않고 명시적으로 실패한다."""
+    with pytest.raises(ds.ExchangeRateNotFoundError):
+        ds._fx_rate(_rate_conn([None, None, None, None]), "KRW", "USD", date(2026, 5, 31))
 
 
 # ───────────────────────────── gating policy contracts ─────────────────────────────
