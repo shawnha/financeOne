@@ -26,6 +26,7 @@
 - [ ] 잔고/재고 → inventory_snapshots 테이블 연계 (재고는 detail STOCK_*/PRODUCT_NO/TERM_DATE)
 
 ## 운영
-- [ ] 자동 동기화 (GitHub Actions cron `/api/integrations/cron/auto-sync` 에 ssart 추가 검토)
+- [x] 자동 동기화 — `cron_auto_sync` 에 `_run_ssart_cron`(매출/매입/입출금 최근7일 롤링 UPSERT) 추가. GitHub Actions `auto-sync.yml`(매일 KST 09:00)가 자동 포함. codef와 격리(asyncio.to_thread, 실패 삼킴). end-to-end 검증(전부 dedup).
+- [ ] (선택) 프론트 "수동 동기화" 버튼 (/api/integrations/ssart/sync 호출)
 - [ ] 비번 로테이션 권장 (transcript 노출)
 - [ ] CHANGELOG 업데이트

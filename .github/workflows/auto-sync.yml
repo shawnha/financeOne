@@ -1,8 +1,8 @@
-name: Auto Sync (Codef + Mercury)
+name: Auto Sync (Codef + Mercury + SsArt)
 
 # 매일 오전 9시 KST (= UTC 00:00) 에 backend 의 /cron/auto-sync 호출.
 # Vercel serverless 는 in-process scheduler 못 쓰므로 GitHub Actions 가 외부 트리거.
-# 모든 entity × org Codef sync + Mercury HOI sync (transactions + balance + historical).
+# 모든 entity × org Codef sync + Mercury HOI sync + SsArt(홀세일 매출/매입/입출금 최근7일) sync.
 #
 # 빈도 결정 (2026-05-04):
 # - Codef 운영(api.codef.io)은 호출당 과금 → 비용 최소화 목적으로 1회/일.

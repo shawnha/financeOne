@@ -1185,9 +1185,50 @@ async def codef_scheduler_run_now():
     return await run_now()
 
 
+def _run_ssart_cron(entity_id: int = 13, lookback_days: int = 7) -> dict:
+    """SsArt 매출/매입/입출금 최근 N일 롤링 sync (UPSERT/dedup).
+
+    codef sync 와 격리 — 실패해도 예외를 삼키고 요약만 반환.
+    SIMS 는 사후 수정(MOD_DATE) 가능하므로 최근 N일을 매번 재sync.
+    """
+    from datetime import date, timedelta
+
+    if not (os.environ.get("SSART_UID") and os.environ.get("SSART_PWD")):
+        return {"skipped": "SSART 미설정"}
+
+    from backend.database import connection as _dbmod
+    from backend.services.integrations import ssart
+
+    end = date.today()
+    start = end - timedelta(days=lookback_days)
+    out: dict = {"start": str(start), "end": str(end)}
+    if _dbmod._pool is None:
+        return {"error": "DB pool 미초기화"}
+    conn = _dbmod._acquire_healthy_conn()
+    try:
+        cli = ssart.SsArtClient()
+        try:
+            rs = ssart.sync_sales(conn, entity_id, start, end, client=cli)
+            rp = ssart.sync_purchases(conn, entity_id, start, end, client=cli)
+            rc = ssart.sync_acc_trans(conn, entity_id, start, end, client=cli)
+            conn.commit()
+            out["sales"] = {"inserted": rs.inserted, "duplicates": rs.duplicates}
+            out["purchase"] = {"inserted": rp.inserted, "duplicates": rp.duplicates}
+            out["collections"] = {"inserted": rc["inserted"], "updated": rc["updated"]}
+        finally:
+            cli.close()
+    except Exception as e:
+        conn.rollback()
+        logger.exception("[SsArt cron] sync 실패")
+        out["error"] = str(e)
+    finally:
+        _dbmod._pool.putconn(conn)
+    return out
+
+
 @router.get("/cron/auto-sync")
 async def cron_auto_sync(request: Request):
-    """Vercel Cron 엔드포인트 — 120 분마다 codef + mercury 자동 sync.
+    """Vercel Cron 엔드포인트 — codef + mercury + SsArt(홀세일) 자동 sync.
 
     Vercel cron 은 GET request 만 보내므로 별도 GET wrapper.
     secret header (CRON_SECRET) 로 보호 — Vercel 자체 cron 만 통과.
@@ -1198,7 +1239,12 @@ async def cron_auto_sync(request: Request):
         if auth != f"Bearer {cron_secret}":
             raise HTTPException(401, detail="unauthorized")
     from backend.services.scheduler import run_now
-    return await run_now()
+    import asyncio
+
+    result = await run_now()
+    # SsArt 는 blocking I/O → 스레드로 (codef sync 와 격리)
+    result["ssart"] = await asyncio.to_thread(_run_ssart_cron)
+    return result
 
 
 @router.get("/codef/errors")
