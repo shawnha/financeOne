@@ -26,6 +26,7 @@ import {
   Wallet,
   FileBarChart,
   TrendingDown,
+  Gauge,
 } from "lucide-react"
 
 type SidebarItem = {
@@ -40,6 +41,7 @@ const sections: { label: string; items: SidebarItem[] }[] = [
   {
     label: "요약",
     items: [
+      { label: "사장님 코쿼핏", icon: Gauge, href: "/cockpit", enabled: true },
       { label: "대시보드", icon: LayoutDashboard, href: "/", enabled: true },
       { label: "현금흐름표", icon: TrendingUp, href: "/cashflow", enabled: true },
       { label: "OpEx", icon: Wallet, href: "/opex", enabled: true },
