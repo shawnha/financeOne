@@ -1704,3 +1704,74 @@ def expenseone_sync(
     except Exception:
         conn.rollback()
         raise
+
+
+# --- SsArt (SIMS OpenAPI) — 한아원홀세일 매출/매입 자동 연동 ---
+class SsArtSyncRequest(BaseModel):
+    entity_id: int = 13
+    start: str  # YYYY-MM-DD
+    end: str    # YYYY-MM-DD
+    types: list[str] = ["sales", "purchase"]
+
+    @field_validator("start", "end")
+    @classmethod
+    def _validate_date(cls, v: str) -> str:
+        from datetime import datetime
+        datetime.strptime(v, "%Y-%m-%d")  # 잘못된 포맷 → 422
+        return v
+
+
+@router.post("/ssart/sync")
+def ssart_sync(body: SsArtSyncRequest, conn: PgConnection = Depends(get_db)):
+    """SsArt SIMS OpenAPI → 홀세일 매출/매입 동기화 (dedup ON CONFLICT)."""
+    from datetime import datetime
+    from backend.services.integrations import ssart
+
+    start = datetime.strptime(body.start, "%Y-%m-%d").date()
+    end = datetime.strptime(body.end, "%Y-%m-%d").date()
+    if end < start:
+        raise HTTPException(400, "end 가 start 보다 빠릅니다")
+
+    out: dict = {}
+    try:
+        cli = ssart.SsArtClient()
+        try:
+            if "sales" in body.types:
+                r = ssart.sync_sales(conn, body.entity_id, start, end, client=cli)
+                out["sales"] = {
+                    "total": r.total_rows, "inserted": r.inserted,
+                    "duplicates": r.duplicates, "errors": r.errors[:5],
+                }
+            if "purchase" in body.types:
+                r = ssart.sync_purchases(conn, body.entity_id, start, end, client=cli)
+                out["purchase"] = {
+                    "total": r.total_rows, "inserted": r.inserted,
+                    "duplicates": r.duplicates, "errors": r.errors[:5],
+                }
+        finally:
+            cli.close()
+        conn.commit()
+    except ssart.SsArtError as e:
+        conn.rollback()
+        raise HTTPException(502, f"SsArt 오류 [{e.code}]: {e.message}")
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(500, f"sync 실패: {e}")
+    return {"entity_id": body.entity_id, "start": body.start, "end": body.end, "result": out}
+
+
+@router.get("/ssart/status")
+def ssart_status():
+    """SsArt 연동 설정 + 인증 점검 (read-only)."""
+    from backend.services.integrations import ssart
+
+    configured = bool(os.environ.get("SSART_UID") and os.environ.get("SSART_PWD"))
+    if not configured:
+        return {"configured": False, "authenticated": False}
+    try:
+        cli = ssart.SsArtClient()
+        cli.authenticate()
+        cli.close()
+        return {"configured": True, "authenticated": True}
+    except ssart.SsArtError as e:
+        return {"configured": True, "authenticated": False, "error": f"[{e.code}] {e.message}"}
