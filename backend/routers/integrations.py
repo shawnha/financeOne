@@ -1211,10 +1211,14 @@ def _run_ssart_cron(entity_id: int = 13, lookback_days: int = 7) -> dict:
             rs = ssart.sync_sales(conn, entity_id, start, end, client=cli)
             rp = ssart.sync_purchases(conn, entity_id, start, end, client=cli)
             rc = ssart.sync_acc_trans(conn, entity_id, start, end, client=cli)
+            cust = ssart.sync_customers(conn, entity_id, client=cli)   # 마스터 — 신규 거래처/제품 반영
+            prod = ssart.sync_products(conn, entity_id, client=cli)
             conn.commit()
             out["sales"] = {"inserted": rs.inserted, "duplicates": rs.duplicates}
             out["purchase"] = {"inserted": rp.inserted, "duplicates": rp.duplicates}
             out["collections"] = {"inserted": rc["inserted"], "updated": rc["updated"]}
+            out["customers"] = {"inserted": cust["inserted"], "updated": cust["updated"]}
+            out["products"] = {"inserted": prod["inserted"], "updated": prod["updated"]}
         finally:
             cli.close()
     except Exception as e:

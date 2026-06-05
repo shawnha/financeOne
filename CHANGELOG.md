@@ -2,6 +2,23 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-06-06 — SsArt SIMS OpenAPI 연동 (한아원홀세일 매출/매입/입출금/거래처/제품 자동화)
+
+### Added
+- `backend/services/integrations/ssart.py` — SsArt(신성아트컴) SIMS OpenAPI 클라이언트. 수동 매출/매입관리 xlsx 업로드를 API 자동 pull로 대체
+  - `SsArtClient` — 2단계 인증(ACCESS_TOKEN 2주 → USE_TOKEN 48h), **cp949(EUC-KR) 응답 디코딩**, 날짜별 페이지네이션(E0005/레이트리밋 회피)
+  - 매출/매입: `sync_sales`/`sync_purchases` → 기존 `wholesale_service.import_*` 재사용(스키마 변경 0). `OUT_AMT/IN_AMT`=합계(VAT포함), 공급가는 TAX_YN 따라 ÷1.1 역산. dedup 키가 매출관리 xlsx(SIMS 생성물)와 동일 → 겹치는 기간 재sync 안전
+  - 입출금: `sync_acc_trans` → 신규 `customer_collections`(거래처별 수금 raw 거래)
+  - 기초자료: `sync_customers`/`sync_products` → 신규 `ssart_customers`(1283)·`ssart_products`(81)
+- `backend/routers/integrations.py` — `POST /api/integrations/ssart/sync`(types=sales/purchase/collections/customers/products) + `GET /api/integrations/ssart/status`
+- 일일 자동 동기화 — `cron_auto_sync`에 SsArt 추가(최근 7일 롤링 + 마스터). GitHub Actions `auto-sync.yml`(매일 KST 09:00)가 자동 호출, codef sync와 격리
+- DB 마이그레이션 — `k7l8m9n0o1p2`(customer_collections), `l8m9n0o1p2q3`(ssart_customers/ssart_products)
+- `backend/tests/test_ssart.py` — transform 단위테스트 11건(VAT 역산·면세·dedup 키·마스터)
+
+### Notes
+- 검증: 5/30 매출 67행·5/29 매입 7행이 기존 DB와 합계금액까지 정확 일치, SIMS 거래처원장과 원단위 정합. 가이드 PPT의 2개 함정 교정(응답 cp949·요청 flat 파라미터)
+- 6월 매출 ₩11.7억·매입 ₩10.3억 + 1~6월 입출금 1872건 prod 적재. 이수마트 선수금 대사로 환불 처리 정합성 데이터 확증
+
 ## [Unreleased] - 2026-05-31 — 그룹 대시보드 환율 합산 하드닝 (가짜 $123M 총액 수정)
 
 ### Fixed
