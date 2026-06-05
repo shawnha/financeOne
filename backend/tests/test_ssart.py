@@ -8,6 +8,8 @@ from backend.services.integrations.ssart import (
     sales_api_to_row,
     purchase_api_to_row,
     acc_trans_api_to_row,
+    customer_api_to_row,
+    product_api_to_row,
 )
 
 
@@ -111,3 +113,33 @@ def test_acc_trans_transform():
     assert r["method"] == "카드결제"
     assert r["io_gu"] == "입금"
     assert r["amount"] == 8564116.0
+
+
+def test_customer_transform():
+    a = {
+        "CUST_CD": "10001", "CUST_GU": "제조사", "CUST_NM": "한국베링거인겔하임(주)",
+        "CUST_PRT": "베링거인겔하임", "BIZ_NO": "1234567890", "MEDI_CD": "41878719",
+        "Cust_Kind": "1", "Cust_Kind_Nm": "제약회사", "ADDR": "서울시", "MOD_DATE": "20230126",
+    }
+    r = customer_api_to_row(a)
+    assert r["customer_code"] == "10001"
+    assert r["customer_gu"] == "제조사"
+    assert r["customer_name"] == "한국베링거인겔하임(주)"
+    assert r["biz_no"] == "1234567890"
+    assert r["medi_code"] == "41878719"
+    assert r["mod_date"] == date(2023, 1, 26)
+
+
+def test_product_transform():
+    a = {
+        "PRODUCT_CD": "00077", "PRODUCT_TYPE": "의약품", "PRODUCT_NM": "릴리)마운자로 펜 5mg",
+        "PRODUCT_STANDARD": "5mg/0.5ml/4관", "INSU_PRICE": "357120.00", "INSU_CD": "650000123",
+        "STANDARD_CD": "8806369407571", "MAKER_NM": "한국릴리", "USE_GU_YN": "Y", "MOD_DATE": "20260101",
+    }
+    r = product_api_to_row(a)
+    assert r["product_code"] == "00077"
+    assert r["product_type"] == "의약품"
+    assert r["insu_price"] == 357120.0
+    assert r["standard_code"] == "8806369407571"
+    assert r["maker_name"] == "한국릴리"
+    assert r["use_yn"] == "Y"

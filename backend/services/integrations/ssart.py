@@ -174,6 +174,14 @@ class SsArtClient:
         """입출금(거래처 수금) — 명세서일자 기준. 원시 API row 리스트."""
         return self._fetch_by_day("/v2/AccTransState/get/", "TRANS_DATE", start, end)
 
+    def fetch_customers(self) -> list[dict]:
+        """거래처 마스터 전체 (날짜 필터 없음, 페이지네이션)."""
+        return self._paged("/v2/customer/get/", {})
+
+    def fetch_products(self) -> list[dict]:
+        """제품 마스터 전체 (날짜 필터 없음, 페이지네이션)."""
+        return self._paged("/v2/product/get/", {})
+
 
 # ── 변환: API row → wholesale_service import dict ──
 def _split_vat(total: Optional[float], taxable: bool) -> tuple[Optional[float], Optional[float]]:
@@ -353,3 +361,137 @@ def sync_acc_trans(conn, entity_id: int, start: date, end: date, client: Optiona
             updated += 1
     cur.close()
     return {"total_rows": len(rows), "inserted": inserted, "updated": updated}
+
+
+# ── 기초자료 (거래처/제품 마스터) ──
+def customer_api_to_row(a: dict) -> dict:
+    """거래처 API row → ssart_customers dict."""
+    return {
+        "customer_code": (str(a.get("CUST_CD") or "").strip() or None),
+        "customer_gu": (a.get("CUST_GU") or "").strip() or None,
+        "customer_name": (a.get("CUST_NM") or "").strip() or None,
+        "customer_print_name": (a.get("CUST_PRT") or "").strip() or None,
+        "owner_name": (a.get("OWNER_NM") or "").strip() or None,
+        "biz_no": (a.get("BIZ_NO") or "").strip() or None,
+        "business_status": (a.get("Buss_Status") or "").strip() or None,
+        "business_item": (a.get("Cust_Item") or "").strip() or None,
+        "tel": (a.get("TEL") or "").strip() or None,
+        "fax": (a.get("FAX") or "").strip() or None,
+        "kind_code": (str(a.get("Cust_Kind") or "").strip() or None),
+        "kind_name": (a.get("Cust_Kind_Nm") or "").strip() or None,
+        "medi_code": (a.get("MEDI_CD") or "").strip() or None,
+        "zip_code": (a.get("ZIP_CODE") or "").strip() or None,
+        "addr": (a.get("ADDR") or "").strip() or None,
+        "mod_date": _ymd_to_date(a.get("MOD_DATE")),
+        "raw_row": a,
+    }
+
+
+def product_api_to_row(a: dict) -> dict:
+    """제품 API row → ssart_products dict."""
+    return {
+        "product_code": (str(a.get("PRODUCT_CD") or "").strip() or None),
+        "product_type": (a.get("PRODUCT_TYPE") or "").strip() or None,
+        "product_name": (a.get("PRODUCT_NM") or "").strip() or None,
+        "product_print_name": (a.get("PRODUCT_PRT") or "").strip() or None,
+        "spec": (a.get("PRODUCT_STANDARD") or "").strip() or None,
+        "unit": (a.get("PRODUCT_UNIT") or "").strip() or None,
+        "insu_price": _to_float(a.get("INSU_PRICE")),
+        "insu_code": (a.get("INSU_CD") or "").strip() or None,
+        "standard_code": (a.get("STANDARD_CD") or "").strip() or None,
+        "ingredient_code": (a.get("CONS_CD") or "").strip() or None,
+        "ingredient_name": (a.get("CONS_CD_NM") or "").strip() or None,
+        "maker_name": (a.get("MAKER_NM") or "").strip() or None,
+        "order_vendor_name": (a.get("ORVEN_NM") or "").strip() or None,
+        "product_group": (a.get("PRODUCT_GROUP") or "").strip() or None,
+        "udi_code": (a.get("UDI_DI_CODE") or "").strip() or None,
+        "use_yn": (a.get("USE_GU_YN") or "").strip() or None,
+        "mod_date": _ymd_to_date(a.get("MOD_DATE")),
+        "raw_row": a,
+    }
+
+
+def _upsert_master(conn, table: str, conflict_col: str, cols: list[str], rows: list[dict]) -> dict:
+    """마스터 UPSERT 공용 헬퍼. 충돌 시 conflict_col 제외 전 컬럼 갱신. raw_row 는 jsonb 캐스팅."""
+    import json as _json
+
+    raw_idx = cols.index("raw_row")
+    val_ph = ", ".join("%s::jsonb" if i == raw_idx else "%s" for i in range(len(cols)))
+    update_set = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c != conflict_col)
+    sql = f"""
+        INSERT INTO {table} (entity_id, {", ".join(cols)}, source)
+        VALUES (%s, {val_ph}, %s)
+        ON CONFLICT (entity_id, {conflict_col}) DO UPDATE SET
+            {update_set}, updated_at = NOW()
+        RETURNING (xmax = 0) AS is_insert
+    """
+    cur = conn.cursor()
+    cur.execute("SET search_path TO financeone, public")
+    inserted = updated = 0
+    for r in rows:
+        params = (
+            [r["entity_id"]]
+            + [
+                _json.dumps(r[c], ensure_ascii=False, default=str) if i == raw_idx else r[c]
+                for i, c in enumerate(cols)
+            ]
+            + [r["source"]]
+        )
+        cur.execute(sql, params)
+        if cur.fetchone()[0]:
+            inserted += 1
+        else:
+            updated += 1
+    cur.close()
+    return {"total_rows": len(rows), "inserted": inserted, "updated": updated}
+
+
+_CUSTOMER_COLS = [
+    "customer_code", "customer_gu", "customer_name", "customer_print_name",
+    "owner_name", "biz_no", "business_status", "business_item", "tel", "fax",
+    "kind_code", "kind_name", "medi_code", "zip_code", "addr", "mod_date", "raw_row",
+]
+_PRODUCT_COLS = [
+    "product_code", "product_type", "product_name", "product_print_name", "spec",
+    "unit", "insu_price", "insu_code", "standard_code", "ingredient_code",
+    "ingredient_name", "maker_name", "order_vendor_name", "product_group",
+    "udi_code", "use_yn", "mod_date", "raw_row",
+]
+
+
+def sync_customers(conn, entity_id: int, client: Optional[SsArtClient] = None) -> dict:
+    """SsArt 거래처 마스터 → ssart_customers (UPSERT)."""
+    cli = client or SsArtClient()
+    try:
+        raw = cli.fetch_customers()
+    finally:
+        if client is None:
+            cli.close()
+    rows = []
+    for a in raw:
+        r = customer_api_to_row(a)
+        if not r["customer_code"]:
+            continue
+        r["entity_id"] = entity_id
+        r["source"] = "ssart_api"
+        rows.append(r)
+    return _upsert_master(conn, "ssart_customers", "customer_code", _CUSTOMER_COLS, rows)
+
+
+def sync_products(conn, entity_id: int, client: Optional[SsArtClient] = None) -> dict:
+    """SsArt 제품 마스터 → ssart_products (UPSERT)."""
+    cli = client or SsArtClient()
+    try:
+        raw = cli.fetch_products()
+    finally:
+        if client is None:
+            cli.close()
+    rows = []
+    for a in raw:
+        r = product_api_to_row(a)
+        if not r["product_code"]:
+            continue
+        r["entity_id"] = entity_id
+        r["source"] = "ssart_api"
+        rows.append(r)
+    return _upsert_master(conn, "ssart_products", "product_code", _PRODUCT_COLS, rows)

@@ -1796,6 +1796,10 @@ def ssart_sync(body: SsArtSyncRequest, conn: PgConnection = Depends(get_db)):
                 }
             if "collections" in body.types:
                 out["collections"] = ssart.sync_acc_trans(conn, body.entity_id, start, end, client=cli)
+            if "customers" in body.types:  # 마스터 — 날짜 무관
+                out["customers"] = ssart.sync_customers(conn, body.entity_id, client=cli)
+            if "products" in body.types:   # 마스터 — 날짜 무관
+                out["products"] = ssart.sync_products(conn, body.entity_id, client=cli)
         finally:
             cli.close()
         conn.commit()

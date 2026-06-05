@@ -17,13 +17,15 @@
 - [x] `/v2/AccTransState/get/` → **신규 테이블 `customer_collections`** (customer_balances 는 스냅샷이라 부적합). 마이그 `k7l8m9n0o1p2`.
 - [x] `sync_acc_trans` (UPSERT, dedup `(entity, trans_date, trans_seq)`) + 라우터 types=["collections"]
 - [x] prod 적용: 5~6월 565건 ₩4.58B (보통예금 ₩2.49B·카드결제 ₩2.07B). idempotency 확인.
-- [x] **이수마트 수금 10건 ₩223.7M 확보** — 선결제↔매출 대사 재료 ([[project_how_refund_reclass_seonsugum]])
-- [ ] (후속) 이수마트 수금 vs wholesale_sales 매출 대사 → 진짜 선수금 잔액 산출
+- [x] **이수마트 수금 ₩223.7M 확보** — 선결제↔매출 대사 재료 ([[project_how_refund_reclass_seonsugum]])
+- [x] 이수마트 수금 vs wholesale_sales 매출 **시점별 대사 완료** — 3월 +₩306M 과납→5/13 net 0(SIMS book_balance=0 원단위 일치)→6/6 −₩71.7M 미수. 환불=과납반환 확증, /pnl 무관, DB 무변경.
 
-## Phase 3 — 기초자료 + 잔고
-- [ ] `/v2/customer/get/` → 거래처 마스터 (payee_aliases 연계)
-- [ ] `/v2/product/get/` → 제품 마스터 (제조사·성분·보험코드)
-- [ ] 잔고/재고 → inventory_snapshots 테이블 연계 (재고는 detail STOCK_*/PRODUCT_NO/TERM_DATE)
+## Phase 3 — 기초자료 ✅ 완료 (2026-06-06, 마이그 `l8m9n0o1p2q3`)
+- [x] `/v2/customer/get/` → **`ssart_customers`**(1283건: 제조사751·매출513·매입15). BIZ_NO 531·요양기관번호 511. UPSERT.
+- [x] `/v2/product/get/` → **`ssart_products`**(81건: 제조사·성분·보험코드·바코드76·UDI). UPSERT.
+- [x] 라우터 types=["customers","products"] + 단위테스트 2건 (총 11 PASS). idempotency 확인.
+- [N/A] 재고 — SsArt API에 현재고 엔드포인트 없음. `inventory_snapshots`는 현재고 xlsx 업로드 경로 유지(별개).
+- [ ] (후속) ssart_customers BIZ_NO/요양기관번호로 payee_aliases·거래처 매칭 강화
 
 ## 운영
 - [x] 자동 동기화 — `cron_auto_sync` 에 `_run_ssart_cron`(매출/매입/입출금 최근7일 롤링 UPSERT) 추가. GitHub Actions `auto-sync.yml`(매일 KST 09:00)가 자동 포함. codef와 격리(asyncio.to_thread, 실패 삼킴). end-to-end 검증(전부 dedup).
