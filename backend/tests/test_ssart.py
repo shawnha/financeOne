@@ -7,6 +7,7 @@ from backend.services.integrations.ssart import (
     _int_or_none,
     sales_api_to_row,
     purchase_api_to_row,
+    acc_trans_api_to_row,
 )
 
 
@@ -92,3 +93,21 @@ def test_purchase_transform():
     # 면세 → 공급가=합계
     assert r["supply_amount"] == 6378696.0
     assert r["vat"] == 0.0
+
+
+def test_acc_trans_transform():
+    a = {
+        "TRANS_DATE": "20260530", "TRANS_SEQ": "12", "CUST_CD": "50219",
+        "CUST_NM": "동탄)아이튼튼약국", "CUST_PRT": "아이튼튼약국",
+        "AccTransState_GU_CD": "04    ", "AccTransState_GU": "카드결제",
+        "AMT": "8564116", "REMARK": "", "ADD_DATE": "20260530", "MOD_DATE": "20260530",
+        "IFTYPE_FLAG": "N", "IO_GU": "입금",
+    }
+    r = acc_trans_api_to_row(a)
+    assert r["trans_date"] == date(2026, 5, 30)
+    assert r["trans_seq"] == "12"          # dedup 키
+    assert r["customer_code"] == "50219"
+    assert r["method_code"] == "04"        # strip 됨
+    assert r["method"] == "카드결제"
+    assert r["io_gu"] == "입금"
+    assert r["amount"] == 8564116.0

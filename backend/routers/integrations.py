@@ -1748,6 +1748,8 @@ def ssart_sync(body: SsArtSyncRequest, conn: PgConnection = Depends(get_db)):
                     "total": r.total_rows, "inserted": r.inserted,
                     "duplicates": r.duplicates, "errors": r.errors[:5],
                 }
+            if "collections" in body.types:
+                out["collections"] = ssart.sync_acc_trans(conn, body.entity_id, start, end, client=cli)
         finally:
             cli.close()
         conn.commit()

@@ -170,6 +170,10 @@ class SsArtClient:
         """매입 detail (입고일 기준) — 원시 API row 리스트."""
         return self._fetch_by_day("/v2/purchase/get/", "IN_DATE", start, end)
 
+    def fetch_acc_trans(self, start: date, end: date) -> list[dict]:
+        """입출금(거래처 수금) — 명세서일자 기준. 원시 API row 리스트."""
+        return self._fetch_by_day("/v2/AccTransState/get/", "TRANS_DATE", start, end)
+
 
 # ── 변환: API row → wholesale_service import dict ──
 def _split_vat(total: Optional[float], taxable: bool) -> tuple[Optional[float], Optional[float]]:
@@ -283,3 +287,69 @@ def sync_purchases(conn, entity_id: int, start: date, end: date, client: Optiona
     rows = [r for r in rows if r["purchase_date"] and r["product_name"] and r["payee_name"]]
     src = f"ssart_api:purchase:{start:%Y%m%d}-{end:%Y%m%d}"
     return import_wholesale_purchases(conn, entity_id, rows, source_file=src)
+
+
+def acc_trans_api_to_row(a: dict) -> dict:
+    """입출금 API row → customer_collections insert dict."""
+    return {
+        "trans_date": _ymd_to_date(a.get("TRANS_DATE")),
+        "trans_seq": (str(a.get("TRANS_SEQ") or "").strip() or None),
+        "customer_code": (str(a.get("CUST_CD") or "").strip() or None),
+        "customer_name": (a.get("CUST_NM") or "").strip() or None,
+        "customer_print_name": (a.get("CUST_PRT") or "").strip() or None,
+        "method_code": (str(a.get("AccTransState_GU_CD") or "").strip() or None),
+        "method": (a.get("AccTransState_GU") or "").strip() or None,
+        "io_gu": (a.get("IO_GU") or "").strip() or None,
+        "amount": _to_float(a.get("AMT")) or 0,
+        "remark": (a.get("REMARK") or "").strip() or None,
+        "add_date": _ymd_to_date(a.get("ADD_DATE")),
+        "mod_date": _ymd_to_date(a.get("MOD_DATE")),
+        "raw_row": a,
+    }
+
+
+def sync_acc_trans(conn, entity_id: int, start: date, end: date, client: Optional[SsArtClient] = None) -> dict:
+    """SsArt 입출금 → customer_collections (dedup UPSERT on entity/date/seq)."""
+    import json as _json
+
+    cli = client or SsArtClient()
+    try:
+        raw = cli.fetch_acc_trans(start, end)
+    finally:
+        if client is None:
+            cli.close()
+    rows = [acc_trans_api_to_row(a) for a in raw]
+    rows = [r for r in rows if r["trans_date"] and r["trans_seq"]]
+    src = f"ssart_api:acctrans:{start:%Y%m%d}-{end:%Y%m%d}"
+
+    cur = conn.cursor()
+    cur.execute("SET search_path TO financeone, public")
+    inserted = updated = 0
+    for r in rows:
+        cur.execute(
+            """
+            INSERT INTO customer_collections (
+                entity_id, trans_date, trans_seq, customer_code, customer_name,
+                customer_print_name, method_code, method, io_gu, amount, remark,
+                add_date, mod_date, source, raw_row
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
+            ON CONFLICT (entity_id, trans_date, trans_seq) DO UPDATE SET
+                customer_code = EXCLUDED.customer_code,
+                customer_name = EXCLUDED.customer_name,
+                method = EXCLUDED.method, io_gu = EXCLUDED.io_gu,
+                amount = EXCLUDED.amount, remark = EXCLUDED.remark,
+                mod_date = EXCLUDED.mod_date, raw_row = EXCLUDED.raw_row
+            RETURNING (xmax = 0) AS is_insert
+            """,
+            [
+                entity_id, r["trans_date"], r["trans_seq"], r["customer_code"], r["customer_name"],
+                r["customer_print_name"], r["method_code"], r["method"], r["io_gu"], r["amount"], r["remark"],
+                r["add_date"], r["mod_date"], src, _json.dumps(r["raw_row"], ensure_ascii=False, default=str),
+            ],
+        )
+        if cur.fetchone()[0]:
+            inserted += 1
+        else:
+            updated += 1
+    cur.close()
+    return {"total_rows": len(rows), "inserted": inserted, "updated": updated}
