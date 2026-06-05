@@ -3,7 +3,7 @@
 import { useState, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import { toast } from "sonner"
-import { FileSpreadsheet, Upload as UploadIcon, Check, AlertCircle } from "lucide-react"
+import { FileSpreadsheet, Upload as UploadIcon, Check, AlertCircle, RefreshCw } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -75,8 +75,47 @@ export function WholesaleUpload({ kind }: Props) {
   const entityId = searchParams.get("entity")
   const inputRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
+  const [ssartBusy, setSsartBusy] = useState(false)
   const [result, setResult] = useState<ImportResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // SsArt SIMS OpenAPI 동기화는 한아원홀세일(entity 13) 전용
+  const ssartEnabled = entityId === "13"
+
+  const handleSsartSync = async () => {
+    if (!ssartEnabled) return
+    setSsartBusy(true)
+    setResult(null)
+    setError(null)
+    const end = new Date()
+    const start = new Date()
+    start.setDate(start.getDate() - 30) // 최근 30일
+    const ymd = (d: Date) => d.toISOString().slice(0, 10)
+    const ssartType = kind === "sales" ? "sales" : "purchase"
+    try {
+      const res = await fetch(`${API_BASE}/integrations/ssart/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entity_id: Number(entityId),
+          start: ymd(start),
+          end: ymd(end),
+          types: [ssartType],
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.detail || "동기화 실패")
+      const r = data.result?.[ssartType] ?? {}
+      setResult({ total_rows: r.total ?? 0, inserted: r.inserted ?? 0, duplicates: r.duplicates ?? 0, errors: r.errors })
+      toast.success(`SsArt 동기화: ${r.inserted ?? 0}건 신규 (${r.duplicates ?? 0}건 중복)`)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "동기화 실패"
+      setError(msg)
+      toast.error(msg)
+    } finally {
+      setSsartBusy(false)
+    }
+  }
 
   const handleFile = async (file: File | null) => {
     if (!file || !entityId) return
@@ -124,12 +163,25 @@ export function WholesaleUpload({ kind }: Props) {
               variant="secondary"
               size="sm"
               onClick={() => inputRef.current?.click()}
-              disabled={busy || !entityId}
+              disabled={busy || ssartBusy || !entityId}
               className="gap-2"
             >
               <UploadIcon className="h-3.5 w-3.5" />
               {busy ? "처리 중..." : "Excel 선택"}
             </Button>
+            {ssartEnabled && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSsartSync}
+                disabled={busy || ssartBusy}
+                className="gap-2"
+                title="SsArt SIMS OpenAPI 에서 최근 30일 자동 동기화"
+              >
+                <RefreshCw className={cn("h-3.5 w-3.5", ssartBusy && "animate-spin")} />
+                {ssartBusy ? "동기화 중..." : "SsArt 동기화 (30일)"}
+              </Button>
+            )}
           </div>
 
           {result && (
