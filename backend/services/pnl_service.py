@@ -22,12 +22,22 @@ SGA_SUBS = ("판매관리비", "판매비와관리비")
 # subcategory 합산을 매출/매출원가로 사용 — wholesale xlsx import 가 없기 때문.
 _WHOLESALE_ENTITIES = (13,)
 
+# 매출을 invoices(direction='sales', SalesOne 동기화) 에서 읽는 법인 — 발생주의.
+# 코리아(2)·리테일(3). 매출배선 Tier 1 (2026-06-06): transactions 매출=0 버그 수정.
+# COGS 는 transactions(현금) 유지 → cogs_basis='cash' (매출=발생/원가=현금 불일치는 라벨로 노출).
+# HOI(1) 등 그 외는 기존 transactions 매출 유지(US-GAAP, 범위 밖).
+_INVOICE_REVENUE_ENTITIES = (2, 3)
+
 
 def _revenue_cogs_summary(cur, entity_id: int, start, end) -> dict:
     """entity 별 매출/매출원가 집계.
 
     entity_id ∈ _WHOLESALE_ENTITIES: wholesale_sales 발생주의.
+    entity_id ∈ _INVOICE_REVENUE_ENTITIES: invoices(sales) 발생 매출 + transactions 현금 원가.
     그 외: transactions (subcategory='매출' / '매출원가') 현금주의.
+
+    반환 dict 에 revenue_source('wholesale_sales'|'invoices'|'transactions') 와
+    cogs_basis('accrual'|'cash') 포함 — 프론트 disclaimer 용.
     """
     if entity_id in _WHOLESALE_ENTITIES:
         cur.execute(
@@ -48,26 +58,46 @@ def _revenue_cogs_summary(cur, entity_id: int, start, end) -> dict:
             "revenue": Decimal(str(r[0])), "revenue_excl_vat": Decimal(str(r[1])),
             "cogs": Decimal(str(r[2])), "cogs_excl_vat": Decimal(str(r[3])),
             "sales_count": r[4],
+            "revenue_source": "wholesale_sales", "cogs_basis": "accrual",
         }
 
-    cur.execute(
-        """
-        SELECT
-          COALESCE(SUM(t.amount), 0) AS revenue,
-          COALESCE(SUM(
-            CASE WHEN s.is_vat_taxable THEN t.amount / 1.1 ELSE t.amount END
-          ), 0) AS revenue_excl_vat,
-          COUNT(*) AS sales_count
-        FROM transactions t
-        JOIN standard_accounts s ON s.id = t.standard_account_id
-        WHERE t.entity_id = %s
-          AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
-          AND s.category = '수익' AND s.subcategory = '매출'
-          AND t.is_duplicate = false AND (t.is_cancel IS NOT TRUE)
-        """,
-        [entity_id, start, end],
-    )
-    rev = cur.fetchone()
+    # 매출 소스 분기 — 코리아·리테일=invoices(발생), 그 외=transactions(현금)
+    if entity_id in _INVOICE_REVENUE_ENTITIES:
+        cur.execute(
+            """
+            SELECT
+              COALESCE(SUM(total), 0) AS revenue,
+              COALESCE(SUM(amount), 0) AS revenue_excl_vat,
+              COUNT(*) AS sales_count
+            FROM invoices
+            WHERE entity_id = %s AND direction = 'sales'
+              AND issue_date >= %s AND issue_date < %s
+              AND status <> 'cancelled'
+            """,
+            [entity_id, start, end],
+        )
+        rev = cur.fetchone()
+        revenue_source = "invoices"
+    else:
+        cur.execute(
+            """
+            SELECT
+              COALESCE(SUM(t.amount), 0) AS revenue,
+              COALESCE(SUM(
+                CASE WHEN s.is_vat_taxable THEN t.amount / 1.1 ELSE t.amount END
+              ), 0) AS revenue_excl_vat,
+              COUNT(*) AS sales_count
+            FROM transactions t
+            JOIN standard_accounts s ON s.id = t.standard_account_id
+            WHERE t.entity_id = %s
+              AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
+              AND s.category = '수익' AND s.subcategory = '매출'
+              AND t.is_duplicate = false AND (t.is_cancel IS NOT TRUE)
+            """,
+            [entity_id, start, end],
+        )
+        rev = cur.fetchone()
+        revenue_source = "transactions"
 
     cur.execute(
         """
@@ -90,6 +120,7 @@ def _revenue_cogs_summary(cur, entity_id: int, start, end) -> dict:
         "revenue": Decimal(str(rev[0])), "revenue_excl_vat": Decimal(str(rev[1])),
         "cogs": Decimal(str(cogs_row[0])), "cogs_excl_vat": Decimal(str(cogs_row[1])),
         "sales_count": rev[2],
+        "revenue_source": revenue_source, "cogs_basis": "cash",
     }
 
 
@@ -104,6 +135,8 @@ def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -
     cogs = rc["cogs"]
     cogs_excl_vat = rc["cogs_excl_vat"]
     sales_count = rc["sales_count"]
+    revenue_source = rc["revenue_source"]
+    cogs_basis = rc["cogs_basis"]
 
     # 매입 (검증용)
     cur.execute(
@@ -252,6 +285,9 @@ def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -
         "purchases_count": purchases_count,
         "opex_breakdown": opex_breakdown,
         "non_op_expense_transactions": non_op_expense_txs,
+        # 매출 소스 / 원가 기준 (프론트 disclaimer — 매출=발생·원가=현금 불일치 표기)
+        "revenue_source": revenue_source,
+        "cogs_basis": cogs_basis,
     }
 
 

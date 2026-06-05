@@ -84,6 +84,9 @@ interface PnlSummary {
   purchases_count: number
   opex_breakdown: Array<{ code: string; name: string; count: number; amount: number }>
   non_op_expense_transactions: NonOpTx[]
+  // 매출 소스 / 원가 기준 — 매출=발생(invoices)·원가=현금이면 매출총이익 기준 불일치 경고
+  revenue_source?: "wholesale_sales" | "invoices" | "transactions"
+  cogs_basis?: "accrual" | "cash"
 }
 
 type VatMode = "incl" | "excl"
@@ -411,6 +414,11 @@ export function PnlContent() {
           <p className="text-[10px] text-muted-foreground/70 mt-1">
             ⓘ 운영 직관 view — 외상 거래 / 발생주의 K-GAAP 정합 손익은 <span className="text-foreground/70">재무제표 페이지</span> 참조
           </p>
+          {summary?.revenue_source === "invoices" && summary?.cogs_basis === "cash" && (
+            <p className="text-[10px] text-amber-300/80 mt-1">
+              ⚠️ 매출 = 세금계산서(발생) · 매출원가 = 거래내역(현금) — 기준이 달라 매출총이익은 월별로 변동될 수 있습니다.
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <div className="inline-flex rounded-md border border-border/40 bg-secondary/40 p-0.5 text-[11px]">
