@@ -12,8 +12,9 @@ import {
   Tooltip as RechartsTooltip,
   ComposedChart,
   ReferenceLine,
+  Cell,
 } from "recharts"
-import { AlertCircle, RefreshCw, TrendingDown } from "lucide-react"
+import { AlertCircle, ChevronLeft, ChevronRight, RefreshCw, TrendingDown } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -31,6 +32,13 @@ interface ReceivableRow {
   collection_rate_pct: number | null
 }
 
+interface CollectionMethod {
+  method: string
+  amount: number
+  count: number
+  pct: number
+}
+
 interface ReceivablesSummary {
   entity_id: number
   total_billed: number
@@ -40,6 +48,7 @@ interface ReceivablesSummary {
   payee_count: number
   detail: ReceivableRow[]
   no_match_received: ReceivableRow[]
+  collection_methods: CollectionMethod[]
 }
 
 interface MonthlyRow {
@@ -52,7 +61,22 @@ interface MonthlyRow {
 }
 
 interface MonthlyData {
+  opening_balance?: number
   months: MonthlyRow[]
+}
+
+interface DailyRow {
+  date: string
+  billed: number
+  received: number
+  daily_diff: number
+  cumulative_outstanding: number
+  collection_rate_pct: number | null
+}
+
+interface DailyData {
+  opening_balance?: number
+  days: DailyRow[]
 }
 
 type LoadState = "loading" | "empty" | "error" | "success"
@@ -82,6 +106,9 @@ export function ReceivablesContent() {
   const [monthly, setMonthly] = useState<MonthlyData | null>(null)
   const [state, setState] = useState<LoadState>("loading")
   const [error, setError] = useState("")
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null)  // 'YYYY-MM'
+  const [daily, setDaily] = useState<DailyData | null>(null)
+  const [dailyLoading, setDailyLoading] = useState(false)
 
   const fetchData = useCallback(async () => {
     if (!entityId) return
@@ -101,6 +128,46 @@ export function ReceivablesContent() {
   }, [entityId])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  // 월별 데이터 로드 완료 시 마지막 월 자동 선택
+  useEffect(() => {
+    if (monthly && monthly.months.length > 0 && selectedMonth === null) {
+      setSelectedMonth(monthly.months[monthly.months.length - 1].month)
+    }
+  }, [monthly, selectedMonth])
+
+  // 선택 월 변경 시 일별 데이터 fetch
+  useEffect(() => {
+    if (!entityId || !selectedMonth) return
+    setDailyLoading(true)
+    const [y, m] = selectedMonth.split("-").map(Number)
+    const startDate = `${y}-${String(m).padStart(2, "0")}-01`
+    const lastDay = new Date(y, m, 0).getDate()
+    const endDate = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
+    fetchAPI<DailyData>(
+      `/receivables/daily?entity_id=${entityId}&start_date=${startDate}&end_date=${endDate}`,
+      { cache: "no-store" },
+    )
+      .then(setDaily)
+      .catch((e) => console.error("daily fetch failed", e))
+      .finally(() => setDailyLoading(false))
+  }, [entityId, selectedMonth])
+
+  // ← / → keyboard nav
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!monthly || !selectedMonth) return
+      const idx = monthly.months.findIndex((m) => m.month === selectedMonth)
+      if (idx < 0) return
+      if (e.key === "ArrowLeft" && idx > 0) {
+        setSelectedMonth(monthly.months[idx - 1].month)
+      } else if (e.key === "ArrowRight" && idx < monthly.months.length - 1) {
+        setSelectedMonth(monthly.months[idx + 1].month)
+      }
+    }
+    window.addEventListener("keydown", handler)
+    return () => window.removeEventListener("keydown", handler)
+  }, [monthly, selectedMonth])
 
   if (!entityId) {
     return <div className="p-6"><Skeleton className="h-[260px] w-full rounded-xl" /></div>
@@ -144,6 +211,9 @@ export function ReceivablesContent() {
 
   const overallRate = summary.collection_rate_pct ?? 0
   const rateColor = overallRate >= 70 ? "text-[hsl(var(--profit))]" : overallRate >= 40 ? "text-amber-300" : "text-[hsl(var(--loss))]"
+  // 수금방식 분해가 있으면 도매(SIMS 코드 기준 수금) 법인
+  const isWholesale = (summary.collection_methods?.length ?? 0) > 0
+  const overpaid = isWholesale ? summary.detail.filter((r) => r.outstanding < 0) : []
 
   return (
     <div className="p-6 space-y-6">
@@ -153,7 +223,9 @@ export function ReceivablesContent() {
           외상매출금
         </h1>
         <p className="text-xs text-muted-foreground mt-1">
-          매출관리 (발생주의) − 거래내역 입금 (현금주의) — payee_aliases 매칭 base
+          {isWholesale
+            ? "매출관리 (발생주의) − SIMS 수금 (customer_collections, 거래처 코드 기준) + 2025 기초잔고"
+            : "매출관리 (발생주의) − 거래내역 입금 (현금주의) — payee_aliases 매칭 base"}
         </p>
       </div>
 
@@ -181,7 +253,7 @@ export function ReceivablesContent() {
         <KPICard
           label="전체 회수율"
           value={`${overallRate.toFixed(1)}%`}
-          subtext={overallRate >= 70 ? "양호" : overallRate >= 40 ? "주의" : "낮음 — alias 부족 가능"}
+          subtext={overallRate >= 70 ? "양호" : overallRate >= 40 ? "주의" : isWholesale ? "낮음" : "낮음 — alias 부족 가능"}
           colorClass={rateColor}
           large
         />
@@ -225,13 +297,175 @@ export function ReceivablesContent() {
                 }}
               />
               <ReferenceLine yAxisId="amount" y={0} stroke="rgba(255,255,255,0.1)" />
-              <Bar yAxisId="amount" dataKey="billed" name="발생" fill="hsl(var(--accent))" fillOpacity={0.5} radius={[4, 4, 0, 0]} barSize={16} />
-              <Bar yAxisId="amount" dataKey="received" name="회수" fill="#22C55E" fillOpacity={0.5} radius={[4, 4, 0, 0]} barSize={16} />
+              <Bar
+                yAxisId="amount" dataKey="billed" name="발생"
+                fill="hsl(var(--accent))" fillOpacity={0.5}
+                radius={[4, 4, 0, 0]} barSize={16}
+                onClick={(data) => setSelectedMonth((data as unknown as MonthlyRow).month)}
+                cursor="pointer"
+              >
+                {monthly.months.map((m) => (
+                  <Cell
+                    key={m.month}
+                    fillOpacity={m.month === selectedMonth ? 1 : 0.4}
+                    stroke={m.month === selectedMonth ? "hsl(var(--accent))" : undefined}
+                    strokeWidth={m.month === selectedMonth ? 2 : 0}
+                  />
+                ))}
+              </Bar>
+              <Bar
+                yAxisId="amount" dataKey="received" name="회수"
+                fill="#22C55E" fillOpacity={0.5}
+                radius={[4, 4, 0, 0]} barSize={16}
+                onClick={(data) => setSelectedMonth((data as unknown as MonthlyRow).month)}
+                cursor="pointer"
+              >
+                {monthly.months.map((m) => (
+                  <Cell
+                    key={m.month}
+                    fillOpacity={m.month === selectedMonth ? 1 : 0.4}
+                  />
+                ))}
+              </Bar>
               <Line yAxisId="cum" type="monotone" dataKey="cumulative_outstanding" name="누적 외상" stroke="#F59E0B" strokeWidth={2.5} dot={{ r: 3, fill: "#F59E0B" }} />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
       </Card>
+
+      {/* 수금방식 분해 + 과수금/선수금 (도매) */}
+      {isWholesale && (
+        <div className="grid grid-cols-2 gap-3 max-md:grid-cols-1">
+          <Card className="p-6 rounded-2xl">
+            <h3 className="text-sm font-medium text-muted-foreground mb-4">수금방식 분해</h3>
+            <div className="space-y-2.5">
+              {summary.collection_methods.map((m) => (
+                <div key={m.method} className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span>{m.method}</span>
+                    <span className="font-mono tabular-nums text-muted-foreground">
+                      {formatByEntity(m.amount, entityId)} · {m.count}건 · {m.pct.toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-white/[0.04] overflow-hidden">
+                    <div className="h-full rounded-full bg-emerald-500/60" style={{ width: `${Math.min(m.pct, 100)}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card className="p-6 rounded-2xl">
+            <h3 className="text-sm font-medium text-muted-foreground mb-4">
+              과수금 / 선수금 거래처 {overpaid.length > 0 && <span className="text-amber-300">({overpaid.length})</span>}
+            </h3>
+            {overpaid.length === 0 ? (
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                현재 초과 수금(선수금) 거래처가 없습니다.<br />모든 거래처가 미수 또는 정산 완료 상태입니다.
+              </p>
+            ) : (
+              <div className="space-y-1.5 text-[12px] max-h-[200px] overflow-y-auto">
+                {overpaid
+                  .slice()
+                  .sort((a, b) => a.outstanding - b.outstanding)
+                  .map((r, i) => (
+                    <div key={i} className="grid grid-cols-[1fr_120px] gap-2">
+                      <span className="truncate" title={r.canonical}>{r.canonical}</span>
+                      <span className="text-right font-mono tabular-nums text-[hsl(var(--profit))]">
+                        {formatByEntity(r.outstanding, entityId)}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {/* 일별 차트 — 선택 월 기준 */}
+      {selectedMonth && (
+        <Card className="p-6 rounded-2xl">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-medium text-muted-foreground">
+                {parseInt(selectedMonth.slice(5))}월 일별 발생 vs 회수 + 누적
+              </h3>
+              <span className="text-[10px] text-muted-foreground/60">(막대 클릭 또는 ←/→ 키로 월 이동)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={!monthly || monthly.months.findIndex((m) => m.month === selectedMonth) <= 0}
+                onClick={() => {
+                  if (!monthly) return
+                  const idx = monthly.months.findIndex((m) => m.month === selectedMonth)
+                  if (idx > 0) setSelectedMonth(monthly.months[idx - 1].month)
+                }}
+                className="h-7 px-2"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-xs font-mono text-muted-foreground tabular-nums w-20 text-center">
+                {selectedMonth}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={!monthly || monthly.months.findIndex((m) => m.month === selectedMonth) >= (monthly.months.length - 1)}
+                onClick={() => {
+                  if (!monthly) return
+                  const idx = monthly.months.findIndex((m) => m.month === selectedMonth)
+                  if (idx >= 0 && idx < monthly.months.length - 1) setSelectedMonth(monthly.months[idx + 1].month)
+                }}
+                className="h-7 px-2"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+          <div className="h-[240px]">
+            {dailyLoading ? (
+              <Skeleton className="h-full w-full rounded-lg" />
+            ) : daily && daily.days.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={daily.days} margin={{ top: 10, right: 50, left: 10, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="4 4" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                  <XAxis
+                    dataKey="date" tick={{ fill: "#64748b", fontSize: 10 }}
+                    axisLine={{ stroke: "rgba(255,255,255,0.06)" }} tickLine={false}
+                    tickFormatter={(v) => v.slice(8)}
+                  />
+                  <YAxis yAxisId="amount" tick={{ fill: "#64748b", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v) => abbreviateAmount(v)} width={60} />
+                  <YAxis yAxisId="cum" orientation="right" tick={{ fill: "#64748b", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v) => abbreviateAmount(v)} width={50} />
+                  <RechartsTooltip
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload?.length) return null
+                      const d = payload[0].payload as DailyRow
+                      return (
+                        <div className="rounded-lg bg-popover border border-border px-3 py-2 shadow-lg text-xs space-y-0.5">
+                          <p className="text-muted-foreground mb-1">{label}</p>
+                          <p className="font-mono tabular-nums">발생: <span className="text-[hsl(var(--accent))]">{formatByEntity(d.billed, entityId)}</span></p>
+                          <p className="font-mono tabular-nums">회수: <span className="text-[hsl(var(--profit))]">{formatByEntity(d.received, entityId)}</span></p>
+                          <p className="font-mono tabular-nums">누적 외상: <span className="text-amber-400">{formatByEntity(d.cumulative_outstanding, entityId)}</span></p>
+                        </div>
+                      )
+                    }}
+                  />
+                  <ReferenceLine yAxisId="amount" y={0} stroke="rgba(255,255,255,0.1)" />
+                  <Bar yAxisId="amount" dataKey="billed" name="발생" fill="hsl(var(--accent))" fillOpacity={0.6} radius={[3, 3, 0, 0]} barSize={10} />
+                  <Bar yAxisId="amount" dataKey="received" name="회수" fill="#22C55E" fillOpacity={0.6} radius={[3, 3, 0, 0]} barSize={10} />
+                  <Line yAxisId="cum" type="monotone" dataKey="cumulative_outstanding" name="누적 외상" stroke="#F59E0B" strokeWidth={2} dot={{ r: 2.5, fill: "#F59E0B" }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-muted-foreground/60">
+                {selectedMonth} 의 일별 데이터가 없습니다.
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
 
       {/* 거래처별 detail */}
       <Card className="overflow-hidden rounded-2xl">

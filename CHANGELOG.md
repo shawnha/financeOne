@@ -2,6 +2,18 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-06-06 — 홀세일 외상매출(미수/수금율) SIMS 코드조인 정확화
+
+### Changed
+- `backend/services/receivables_service.py` — 한아원홀세일(entity 13)의 수금 집계를 은행 입금 이름매칭(payee_aliases) → **SIMS `customer_collections`(입금) 거래처 코드 기준**으로 전환. `summary`/`monthly`/`daily` 모두 분기(`_WHOLESALE_ENTITIES`). 다른 법인은 기존 로직 유지
+  - 기존 이름매칭은 카드정산·점주 개인명 입금 ₩3.93B를 매칭 못 해 **수금 과소·미수 과대**였음. 코드조인은 매출 거래처 238/238 정합(customer_name==payee_name)
+  - 정확 미수 = 2025 기초잔고 ₩150.4M + 매출 − 수금 = **₩283.0M**(수금율 97.8%). 이수마트 ₩71.7M 등 지난 대사와 원단위 일치
+
+### Added
+- 수금방식 분해 — 보통예금/카드결제/더샵몰/중외몰/새로팜 별 금액·건수·비중 (`collection_methods`)
+- 과수금/선수금 거래처 섹션 — outstanding < 0 필터(기초 반영 후 전체기간 0건)
+- `/receivables` 프론트(`receivables-content.tsx`) — 수금방식 분해 바·과수금 카드·홀세일 전용 부제
+
 ## [Unreleased] - 2026-06-06 — SsArt SIMS OpenAPI 연동 (한아원홀세일 매출/매입/입출금/거래처/제품 자동화)
 
 ### Added
