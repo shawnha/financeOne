@@ -391,11 +391,39 @@ def test_get_connected_id_found():
     conn.cursor.return_value = cur
     cur.fetchone.return_value = ("cid_abc123",)
 
-    result = get_connected_id(conn, 2, "woori_bank")
+    # explicit env 로 호출 → env-scoped 키 조회
+    result = get_connected_id(conn, 2, "woori_bank", env="demo")
     assert result == "cid_abc123"
     args, _ = cur.execute.call_args
-    assert args[1][0] == SETTINGS_PREFIX + "woori_bank"
+    assert args[1][0] == "codef_connected_id_demo_woori_bank"
     assert args[1][1] == 2
+
+
+def test_get_connected_id_legacy_fallback_demo():
+    """demo 모드에서 env-scoped 키 없으면 legacy unscoped 키로 fallback."""
+    from backend.services.integrations.codef import get_connected_id
+    conn = MagicMock()
+    cur = MagicMock()
+    conn.cursor.return_value = cur
+    # 첫 호출 (env-scoped) None, 두 번째 호출 (legacy) 값 반환
+    cur.fetchone.side_effect = [None, ("cid_legacy",)]
+
+    result = get_connected_id(conn, 2, "woori_bank", env="demo")
+    assert result == "cid_legacy"
+    # 마지막 execute 는 legacy SETTINGS_PREFIX 키여야 함
+    args, _ = cur.execute.call_args
+    assert args[1][0] == SETTINGS_PREFIX + "woori_bank"
+
+
+def test_get_connected_id_production_no_legacy_fallback():
+    """production 모드에서는 legacy 키로 fallback 하지 않음 (격리)."""
+    from backend.services.integrations.codef import get_connected_id
+    conn = MagicMock()
+    cur = MagicMock()
+    conn.cursor.return_value = cur
+    cur.fetchone.return_value = None
+
+    assert get_connected_id(conn, 2, "woori_bank", env="production") is None
 
 
 def test_get_connected_id_not_found():
@@ -405,7 +433,7 @@ def test_get_connected_id_not_found():
     conn.cursor.return_value = cur
     cur.fetchone.return_value = None
 
-    assert get_connected_id(conn, 2, "woori_bank") is None
+    assert get_connected_id(conn, 2, "woori_bank", env="demo") is None
 
 
 def test_set_connected_id_upserts():
@@ -414,13 +442,25 @@ def test_set_connected_id_upserts():
     cur = MagicMock()
     conn.cursor.return_value = cur
 
-    set_connected_id(conn, 2, "lotte_card", "cid_xyz")
+    set_connected_id(conn, 2, "lotte_card", "cid_xyz", env="demo")
     cur.execute.assert_called_once()
     args, _ = cur.execute.call_args
     assert "ON CONFLICT" in args[0]
-    assert args[1][0] == SETTINGS_PREFIX + "lotte_card"
+    assert args[1][0] == "codef_connected_id_demo_lotte_card"
     assert args[1][1] == "cid_xyz"
     assert args[1][2] == 2
+
+
+def test_set_connected_id_production_separate():
+    """production env 는 별도 키로 저장 → demo connected_id 와 격리."""
+    from backend.services.integrations.codef import set_connected_id
+    conn = MagicMock()
+    cur = MagicMock()
+    conn.cursor.return_value = cur
+
+    set_connected_id(conn, 2, "lotte_card", "cid_prod", env="production")
+    args, _ = cur.execute.call_args
+    assert args[1][0] == "codef_connected_id_production_lotte_card"
 
 
 def test_list_connected_ids():
@@ -428,13 +468,32 @@ def test_list_connected_ids():
     conn = MagicMock()
     cur = MagicMock()
     conn.cursor.return_value = cur
-    cur.fetchall.return_value = [
-        (SETTINGS_PREFIX + "woori_bank", "cid_bank"),
-        (SETTINGS_PREFIX + "lotte_card", "cid_card"),
+    # demo 모드는 두 번 query (env-scoped + legacy fallback)
+    cur.fetchall.side_effect = [
+        [
+            ("codef_connected_id_demo_woori_bank", "cid_bank"),
+            ("codef_connected_id_demo_lotte_card", "cid_card"),
+        ],
+        [],  # legacy unscoped 비어있음
     ]
 
-    result = list_connected_ids(conn, 2)
+    result = list_connected_ids(conn, 2, env="demo")
     assert result == {"woori_bank": "cid_bank", "lotte_card": "cid_card"}
+
+
+def test_list_connected_ids_includes_legacy_in_demo():
+    """demo 모드에서 legacy unscoped 키도 함께 노출 (마이그레이션 호환)."""
+    from backend.services.integrations.codef import list_connected_ids
+    conn = MagicMock()
+    cur = MagicMock()
+    conn.cursor.return_value = cur
+    cur.fetchall.side_effect = [
+        [("codef_connected_id_demo_woori_bank", "cid_new")],
+        [(SETTINGS_PREFIX + "ibk_bank", "cid_legacy")],  # 옛 unscoped 데이터
+    ]
+
+    result = list_connected_ids(conn, 2, env="demo")
+    assert result == {"woori_bank": "cid_new", "ibk_bank": "cid_legacy"}
 
 
 def test_delete_connected_id():
@@ -677,3 +736,123 @@ def test_scheduler_sync_one_sync_handles_hometax():
     assert "PUBLIC_ORGS" in src
     assert "sync_tax_invoices" in src
     assert "business_number" in src  # entity 자동 조회
+
+
+# ── 경로 B: 목록 API 없이 번호 직접공급 ────────────────
+
+
+def test_sync_card_approvals_with_card_numbers_skips_card_list():
+    """card_numbers 공급 시 get_card_list 를 호출하지 않아야 (목록 상품 미신청 대응)."""
+    client = CodefClient("id", "sec")
+    approvals = [
+        {
+            "resUsedDate": "20260301",
+            "resUsedAmount": "10,000",
+            "resMemberStoreName": "가맹점A",
+            "resCardNo": "5105*********059",
+            "resCancelYN": "0",
+        },
+    ]
+
+    def _boom(*a, **k):
+        raise AssertionError("get_card_list 가 호출되면 안 됨 (card_numbers 공급됨)")
+
+    with patch.object(client, "get_card_list", side_effect=_boom), \
+         patch.object(client, "get_card_approvals", return_value=approvals), \
+         patch("backend.services.mapping_service.auto_map_transaction", return_value=None):
+        conn = MagicMock()
+        cur = MagicMock()
+        conn.cursor.return_value = cur
+        cur.fetchone.return_value = None  # dedup/member 모두 미스 (호출 횟수 무관)
+
+        result = client.sync_card_approvals(
+            conn, 1, "cid", "20260301", "20260331", "lotte_card",
+            card_numbers=["5105*********059"],
+        )
+        assert result["synced"] == 1
+        assert result["total_fetched"] == 1
+    client.close()
+
+
+def test_sync_card_approvals_empty_card_numbers_falls_back_to_list():
+    """card_numbers=None 이면 기존대로 card-list 자동발견 (하위호환)."""
+    client = CodefClient("id", "sec")
+    with patch.object(client, "get_card_list", return_value=[]) as m_list:
+        conn = MagicMock()
+        with pytest.raises(CodefError, match="보유 카드 없음"):
+            client.sync_card_approvals(
+                conn, 1, "cid", "20260301", "20260331", "lotte_card",
+                card_numbers=None,
+            )
+        m_list.assert_called_once()
+    client.close()
+
+
+def test_resolve_codef_card_numbers_override_wins():
+    from backend.services.integrations.codef import resolve_codef_card_numbers
+    conn = MagicMock()
+    cur = MagicMock()
+    conn.cursor.return_value = cur
+    with patch("backend.services.integrations.codef.get_active_env", return_value="production"):
+        # override 설정 존재 → transactions 조회 안 함
+        cur.fetchone.return_value = ('["5105*********059", "5105*********114"]',)
+        nums = resolve_codef_card_numbers(conn, 2, "lotte_card")
+    assert nums == ["5105*********059", "5105*********114"]
+
+
+def test_resolve_codef_card_numbers_from_transactions():
+    from backend.services.integrations.codef import resolve_codef_card_numbers
+    conn = MagicMock()
+    cur = MagicMock()
+    conn.cursor.return_value = cur
+    with patch("backend.services.integrations.codef.get_active_env", return_value="production"):
+        # override 없음(None) → distinct transactions.card_number
+        cur.fetchone.return_value = None
+        cur.fetchall.return_value = [("5275********1840",), ("5339********5646",)]
+        nums = resolve_codef_card_numbers(conn, 2, "woori_card")
+    assert nums == ["5275********1840", "5339********5646"]
+
+
+def test_resolve_codef_card_numbers_none_when_empty():
+    from backend.services.integrations.codef import resolve_codef_card_numbers
+    conn = MagicMock()
+    cur = MagicMock()
+    conn.cursor.return_value = cur
+    with patch("backend.services.integrations.codef.get_active_env", return_value="production"):
+        cur.fetchone.return_value = None       # override 없음
+        cur.fetchall.return_value = []         # 거래도 없음
+        nums = resolve_codef_card_numbers(conn, 99, "lotte_card")
+    assert nums is None
+
+
+def test_get_codef_account_digits_only_roundtrip():
+    from backend.services.integrations.codef import set_codef_account, get_codef_account
+    conn = MagicMock()
+    cur = MagicMock()
+    conn.cursor.return_value = cur
+    captured = {}
+
+    def _exec(sql, params):
+        if "INSERT" in sql:
+            captured["value"] = params[1]
+    cur.execute.side_effect = _exec
+    with patch("backend.services.integrations.codef.get_active_env", return_value="production"):
+        set_codef_account(conn, 2, "woori_bank", "1002-345-678901")
+    # 하이픈 제거된 digits-only 로 저장
+    assert captured["value"] == "1002345678901"
+
+
+def test_get_codef_account_none_when_blank():
+    from backend.services.integrations.codef import get_codef_account
+    conn = MagicMock()
+    cur = MagicMock()
+    conn.cursor.return_value = cur
+    cur.fetchone.return_value = ("   ",)  # 공백만 → None
+    with patch("backend.services.integrations.codef.get_active_env", return_value="production"):
+        assert get_codef_account(conn, 2, "woori_bank") is None
+
+
+def test_codef_account_card_keys_env_scoped():
+    from backend.services.integrations.codef import _codef_account_key, _codef_cards_key
+    assert _codef_account_key("production", "woori_bank") == "codef_account_production_woori_bank"
+    assert _codef_cards_key("demo", "lotte_card") == "codef_cards_demo_lotte_card"

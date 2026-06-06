@@ -235,6 +235,7 @@ VALID_CODEF_ORGS = {
     "kb_card", "hyundai_card", "samsung_card", "nh_card", "bc_card",
     "shinhan_card", "citi_card", "woori_card", "lotte_card", "hana_card",
     "jeonbuk_card", "gwangju_card", "suhyup_card", "jeju_card",
+    "hometax",  # 공공기관 (PB) — 전자세금계산서/국세납부
 }
 
 
@@ -309,13 +310,28 @@ class CodefConnectionDeleteRequest(BaseModel):
         return v
 
 
+class CodefNumbersUpsertRequest(BaseModel):
+    """계좌목록·카드목록 상품 미신청 시, 조회할 계좌/카드번호 직접공급."""
+    entity_id: int
+    organization: str
+    account: Optional[str] = None          # 은행 계좌번호 (하이픈 무관)
+    card_numbers: Optional[list[str]] = None  # 카드번호 리스트 (CODEF 마스킹 포맷)
+
+    @field_validator("organization")
+    @classmethod
+    def validate_org(cls, v: str) -> str:
+        if v not in VALID_CODEF_ORGS:
+            raise ValueError(f"organization must be one of {VALID_CODEF_ORGS}")
+        return v
+
+
 class CodefAccountSpec(BaseModel):
     """Codef /v1/account/create 요청 단위. id/pw 로그인 또는 공동인증서.
 
     우리은행(0020) 등 일부 기관은 공동인증서 의무 — loginType='0' + derFile + keyFile + password 필수.
     """
     organization: str
-    business_type: str = "BK"  # BK=bank, CD=card
+    business_type: str = "BK"  # BK=bank, CD=card, PB=public (hometax)
     client_type: str = "B"  # B=법인, P=개인
     login_type: str = "1"  # "0"=공동인증서, "1"=id/pw
 
@@ -352,8 +368,8 @@ class CodefAccountSpec(BaseModel):
     @field_validator("business_type")
     @classmethod
     def validate_btype(cls, v: str) -> str:
-        if v not in ("BK", "CD"):
-            raise ValueError("business_type must be BK (bank) or CD (card)")
+        if v not in ("BK", "CD", "PB"):
+            raise ValueError("business_type must be BK (bank), CD (card), or PB (public)")
         return v
 
 
@@ -363,14 +379,28 @@ class CodefConnectRequest(BaseModel):
     save_as: Optional[str] = None  # settings 키로 저장할 org 이름. 첫 계정 org 기본값.
 
 
-def _get_codef_client():
-    """Codef 클라이언트 생성. env var로 환경 결정 (sandbox/production)."""
-    from backend.services.integrations.codef import CodefClient
-    client_id = os.environ.get("CODEF_CLIENT_ID", "")
-    client_secret = os.environ.get("CODEF_CLIENT_SECRET", "")
+def _get_codef_client(conn: Optional[PgConnection] = None):
+    """Codef 클라이언트 생성. settings.codef_active_env 우선, 없으면 CODEF_ENV."""
+    from backend.services.integrations.codef import (
+        CodefClient,
+        get_active_credentials,
+        resolve_base_url,
+    )
+    env, client_id, client_secret, _pk = get_active_credentials(conn)
     if not client_id or not client_secret:
-        raise HTTPException(400, "Codef credentials not configured")
-    return CodefClient(client_id, client_secret)
+        raise HTTPException(
+            400,
+            f"Codef credentials not configured for env={env} "
+            f"(set CODEF_{'PROD' if env == 'production' else 'DEMO'}_CLIENT_ID/SECRET 또는 legacy CODEF_CLIENT_ID/SECRET)",
+        )
+    return CodefClient(client_id, client_secret, base_url=resolve_base_url(env))
+
+
+def _get_active_public_key(conn: Optional[PgConnection] = None) -> str:
+    """현재 활성 env 의 RSA 공개키 (encrypt_password 에 직접 주입)."""
+    from backend.services.integrations.codef import get_active_credentials
+    _env, _cid, _sec, pk = get_active_credentials(conn)
+    return pk
 
 
 def _log_codef_error(
@@ -484,39 +514,51 @@ def codef_status(
     """Codef 연결 상태 + 환경 + 등록된 connected_id + 마지막 sync 시각."""
     from backend.services.integrations.codef import (
         resolve_base_url,
-        is_production,
+        get_active_env,
+        get_credentials_for_env,
         list_connected_ids,
         list_last_syncs,
     )
 
-    configured = bool(
-        os.environ.get("CODEF_CLIENT_ID") and os.environ.get("CODEF_CLIENT_SECRET")
-    )
-    env = "production" if is_production() else "demo"
-    connections = list_connected_ids(conn, entity_id) if configured else {}
-    last_syncs = list_last_syncs(conn, entity_id) if configured else {}
+    env = get_active_env(conn)
+    demo_cid, demo_sec, _ = get_credentials_for_env("demo")
+    prod_cid, prod_sec, _ = get_credentials_for_env("production")
+    demo_configured = bool(demo_cid and demo_sec)
+    prod_configured = bool(prod_cid and prod_sec)
+    configured = demo_configured if env == "demo" else prod_configured
+
+    envs_payload = {
+        "active": env,
+        "demo_configured": demo_configured,
+        "prod_configured": prod_configured,
+    }
 
     if not configured:
         return {
             "configured": False,
             "connected": False,
             "environment": env,
-            "base_url": resolve_base_url(),
+            "base_url": resolve_base_url(env),
             "connections": {},
             "last_syncs": {},
+            "envs": envs_payload,
         }
 
+    connections = list_connected_ids(conn, entity_id, env=env)
+    last_syncs = list_last_syncs(conn, entity_id, env=env)
+
     try:
-        client = _get_codef_client()
+        client = _get_codef_client(conn)
         client._get_token()
         client.close()
         return {
             "configured": True,
             "connected": True,
             "environment": env,
-            "base_url": resolve_base_url(),
+            "base_url": resolve_base_url(env),
             "connections": connections,
             "last_syncs": last_syncs,
+            "envs": envs_payload,
         }
     except Exception:
         logger.exception("Connection check failed")
@@ -524,11 +566,74 @@ def codef_status(
             "configured": True,
             "connected": False,
             "environment": env,
-            "base_url": resolve_base_url(),
+            "base_url": resolve_base_url(env),
             "connections": connections,
             "last_syncs": last_syncs,
             "error": "Unable to authenticate",
+            "envs": envs_payload,
         }
+
+
+class CodefEnvSwitchRequest(BaseModel):
+    env: str
+
+    @field_validator("env")
+    @classmethod
+    def validate_env(cls, v: str) -> str:
+        if v not in ("demo", "production"):
+            raise ValueError("env must be 'demo' or 'production'")
+        return v
+
+
+@router.get("/codef/env")
+def codef_get_env(conn: PgConnection = Depends(get_db)):
+    """현재 활성 Codef env + 두 env 의 credential 설정 상태."""
+    from backend.services.integrations.codef import (
+        get_active_env, get_credentials_for_env, resolve_base_url,
+    )
+    env = get_active_env(conn)
+    demo_cid, demo_sec, demo_pk = get_credentials_for_env("demo")
+    prod_cid, prod_sec, prod_pk = get_credentials_for_env("production")
+    return {
+        "active": env,
+        "base_url": resolve_base_url(env),
+        "demo": {
+            "configured": bool(demo_cid and demo_sec),
+            "has_public_key": bool(demo_pk),
+        },
+        "production": {
+            "configured": bool(prod_cid and prod_sec),
+            "has_public_key": bool(prod_pk),
+        },
+    }
+
+
+@router.post("/codef/env")
+def codef_set_env(
+    body: CodefEnvSwitchRequest,
+    conn: PgConnection = Depends(get_db),
+):
+    """활성 Codef env 전환 (demo ↔ production).
+
+    주의: connected_id 는 env 별로 분리 저장됨. 전환 후 새 env 에 등록된 connection 만 보임.
+    """
+    from backend.services.integrations.codef import (
+        set_active_env, get_credentials_for_env, resolve_base_url,
+    )
+    cid, sec, _ = get_credentials_for_env(body.env)
+    if not cid or not sec:
+        raise HTTPException(
+            400,
+            f"CODEF_{'PROD' if body.env == 'production' else 'DEMO'}_CLIENT_ID/SECRET 미설정 — "
+            f".env 에 키 추가 후 다시 시도해주세요.",
+        )
+    try:
+        new_env = set_active_env(conn, body.env)
+        conn.commit()
+        return {"active": new_env, "base_url": resolve_base_url(new_env)}
+    except Exception:
+        conn.rollback()
+        raise
 
 
 @router.get("/codef/connections")
@@ -573,6 +678,61 @@ def codef_delete_connection(
         raise
 
 
+@router.get("/codef/account-numbers")
+def codef_get_account_numbers(
+    entity_id: int,
+    conn: PgConnection = Depends(get_db),
+):
+    """entity의 활성 env 계좌/카드번호 설정 조회 (목록 API 미신청 시 직접공급용).
+
+    카드는 설정 override 없으면 기존 거래에서 도출된 값을 effective 로 함께 반환.
+    """
+    from backend.services.integrations.codef import (
+        BANK_ORGS, CARD_ORGS, get_active_env, get_codef_account,
+        get_codef_cards_override, resolve_codef_card_numbers,
+    )
+    env = get_active_env(conn)
+    banks = {org: get_codef_account(conn, entity_id, org, env=env) for org in sorted(BANK_ORGS)}
+    cards = {
+        org: {
+            "override": get_codef_cards_override(conn, entity_id, org, env=env),
+            "effective": resolve_codef_card_numbers(conn, entity_id, org, env=env),
+        }
+        for org in sorted(CARD_ORGS)
+    }
+    return {"env": env, "accounts": banks, "cards": cards}
+
+
+@router.post("/codef/account-numbers")
+def codef_set_account_numbers(
+    body: CodefNumbersUpsertRequest,
+    conn: PgConnection = Depends(get_db),
+):
+    """계좌번호(은행) / 카드번호(카드) 설정 저장. 활성 env scope."""
+    from backend.services.integrations.codef import (
+        BANK_ORGS, CARD_ORGS, get_active_env, set_codef_account, set_codef_cards,
+    )
+    env = get_active_env(conn)
+    try:
+        saved = {}
+        if body.account is not None and body.organization in BANK_ORGS:
+            set_codef_account(conn, body.entity_id, body.organization, body.account, env=env)
+            saved["account"] = True
+        if body.card_numbers is not None and body.organization in CARD_ORGS:
+            set_codef_cards(conn, body.entity_id, body.organization, body.card_numbers, env=env)
+            saved["card_numbers"] = len(body.card_numbers)
+        if not saved:
+            raise HTTPException(400, "account(은행)/card_numbers(카드)와 organization 종류가 맞지 않음")
+        conn.commit()
+        return {"ok": True, "env": env, "organization": body.organization, "saved": saved}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception:
+        conn.rollback()
+        raise
+
+
 @router.get("/codef/npki/certs")
 def codef_npki_list():
     """로컬 Mac/Linux의 공동인증서 목록 (발견된 것만)."""
@@ -601,19 +761,34 @@ def codef_connect(
     if not body.accounts:
         raise HTTPException(400, "accounts list empty")
 
+    # entity.business_number 조회 — PB(hometax) 등록 시 사업자번호 자동 fallback
+    cur_biz = conn.cursor()
+    cur_biz.execute("SELECT business_number FROM entities WHERE id = %s", [body.entity_id])
+    biz_row = cur_biz.fetchone()
+    cur_biz.close()
+    entity_biz_no = biz_row[0] if biz_row and biz_row[0] else None
+
     # Codef 요청 포맷으로 변환 — 비밀번호는 RSA(PKCS1v15) + base64
+    # 활성 env 공개키 사용 (demo/prod 토글 시 다른 키페어로 암호화)
+    active_public_key = _get_active_public_key(conn) or None
     account_list = []
     try:
         for spec in body.accounts:
+            # PB 모드 cert 등록 시 spec.business_no 비어있으면 entity 값으로 fallback
+            if not spec.business_no and spec.business_type == "PB" and entity_biz_no:
+                spec.business_no = entity_biz_no
             org_code = ORG_CODES.get(spec.organization)
             if not org_code:
                 raise HTTPException(400, f"Unknown organization: {spec.organization}")
 
+            # 홈택스(hometax) 계정 등록 시 clientType 은 반드시 "A".
+            # (Codef/헥토 API 팀 안내 2026-05: B 로 호출 시 등록 실패. 법인/개인 구분과 무관.)
+            effective_client_type = "A" if spec.organization == "hometax" else spec.client_type
             account = {
                 "countryCode": "KR",
                 "businessType": spec.business_type,
                 "organization": org_code,
-                "clientType": spec.client_type,
+                "clientType": effective_client_type,
                 "loginType": spec.login_type,
             }
 
@@ -621,10 +796,10 @@ def codef_connect(
                 if not spec.login_id or not spec.login_password:
                     raise HTTPException(400, "login_id + login_password required for id/pw auth")
                 account["id"] = spec.login_id
-                account["password"] = encrypt_password(spec.login_password)
+                account["password"] = encrypt_password(spec.login_password, active_public_key)
                 # 카드사·일부 은행 추가 필드 (있으면 포함)
                 if spec.card_password:
-                    account["cardPassword"] = encrypt_password(spec.card_password)
+                    account["cardPassword"] = encrypt_password(spec.card_password, active_public_key)
                 if spec.business_no:
                     account["businessNo"] = spec.business_no
                 if spec.birth_date:
@@ -644,14 +819,17 @@ def codef_connect(
                     )
                 account["derFile"] = der_b64
                 account["keyFile"] = key_b64
-                account["password"] = encrypt_password(spec.cert_password)
+                account["password"] = encrypt_password(spec.cert_password, active_public_key)
+                # PB (hometax) 등 일부 기관은 cert 모드에서도 사업자번호 필수
+                if spec.business_no:
+                    account["businessNo"] = spec.business_no
 
             account_list.append(account)
     except CodefError as e:
         # 공개키 미설정 등 설정 문제 — 400으로 사용자에게 명확한 안내
         raise HTTPException(400, str(e))
 
-    client = _get_codef_client()
+    client = _get_codef_client(conn)
     try:
         connected_id = client.create_connected_id(account_list)
         saved_orgs = []
@@ -688,21 +866,41 @@ def codef_sync_bank(
     """Codef 은행 거래 동기화 (woori/ibk/shinhan).
 
     body.organization 미지정 시 woori_bank (backward compat).
+    응답에 inserted_ids 포함 — 실수 동기화 원복용.
     """
-    from backend.services.integrations.codef import CodefError, set_last_sync, BANK_ORGS
+    from backend.services.integrations.codef import (
+        CodefError, set_last_sync, BANK_ORGS, get_active_env, get_codef_account,
+    )
     org = body.organization or "woori_bank"
     if org not in BANK_ORGS:
         raise HTTPException(400, f"organization must be one of {sorted(BANK_ORGS)}")
     connected_id = _resolve_connected_id(conn, body.entity_id, org, body.connected_id)
-    client = _get_codef_client()
+    client = _get_codef_client(conn)
     try:
+        # 직전 sync 후 신규 INSERT 만 식별하기 위한 시작 타임스탬프
+        _cur = conn.cursor()
+        _cur.execute("SELECT NOW()")
+        sync_start = _cur.fetchone()[0]
+        _cur.close()
+
+        # 계좌목록 상품 미신청 환경: 설정에 저장된 계좌번호 직접공급 (없으면 account-list fallback)
+        account = get_codef_account(conn, body.entity_id, org, env=get_active_env(conn))
         result = client.sync_bank_transactions(
             conn, body.entity_id, connected_id,
-            body.start_date, body.end_date, org=org,
+            body.start_date, body.end_date, account=account, org=org,
         )
         set_last_sync(conn, body.entity_id, org)
         conn.commit()
         _sync_forecast_actuals_after_import(conn, body.entity_id)
+
+        # 이번 sync 에서 INSERT 된 ID 목록 — 원복(undo) 용
+        _cur = conn.cursor()
+        _cur.execute(
+            "SELECT id FROM transactions WHERE entity_id=%s AND source_type=%s AND created_at >= %s",
+            [body.entity_id, f"codef_{org}", sync_start],
+        )
+        result["inserted_ids"] = [r[0] for r in _cur.fetchall()]
+        _cur.close()
         return result
     except CodefError as e:
         conn.rollback()
@@ -721,20 +919,39 @@ def codef_sync_card(
     body: CodefCardSyncRequest,
     conn: PgConnection = Depends(get_db),
 ):
-    """Codef 카드 승인내역 동기화."""
-    from backend.services.integrations.codef import CodefError, set_last_sync
+    """Codef 카드 승인내역 동기화. 응답에 inserted_ids 포함 — 원복용."""
+    from backend.services.integrations.codef import (
+        CodefError, set_last_sync, get_active_env, resolve_codef_card_numbers,
+    )
     connected_id = _resolve_connected_id(conn, body.entity_id, body.card_type, body.connected_id)
-    client = _get_codef_client()
+    client = _get_codef_client(conn)
     try:
+        _cur = conn.cursor()
+        _cur.execute("SELECT NOW()")
+        sync_start = _cur.fetchone()[0]
+        _cur.close()
+
+        # 카드목록 상품 미신청 환경: 설정/기존거래에서 카드번호 도출 직접공급 (없으면 card-list fallback)
+        card_numbers = resolve_codef_card_numbers(
+            conn, body.entity_id, body.card_type, env=get_active_env(conn)
+        )
         result = client.sync_card_approvals(
             conn, body.entity_id, connected_id,
             body.start_date, body.end_date, body.card_type,
+            card_numbers=card_numbers,
         )
         set_last_sync(conn, body.entity_id, body.card_type)
         conn.commit()
         _sync_forecast_actuals_after_import(conn, body.entity_id)
-        # Notify ExpenseOne about new card transactions
         _notify_expenseone_card_sync()
+
+        _cur = conn.cursor()
+        _cur.execute(
+            "SELECT id FROM transactions WHERE entity_id=%s AND source_type=%s AND created_at >= %s",
+            [body.entity_id, f"codef_{body.card_type}", sync_start],
+        )
+        result["inserted_ids"] = [r[0] for r in _cur.fetchall()]
+        _cur.close()
         return result
     except CodefError as e:
         conn.rollback()
@@ -779,7 +996,7 @@ def codef_sync_card_billing(
     """카드 청구서 sync — card_billings 테이블에 UPSERT."""
     from backend.services.integrations.codef import CodefError
     connected_id = _resolve_connected_id(conn, body.entity_id, body.card_type, body.connected_id)
-    client = _get_codef_client()
+    client = _get_codef_client(conn)
     try:
         result = client.sync_card_billings(
             conn, body.entity_id, connected_id,
@@ -814,7 +1031,7 @@ class BizStatusRequest(BaseModel):
 def codef_business_status(body: BizStatusRequest):
     """사업자번호 휴폐업 상태 조회 (Codef 공식: 국세청 공공기관)."""
     from backend.services.integrations.codef import CodefError
-    client = _get_codef_client()
+    client = _get_codef_client(conn)
     try:
         result = client.check_business_status(body.biz_no)
         return result
@@ -850,7 +1067,7 @@ def codef_tax_payments(
     """
     from backend.services.integrations.codef import CodefError
     connected_id = _resolve_connected_id(conn, body.entity_id, "hometax", body.connected_id)
-    client = _get_codef_client()
+    client = _get_codef_client(conn)
     try:
         items = client.get_tax_payment_list(
             connected_id, body.start_date, body.end_date, body.tax_type,
@@ -956,7 +1173,7 @@ def codef_sync_tax_invoice(
         if row and row[0]:
             our_biz_no = row[0]
 
-    client = _get_codef_client()
+    client = _get_codef_client(conn)
     try:
         result = client.sync_tax_invoices(
             conn, body.entity_id, connected_id,
@@ -1026,7 +1243,7 @@ def codef_compare_card(
         raise HTTPException(400, "start_date / end_date must be YYYYMMDD")
 
     connected_id = _resolve_connected_id(conn, body.entity_id, body.card_type, body.connected_id)
-    client = _get_codef_client()
+    client = _get_codef_client(conn)
 
     codef_rows: list[dict] = []
     cards_summary: list[dict] = []

@@ -5,8 +5,12 @@
 
 env vars:
     CODEF_ENV              : "demo" (default, alias: "sandbox") | "production"
-    CODEF_CLIENT_ID        : OAuth client id
-    CODEF_CLIENT_SECRET    : OAuth client secret
+                             — settings.codef_active_env 가 있으면 그게 우선.
+    CODEF_CLIENT_ID        : legacy OAuth client id (env 토글 미사용 시 fallback)
+    CODEF_CLIENT_SECRET    : legacy OAuth client secret
+    CODEF_PUBLIC_KEY       : legacy 비밀번호 암호화용 RSA 공개키
+    CODEF_DEMO_CLIENT_ID / CODEF_DEMO_CLIENT_SECRET / CODEF_DEMO_PUBLIC_KEY     : demo 환경 전용 (UI 토글)
+    CODEF_PROD_CLIENT_ID / CODEF_PROD_CLIENT_SECRET / CODEF_PROD_PUBLIC_KEY     : production 환경 전용
     CODEF_BASE_URL         : override 자동 URL 선택
 """
 
@@ -16,7 +20,7 @@ import base64
 import json
 import logging
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Optional
 from urllib.parse import quote, unquote_plus
@@ -117,25 +121,111 @@ _BANK_OU_KEYWORDS = {
     "BizBank": "신한은행",  # SignKorea + BizBank 조합 = 신한 BizBank
 }
 
-SETTINGS_PREFIX = "codef_connected_id_"  # e.g., codef_connected_id_woori_bank
-LAST_SYNC_PREFIX = "codef_last_sync_"    # e.g., codef_last_sync_woori_bank
+SETTINGS_PREFIX = "codef_connected_id_"  # legacy unscoped — read-only fallback
+LAST_SYNC_PREFIX = "codef_last_sync_"    # legacy unscoped — read-only fallback
+ACTIVE_ENV_KEY = "codef_active_env"      # settings 글로벌 키 (entity_id IS NULL)
 
 
-def resolve_base_url() -> str:
+def _connected_id_key(env: str, org: str) -> str:
+    """env 별로 분리된 connected_id 저장 키.
+
+    데모 connected_id 와 production connected_id 는 호환되지 않으므로 키를 분리한다.
+    """
+    return f"codef_connected_id_{env}_{org}"
+
+
+def _last_sync_key(env: str, org: str) -> str:
+    return f"codef_last_sync_{env}_{org}"
+
+
+def _normalize_env(value: Optional[str]) -> str:
+    v = (value or "").strip().lower()
+    if v in ("prod", "production"):
+        return "production"
+    return "demo"  # demo / sandbox / 그 외 모두 demo
+
+
+def get_active_env(conn: Optional[PgConnection] = None) -> str:
+    """현재 활성 Codef 환경. settings.codef_active_env 우선, 없으면 CODEF_ENV."""
+    if conn is not None:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "SELECT value FROM settings WHERE key = %s AND entity_id IS NULL",
+                [ACTIVE_ENV_KEY],
+            )
+            row = cur.fetchone()
+            if row and row[0]:
+                return _normalize_env(row[0])
+        except Exception:
+            logger.exception("get_active_env failed; falling back to env var")
+        finally:
+            cur.close()
+    return _normalize_env(os.environ.get("CODEF_ENV"))
+
+
+def set_active_env(conn: PgConnection, env: str) -> str:
+    """codef_active_env 토글 (글로벌 setting, entity_id IS NULL)."""
+    normalized = _normalize_env(env)
+    cur = conn.cursor()
+    try:
+        # entity_id IS NULL row 가 이미 있는지 확인 (UNIQUE 가 NULL 을 distinct 로 처리하므로 직접 upsert 불가)
+        cur.execute(
+            "SELECT id FROM settings WHERE key = %s AND entity_id IS NULL",
+            [ACTIVE_ENV_KEY],
+        )
+        row = cur.fetchone()
+        if row:
+            cur.execute(
+                "UPDATE settings SET value = %s, updated_at = NOW() WHERE id = %s",
+                [normalized, row[0]],
+            )
+        else:
+            cur.execute(
+                "INSERT INTO settings (key, value, entity_id, updated_at) VALUES (%s, %s, NULL, NOW())",
+                [ACTIVE_ENV_KEY, normalized],
+            )
+    finally:
+        cur.close()
+    return normalized
+
+
+def resolve_base_url(env: Optional[str] = None) -> str:
     override = os.environ.get("CODEF_BASE_URL", "").strip()
     if override:
         return override
-    env = os.environ.get("CODEF_ENV", "demo").strip().lower()
-    return CODEF_PRODUCTION_URL if env == "production" else CODEF_DEMO_URL
+    eff = _normalize_env(env if env is not None else os.environ.get("CODEF_ENV"))
+    return CODEF_PRODUCTION_URL if eff == "production" else CODEF_DEMO_URL
 
 
-def is_production() -> bool:
-    return os.environ.get("CODEF_ENV", "demo").strip().lower() == "production"
+def is_production(env: Optional[str] = None) -> bool:
+    eff = env if env is not None else os.environ.get("CODEF_ENV")
+    return _normalize_env(eff) == "production"
 
 
-def env_label() -> str:
+def env_label(env: Optional[str] = None) -> str:
     """UI 표시용 라벨 — demo | production."""
-    return "production" if is_production() else "demo"
+    return "production" if is_production(env) else "demo"
+
+
+def get_credentials_for_env(env: str) -> tuple[str, str, str]:
+    """env 별 (client_id, client_secret, public_key).
+
+    우선순위: CODEF_{ENV}_* → legacy CODEF_* (둘 다 비어있으면 빈 문자열).
+    """
+    e = _normalize_env(env)
+    prefix = "CODEF_PROD_" if e == "production" else "CODEF_DEMO_"
+    cid = os.environ.get(f"{prefix}CLIENT_ID", "").strip() or os.environ.get("CODEF_CLIENT_ID", "").strip()
+    sec = os.environ.get(f"{prefix}CLIENT_SECRET", "").strip() or os.environ.get("CODEF_CLIENT_SECRET", "").strip()
+    pk = os.environ.get(f"{prefix}PUBLIC_KEY", "").strip() or os.environ.get("CODEF_PUBLIC_KEY", "").strip()
+    return cid, sec, pk
+
+
+def get_active_credentials(conn: Optional[PgConnection] = None) -> tuple[str, str, str, str]:
+    """현재 활성 env 의 (env, client_id, client_secret, public_key)."""
+    env = get_active_env(conn)
+    cid, sec, pk = get_credentials_for_env(env)
+    return env, cid, sec, pk
 
 
 def _normalize_public_key_pem(raw: str) -> str:
@@ -456,17 +546,28 @@ class CodefClient:
         raw_list = self.get_bank_transactions(
             connected_id, start_date, end_date, account=account, org=org,
         )
+        # 시간 ASC 정렬 — Codef 응답 순서에 의존하지 않도록 명시 정렬.
+        # INSERT 순서가 시간순 → transactions.id 순서 = 시간 순서 → cashflow 표시 정상.
+        raw_list = sorted(
+            raw_list,
+            key=lambda x: (
+                str(x.get("resAccountTrDate", "") or ""),
+                str(x.get("resAccountTrTime", "") or ""),
+            ),
+        )
         cur = conn.cursor()
         synced = 0
         duplicates = 0
         auto_mapped = 0
 
         # 잔고 추적 (Excel 파서와 동일 — balance_snapshots 자동 갱신)
-        # daily_balance: 일자별 EOD 잔고 = orderBy="0"(오래된순)이라 같은 date 의 마지막 거래의 balance_after.
-        # 모든 일자 EOD snapshot 을 INSERT 해야 cashflow 의 월말/기초잔고가 정확.
+        # daily_balance: 일자별 EOD = 같은 date 안에서 가장 늦은 resAccountTrTime 의 balance_after.
+        # 과거 코드는 raw_list 응답이 시간 ASC 라 가정 → 마지막 row 채택. 실제 신한 응답은 DESC 라
+        # 가장 오래된 거래의 잔고가 EOD 로 저장되는 버그. resAccountTrTime 비교로 명시적 처리.
         latest_balance = None
         latest_balance_date = None
         daily_balance: dict = {}
+        day_latest_time: dict = {}  # date(str) → 그 date 안 최늦 시각 (HHMMSS)
 
         # 자동 매핑 (lazy import — 순환 회피)
         from backend.services.mapping_service import auto_map_transaction
@@ -476,33 +577,43 @@ class CodefClient:
             if not tx:
                 continue
 
-            # 잔고 — orderBy="0"(오래된순)이라 마지막 row가 가장 최신
+            # 잔고 — 같은 date 안에서 가장 늦은 시각의 balance_after = EOD.
+            # raw_list 응답 순서에 의존하지 않고 resAccountTrTime 으로 명시적 비교.
             if tx.get("balance_after") is not None:
-                latest_balance = tx["balance_after"]
-                latest_balance_date = tx["date"]
-                # 같은 date 내에서는 마지막 거래의 balance_after = EOD (이 루프가 그 값을 덮어씀)
-                daily_balance[tx["date"]] = tx["balance_after"]
+                tx_time = tx.get("time") or ""
+                prev_time = day_latest_time.get(tx["date"], "")
+                if tx_time >= prev_time:
+                    daily_balance[tx["date"]] = tx["balance_after"]
+                    day_latest_time[tx["date"]] = tx_time
+                # latest_balance: 전체 raw_list 중 시간 기준 최신
+                if not latest_balance_date or (tx["date"], tx_time) >= (latest_balance_date, day_latest_time.get(latest_balance_date, "")):
+                    latest_balance = tx["balance_after"]
+                    latest_balance_date = tx["date"]
 
             if _is_duplicate(cur, entity_id, tx, source_type):
                 duplicates += 1
                 continue
 
-            # 체크카드 cross-dedup: 우리은행 '체크우리' 메모는 우리카드 결제와 매핑되어
-            # Excel 업로드 정책상 은행쪽 row 를 skip. 신한/IBK 는 해당 패턴 없음 (현재까진).
+            # 체크카드 cross-dedup 정책: **card 살림 + bank 를 dup 처리** (카드가 더 상세).
+            # bank 는 항상 INSERT 한 뒤 sync 끝에서 reconcile_check_card_duplicates() 가
+            # 같은 (entity, date, amount, counterparty) 페어를 찾아 bank 쪽을 is_duplicate=true
+            # 처리. sync 순서에 무관하게 idempotent. Excel 업로드 경로 (upload.py) 와 일관성.
             is_check_card_memo = (org == "woori_bank" and tx.get("memo") == "체크우리")
+
+            # 우리체크카드 holder 매핑 — 통장명세엔 카드번호 없으므로 entity 등록 값으로 채움
+            check_card_num: str | None = None
+            check_member_id: int | None = None
             if is_check_card_memo:
-                cur.execute(
-                    """
-                    SELECT id FROM transactions
-                    WHERE entity_id = %s AND date = %s AND amount = %s
-                      AND source_type IN ('woori_card', 'codef_woori_card')
-                    LIMIT 1
-                    """,
-                    [entity_id, tx["date"], float(tx["amount"])],
-                )
-                if cur.fetchone():
-                    duplicates += 1
-                    continue
+                from backend.services.parsers.woori_check_card_mapping import get_woori_check_card_number
+                check_card_num = get_woori_check_card_number(entity_id)
+                if check_card_num:
+                    cur.execute(
+                        "SELECT id FROM members WHERE entity_id = %s AND %s = ANY(card_numbers) AND is_active = true LIMIT 1",
+                        [entity_id, check_card_num],
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        check_member_id = row[0]
 
             # mapping_rules cascade 시도
             mapping = auto_map_transaction(
@@ -512,23 +623,27 @@ class CodefClient:
                 description=tx["description"],
             )
 
+            tx_time_val = tx.get("time") or None
             if mapping:
                 auto_mapped += 1
                 cur.execute(
                     """
                     INSERT INTO transactions
-                        (entity_id, date, amount, currency, type, description,
+                        (entity_id, date, time, amount, currency, type, description,
                          counterparty, source_type, is_confirmed, is_cancel, note,
+                         card_number, member_id,
                          internal_account_id, standard_account_id,
                          mapping_confidence, mapping_source)
-                    VALUES (%s, %s, %s, 'KRW', %s, %s, %s, %s, FALSE, FALSE, %s,
+                    VALUES (%s, %s, %s, %s, 'KRW', %s, %s, %s, %s, FALSE, FALSE, %s,
+                            %s, %s,
                             %s, %s, %s, %s)
                     """,
                     [
-                        entity_id, tx["date"], float(tx["amount"]),
+                        entity_id, tx["date"], tx_time_val, float(tx["amount"]),
                         tx["type"], tx["description"], tx["counterparty"],
                         source_type,
                         "체크카드" if is_check_card_memo else None,
+                        check_card_num, check_member_id,
                         mapping["internal_account_id"], mapping.get("standard_account_id"),
                         mapping.get("confidence"), mapping.get("match_type"),
                     ],
@@ -537,15 +652,17 @@ class CodefClient:
                 cur.execute(
                     """
                     INSERT INTO transactions
-                        (entity_id, date, amount, currency, type, description,
-                         counterparty, source_type, is_confirmed, is_cancel, note)
-                    VALUES (%s, %s, %s, 'KRW', %s, %s, %s, %s, FALSE, FALSE, %s)
+                        (entity_id, date, time, amount, currency, type, description,
+                         counterparty, source_type, is_confirmed, is_cancel, note,
+                         card_number, member_id)
+                    VALUES (%s, %s, %s, %s, 'KRW', %s, %s, %s, %s, FALSE, FALSE, %s, %s, %s)
                     """,
                     [
-                        entity_id, tx["date"], float(tx["amount"]),
+                        entity_id, tx["date"], tx_time_val, float(tx["amount"]),
                         tx["type"], tx["description"], tx["counterparty"],
                         source_type,
                         "체크카드" if is_check_card_memo else None,
+                        check_card_num, check_member_id,
                     ],
                 )
             synced += 1
@@ -553,10 +670,42 @@ class CodefClient:
         # balance_snapshots 자동 저장 — sync 한 모든 일자의 EOD 잔고 upsert
         # 이전 코드는 가장 최근 1건만 저장 → cashflow 의 월말/기초잔고가 부정확.
         # 이제 일자별 EOD snapshot 모두 INSERT → get_opening_balance 가 정확한 월초 잔고 조회 가능.
+        # Carry-forward: 거래 없는 날에는 직전 EOD 를 그대로 복제해 end_date 까지 채움.
+        # 거래가 0건인 sync 라도 DB 의 직전 latest snapshot 을 가져와 carry-forward.
         balance_saved = False
         snapshots_upserted = 0
+        account_name = f"{ORG_LABELS.get(org, org)} 법인통장"
+        end_d = datetime.strptime(end_date, "%Y%m%d").date()
+
+        # daily_balance keys = ISO 문자열 (_parse_codef_date 결과). date 산술용으로 별도 변수 사용.
         if daily_balance:
-            account_name = f"{ORG_LABELS.get(org, org)} 법인통장"
+            last_known_key = max(daily_balance.keys())
+            last_known_date = datetime.strptime(last_known_key, "%Y-%m-%d").date()
+            last_known_balance = daily_balance[last_known_key]
+        else:
+            cur.execute(
+                """
+                SELECT date, balance FROM balance_snapshots
+                WHERE entity_id = %s AND account_name = %s
+                ORDER BY date DESC LIMIT 1
+                """,
+                [entity_id, account_name],
+            )
+            row = cur.fetchone()
+            if row:
+                last_known_date, last_known_balance = row[0], row[1]
+            else:
+                last_known_date, last_known_balance = None, None
+
+        if last_known_date is not None:
+            d = last_known_date + timedelta(days=1)
+            while d <= end_d:
+                d_key = d.isoformat()
+                if d_key not in daily_balance:
+                    daily_balance[d_key] = last_known_balance
+                d += timedelta(days=1)
+
+        if daily_balance:
             for d, bal in daily_balance.items():
                 cur.execute(
                     """
@@ -572,9 +721,22 @@ class CodefClient:
             balance_saved = True
 
         cur.close()
+
+        # 체크카드 cross-source dedup (우리은행 ↔ 우리카드).
+        # bank insert 직후 호출 — 같은 sync 라운드에서 카드 row 가 이미 있다면 reconcile.
+        # 카드가 아직 안 들어왔다면 다음 카드 sync 끝에서 reconcile 됨 (idempotent).
+        reconciled = 0
+        if org == "woori_bank":
+            try:
+                reconciled = reconcile_check_card_duplicates(
+                    conn, entity_id, start_date, end_date,
+                )
+            except Exception as e:
+                logger.warning("reconcile_check_card_duplicates failed (non-fatal): %s", e)
+
         logger.info(
-            "Codef bank sync: entity=%d, fetched=%d, synced=%d, dup=%d, auto_mapped=%d, bal=%s",
-            entity_id, len(raw_list), synced, duplicates, auto_mapped, balance_saved,
+            "Codef bank sync: entity=%d, fetched=%d, synced=%d, dup=%d, auto_mapped=%d, bal=%s, reconciled=%d",
+            entity_id, len(raw_list), synced, duplicates, auto_mapped, balance_saved, reconciled,
         )
         return {
             "synced": synced,
@@ -584,6 +746,7 @@ class CodefClient:
             "total_fetched": len(raw_list),
             "environment": self.environment,
             "account": account,
+            "reconciled_check_cards": reconciled,
             "balance_snapshot": {
                 "saved": balance_saved,
                 "snapshots_upserted": snapshots_upserted,
@@ -827,18 +990,27 @@ class CodefClient:
         start_date: str,
         end_date: str,
         card_type: str = "lotte_card",
+        card_numbers: Optional[list[str]] = None,
     ) -> dict:
         """카드 승인내역 → transactions 동기화.
 
         취소건은 type='in' + is_cancel=TRUE로 삽입 (환불 처리).
+
+        card_numbers 가 주어지면 card-list 호출을 건너뛰고 해당 카드만 조회
+        (보유카드목록 상품 미신청 시 직접공급). 미지정 시 기존 card-list 자동발견.
         """
         if card_type not in CARD_ORGS:
             raise CodefError(f"Unknown card type: {card_type}")
 
-        # 등록된 모든 카드 자동 발견 → 카드별 승인내역 통합
-        cards = self.get_card_list(connected_id, card_type)
-        if not cards:
-            raise CodefError(f"{card_type}: 보유 카드 없음 (card-list 빈 응답)")
+        # 카드 목록: 직접공급된 번호 우선, 없으면 card-list 자동 발견
+        if card_numbers:
+            cards = [{"resCardNo": n, "resCardName": ""} for n in card_numbers if n]
+            if not cards:
+                raise CodefError(f"{card_type}: 공급된 카드번호 없음")
+        else:
+            cards = self.get_card_list(connected_id, card_type)
+            if not cards:
+                raise CodefError(f"{card_type}: 보유 카드 없음 (card-list 빈 응답)")
 
         raw_list: list[dict] = []
         cards_summary: list[dict] = []
@@ -861,6 +1033,16 @@ class CodefClient:
                 "card_no": card_no, "card_name": card_name,
                 "fetched": len(approvals),
             })
+
+        # 시간 ASC 정렬 — Codef 응답 순서 의존하지 않도록 명시 정렬.
+        # INSERT 순서 = 시간 순서 → transactions.id 순서 정합.
+        raw_list = sorted(
+            raw_list,
+            key=lambda x: (
+                str(x.get("resUsedDate", "") or ""),
+                str(x.get("resUsedTime", "") or x.get("resApprovalTime", "") or x.get("resTime", "") or ""),
+            ),
+        )
 
         source_type = f"codef_{card_type}"
 
@@ -934,22 +1116,23 @@ class CodefClient:
                 description=tx["description"],
             )
 
+            tx_time_val = tx.get("time") or None
             if mapping:
                 auto_mapped += 1
                 cur.execute(
                     """
                     INSERT INTO transactions
-                        (entity_id, date, amount, currency, type, description,
+                        (entity_id, date, time, amount, currency, type, description,
                          counterparty, source_type, is_confirmed,
                          card_number, parsed_member_name, is_cancel,
                          member_id, internal_account_id, standard_account_id,
                          mapping_confidence, mapping_source)
-                    VALUES (%s, %s, %s, 'KRW', %s, %s, %s, %s, FALSE,
+                    VALUES (%s, %s, %s, %s, 'KRW', %s, %s, %s, %s, FALSE,
                             %s, %s, %s,
                             %s, %s, %s, %s, %s)
                     """,
                     [
-                        entity_id, tx["date"], float(tx["amount"]),
+                        entity_id, tx["date"], tx_time_val, float(tx["amount"]),
                         tx["type"], tx["description"], tx["counterparty"],
                         source_type,
                         tx["card_number"], tx["member_name"], tx["is_cancel"],
@@ -962,14 +1145,14 @@ class CodefClient:
                 cur.execute(
                     """
                     INSERT INTO transactions
-                        (entity_id, date, amount, currency, type, description,
+                        (entity_id, date, time, amount, currency, type, description,
                          counterparty, source_type, is_confirmed,
                          card_number, parsed_member_name, is_cancel, member_id)
-                    VALUES (%s, %s, %s, 'KRW', %s, %s, %s, %s, FALSE,
+                    VALUES (%s, %s, %s, %s, 'KRW', %s, %s, %s, %s, FALSE,
                             %s, %s, %s, %s)
                     """,
                     [
-                        entity_id, tx["date"], float(tx["amount"]),
+                        entity_id, tx["date"], tx_time_val, float(tx["amount"]),
                         tx["type"], tx["description"], tx["counterparty"],
                         source_type,
                         tx["card_number"], tx["member_name"], tx["is_cancel"],
@@ -980,25 +1163,26 @@ class CodefClient:
             if tx["is_cancel"]:
                 cancels += 1
 
-            # 우리카드면 같은 (date, amount)의 우리은행 '체크우리' 행 자동 취소
-            # (Excel 업로더와 동일 정책)
-            if card_type == "woori_card":
-                cur.execute(
-                    """
-                    UPDATE transactions SET is_cancel = true, updated_at = NOW()
-                    WHERE entity_id = %s AND date = %s AND amount = %s
-                      AND source_type IN ('woori_bank', 'codef_woori_bank')
-                      AND description LIKE '체크우리%%'
-                      AND is_cancel IS NOT TRUE
-                    """,
-                    [entity_id, tx["date"], float(tx["amount"])],
-                )
-                check_card_cancelled += cur.rowcount
+            # 체크카드 cross-dedup 은 sync 끝에서 reconcile_check_card_duplicates() 가 일괄 처리.
+            # 이전엔 여기서 bank row 를 is_cancel=true 로 마킹했으나, is_cancel 은 '거래 취소'
+            # 의미라 dedup 과 분리. reconcile 함수가 is_duplicate=true 로 정확히 처리.
 
         cur.close()
+
+        # 체크카드 cross-source dedup (우리카드 ↔ 우리은행).
+        # bank insert 가 먼저였든 card insert 가 먼저였든 한쪽 sync 끝에서 reconcile.
+        reconciled = 0
+        if card_type == "woori_card":
+            try:
+                reconciled = reconcile_check_card_duplicates(
+                    conn, entity_id, start_date, end_date,
+                )
+            except Exception as e:
+                logger.warning("reconcile_check_card_duplicates failed (non-fatal): %s", e)
+
         logger.info(
-            "Codef card sync: entity=%d, card=%s, cards=%d, fetched=%d, synced=%d, dup=%d, cancel=%d, auto_mapped=%d, check_cancelled=%d",
-            entity_id, card_type, len(cards), len(raw_list), synced, duplicates, cancels, auto_mapped, check_card_cancelled,
+            "Codef card sync: entity=%d, card=%s, cards=%d, fetched=%d, synced=%d, dup=%d, cancel=%d, auto_mapped=%d, reconciled=%d",
+            entity_id, card_type, len(cards), len(raw_list), synced, duplicates, cancels, auto_mapped, reconciled,
         )
         return {
             "card_type": card_type,
@@ -1010,6 +1194,7 @@ class CodefClient:
             "auto_mapped": auto_mapped,
             "unmapped": synced - auto_mapped,
             "check_card_cancelled": check_card_cancelled,
+            "reconciled_check_cards": reconciled,
             "total_fetched": len(raw_list),
             "environment": self.environment,
         }
@@ -1272,9 +1457,11 @@ def _normalize_bank_row(item: dict) -> Optional[dict]:
     description = f"{desc2} {desc3}".strip() or counterparty
 
     balance_after = _parse_amount(item.get("resAfterTranBalance", ""))
+    tx_time = str(item.get("resAccountTrTime", "") or "").strip()  # HHMMSS
 
     return {
         "date": tx_date,
+        "time": tx_time,
         "amount": amount,
         "type": tx_type,
         "description": description[:500],
@@ -1324,8 +1511,20 @@ def _normalize_card_row(item: dict) -> Optional[dict]:
 
     description = counterparty + (" (취소)" if is_cancel else "")
 
+    # 시각 (HHMMSS) — 카드사마다 필드명 다름. 일반적인 후보들 fallback.
+    tx_time = str(
+        item.get("resUsedTime", "")
+        or item.get("resApprovalTime", "")
+        or item.get("resTime", "")
+        or ""
+    ).strip()
+    # 일부 카드사는 HHMM 또는 HH:MM:SS 형식 → 숫자만 추출
+    digits_only = "".join(c for c in tx_time if c.isdigit())
+    tx_time = digits_only[:6] if digits_only else ""
+
     return {
         "date": tx_date,
+        "time": tx_time,
         "amount": amount,
         "type": "in" if is_cancel else "out",  # 취소 = 환불 유입
         "description": description[:500],
@@ -1493,10 +1692,14 @@ def _normalize_tax_invoice_row(item: dict, our_biz_no: Optional[str] = None) -> 
 
 
 def _is_duplicate(cur, entity_id: int, tx: dict, source_type: str) -> bool:
-    """date + amount + counterparty + source_type 로 중복 감지."""
+    """date + amount + counterparty + source_type 로 중복 감지.
+
+    매칭된 row 의 time 이 NULL 이고 새 sync 에 time 있으면 backfill.
+    → time 컬럼 도입 이전 INSERT 된 row 가 재sync 시 자동 보강됨.
+    """
     cur.execute(
         """
-        SELECT id FROM transactions
+        SELECT id, time FROM transactions
         WHERE entity_id = %s AND date = %s AND amount = %s
           AND counterparty = %s AND source_type = %s
           AND is_cancel = %s
@@ -1507,22 +1710,150 @@ def _is_duplicate(cur, entity_id: int, tx: dict, source_type: str) -> bool:
             tx["counterparty"], source_type, tx.get("is_cancel", False),
         ],
     )
-    return cur.fetchone() is not None
+    row = cur.fetchone()
+    if not row:
+        return False
+    existing_id, existing_time = row
+    new_time = tx.get("time")
+    if existing_time is None and new_time:
+        cur.execute(
+            "UPDATE transactions SET time = %s WHERE id = %s",
+            [new_time, existing_id],
+        )
+    return True
+
+
+# ── 체크카드 cross-source dedup ──────────────────────────
+
+
+def reconcile_check_card_duplicates(
+    conn: PgConnection,
+    entity_id: int,
+    start_date: str,  # YYYYMMDD
+    end_date: str,    # YYYYMMDD
+) -> int:
+    """우리은행 ↔ 우리카드 체크카드 cross-source 중복 정리.
+
+    체크카드 결제는 카드 거래와 통장 즉시 출금이 1:1 매칭. Codef bank/card sync 가
+    같은 거래를 양쪽으로 가져오므로 한쪽을 dup 처리해야 비용 이중 계상 방지.
+
+    정책: **card 살림 + bank dup** (카드가 가맹점·카드번호·회원 정보가 더 상세).
+    Excel 업로드 경로 (backend/routers/upload.py) 와 일관성 유지.
+    bank row 를 is_duplicate=true 마킹만 — 카드 매핑은 그대로 유지.
+
+    매칭 조건:
+        - bank: source='codef_woori_bank', '체크우리' marker (description prefix or note)
+        - card: source='codef_woori_card'
+        - 같은 (entity_id, date, amount, counterparty)
+        - 양쪽 모두 is_duplicate=false, type='out'
+
+    Idempotent — 이미 처리된 쌍은 bank 가 is_duplicate=true 라 매칭 안 됨.
+
+    Returns:
+        reconciled 쌍 수.
+    """
+    start = datetime.strptime(start_date, "%Y%m%d").date()
+    end = datetime.strptime(end_date, "%Y%m%d").date()
+
+    cur = conn.cursor()
+    try:
+        # WITH chain: 매칭 후보 → bank update (is_duplicate=true) → card update (note만)
+        # bank_id 별로 1개 카드만 매칭 (DISTINCT ON) — false positive 방지
+        cur.execute(
+            """
+            WITH candidates AS (
+                SELECT DISTINCT ON (b.id)
+                    b.id AS bank_id,
+                    c.id AS card_id
+                FROM transactions b
+                JOIN transactions c
+                  ON c.entity_id = b.entity_id
+                 AND c.date = b.date
+                 AND c.amount = b.amount
+                 AND c.counterparty = b.counterparty
+                 AND c.source_type = 'codef_woori_card'
+                 AND c.type = 'out'
+                 AND c.is_duplicate = false
+                WHERE b.entity_id = %s
+                  AND b.source_type = 'codef_woori_bank'
+                  AND b.type = 'out'
+                  AND b.is_duplicate = false
+                  AND b.date BETWEEN %s AND %s
+                  AND (b.description LIKE '체크우리%%' OR b.note ILIKE '%%체크카드%%')
+                ORDER BY b.id, c.id
+            ),
+            bank_upd AS (
+                UPDATE transactions b
+                SET is_duplicate = true,
+                    duplicate_of_id = c.card_id,
+                    note = COALESCE(b.note, '') ||
+                           CASE WHEN COALESCE(b.note, '') = '' THEN '' ELSE ' | ' END ||
+                           'duplicate of card #' || c.card_id::text || ' (체크카드 auto-reconcile)',
+                    updated_at = NOW()
+                FROM candidates c
+                WHERE b.id = c.bank_id
+                RETURNING b.id
+            ),
+            card_upd AS (
+                UPDATE transactions card
+                SET note = COALESCE(card.note, '') ||
+                           CASE WHEN COALESCE(card.note, '') = '' THEN '' ELSE ' | ' END ||
+                           'matched with bank #' || c.bank_id::text || ' (체크카드 auto-reconcile)',
+                    updated_at = NOW()
+                FROM candidates c
+                WHERE card.id = c.card_id
+                RETURNING card.id
+            )
+            SELECT (SELECT COUNT(*) FROM bank_upd) AS banks,
+                   (SELECT COUNT(*) FROM card_upd) AS cards
+            """,
+            [entity_id, start, end],
+        )
+        row = cur.fetchone()
+        banks_n = row[0] if row else 0
+        cards_n = row[1] if row else 0
+        if banks_n != cards_n:
+            logger.warning(
+                "reconcile_check_card_duplicates: bank_updated=%d != card_updated=%d (entity=%d, %s~%s)",
+                banks_n, cards_n, entity_id, start_date, end_date,
+            )
+        return banks_n
+    finally:
+        cur.close()
 
 
 # ── connected_id 설정 storage ─────────────────────────────
 
 
-def get_connected_id(conn: PgConnection, entity_id: int, org: str) -> Optional[str]:
-    """settings에서 connected_id 조회. 없으면 None."""
+def get_connected_id(
+    conn: PgConnection,
+    entity_id: int,
+    org: str,
+    env: Optional[str] = None,
+) -> Optional[str]:
+    """settings에서 connected_id 조회. env 미지정 시 active env 사용.
+
+    env-scoped key 우선 → 없으면 legacy unscoped key 로 fallback (구버전 데이터 호환).
+    """
+    eff_env = env or get_active_env(conn)
     cur = conn.cursor()
     try:
         cur.execute(
             "SELECT value FROM settings WHERE key = %s AND entity_id = %s",
-            [SETTINGS_PREFIX + org, entity_id],
+            [_connected_id_key(eff_env, org), entity_id],
         )
         row = cur.fetchone()
-        return row[0] if row and row[0] else None
+        if row and row[0]:
+            return row[0]
+        # legacy unscoped — 옛 데이터는 demo 환경 가정. demo 일 때만 fallback.
+        if eff_env == "demo":
+            cur.execute(
+                "SELECT value FROM settings WHERE key = %s AND entity_id = %s",
+                [SETTINGS_PREFIX + org, entity_id],
+            )
+            row = cur.fetchone()
+            return row[0] if row and row[0] else None
+        return None
     finally:
         cur.close()
 
@@ -1532,8 +1863,10 @@ def set_connected_id(
     entity_id: int,
     org: str,
     connected_id: str,
+    env: Optional[str] = None,
 ) -> None:
-    """settings에 connected_id 저장 (upsert)."""
+    """settings에 connected_id 저장 (upsert, env-scoped)."""
+    eff_env = env or get_active_env(conn)
     cur = conn.cursor()
     try:
         cur.execute(
@@ -1543,31 +1876,183 @@ def set_connected_id(
             ON CONFLICT (key, entity_id) DO UPDATE
                 SET value = EXCLUDED.value, updated_at = NOW()
             """,
-            [SETTINGS_PREFIX + org, connected_id, entity_id],
+            [_connected_id_key(eff_env, org), connected_id, entity_id],
         )
     finally:
         cur.close()
 
 
-def list_connected_ids(conn: PgConnection, entity_id: int) -> dict:
-    """entity의 모든 Codef connected_id 조회. {org: connected_id}."""
+# ── 계좌·카드번호 (목록 API 미신청 시 직접공급) ───────────────
+# account-list/card-list 상품 없이 transaction-list/approval-list 를 쓰려면
+# 조회할 계좌번호·카드번호가 필요. env-scoped 설정으로 공급한다.
+def _codef_account_key(env: str, org: str) -> str:
+    return f"codef_account_{env}_{org}"
+
+
+def _codef_cards_key(env: str, org: str) -> str:
+    return f"codef_cards_{env}_{org}"
+
+
+def get_codef_account(
+    conn: PgConnection, entity_id: int, org: str, env: Optional[str] = None
+) -> Optional[str]:
+    """은행 계좌번호 조회 (설정). 없으면 None → 호출측이 account-list fallback."""
+    eff_env = env or get_active_env(conn)
     cur = conn.cursor()
     try:
         cur.execute(
+            "SELECT value FROM settings WHERE key = %s AND entity_id = %s",
+            [_codef_account_key(eff_env, org), entity_id],
+        )
+        row = cur.fetchone()
+        return row[0].strip() if row and row[0] and row[0].strip() else None
+    finally:
+        cur.close()
+
+
+def set_codef_account(
+    conn: PgConnection, entity_id: int, org: str, account: str, env: Optional[str] = None
+) -> None:
+    """은행 계좌번호 저장 (digits-only 정규화, upsert)."""
+    eff_env = env or get_active_env(conn)
+    digits = "".join(c for c in str(account) if c.isdigit())
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            INSERT INTO settings (key, value, entity_id, updated_at)
+            VALUES (%s, %s, %s, NOW())
+            ON CONFLICT (key, entity_id) DO UPDATE
+                SET value = EXCLUDED.value, updated_at = NOW()
+            """,
+            [_codef_account_key(eff_env, org), digits, entity_id],
+        )
+    finally:
+        cur.close()
+
+
+def get_codef_cards_override(
+    conn: PgConnection, entity_id: int, org: str, env: Optional[str] = None
+) -> Optional[list[str]]:
+    """카드번호 수동 override 조회 (설정, JSON 리스트). 없으면 None."""
+    eff_env = env or get_active_env(conn)
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT value FROM settings WHERE key = %s AND entity_id = %s",
+            [_codef_cards_key(eff_env, org), entity_id],
+        )
+        row = cur.fetchone()
+        if not (row and row[0]):
+            return None
+        try:
+            cards = json.loads(row[0])
+        except (json.JSONDecodeError, TypeError):
+            return None
+        nums = [str(c).strip() for c in cards if str(c).strip()]
+        return nums or None
+    finally:
+        cur.close()
+
+
+def set_codef_cards(
+    conn: PgConnection, entity_id: int, org: str, cards: list[str], env: Optional[str] = None
+) -> None:
+    """카드번호 override 저장 (JSON 리스트, upsert)."""
+    eff_env = env or get_active_env(conn)
+    clean = [str(c).strip() for c in cards if str(c).strip()]
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            INSERT INTO settings (key, value, entity_id, updated_at)
+            VALUES (%s, %s, %s, NOW())
+            ON CONFLICT (key, entity_id) DO UPDATE
+                SET value = EXCLUDED.value, updated_at = NOW()
+            """,
+            [_codef_cards_key(eff_env, org), json.dumps(clean), entity_id],
+        )
+    finally:
+        cur.close()
+
+
+def resolve_codef_card_numbers(
+    conn: PgConnection, entity_id: int, org: str, env: Optional[str] = None
+) -> Optional[list[str]]:
+    """카드 sync 에 쓸 카드번호 결정.
+
+    우선순위: 설정 override → 기존 transactions.card_number distinct → None.
+    None 이면 호출측 sync_card_approvals 가 card-list 로 fallback.
+    transactions.card_number 는 과거 sync 가 CODEF 마스킹 포맷 그대로 저장 →
+    card-list 없이도 기존 카드 전부 자동 도출.
+    """
+    override = get_codef_cards_override(conn, entity_id, org, env)
+    if override:
+        return override
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT DISTINCT card_number FROM transactions
+            WHERE entity_id = %s AND source_type = %s
+              AND card_number IS NOT NULL AND card_number <> ''
+            ORDER BY card_number
+            """,
+            [entity_id, f"codef_{org}"],
+        )
+        nums = [r[0] for r in cur.fetchall() if r[0]]
+        return nums or None
+    finally:
+        cur.close()
+
+
+def list_connected_ids(
+    conn: PgConnection,
+    entity_id: int,
+    env: Optional[str] = None,
+) -> dict:
+    """entity의 활성 env Codef connected_id 조회. {org: connected_id}.
+
+    env-scoped 키 + (demo 일 때만) legacy unscoped 키를 함께 노출.
+    """
+    eff_env = env or get_active_env(conn)
+    cur = conn.cursor()
+    try:
+        prefix = f"codef_connected_id_{eff_env}_"
+        cur.execute(
             "SELECT key, value FROM settings WHERE key LIKE %s AND entity_id = %s",
-            [SETTINGS_PREFIX + "%", entity_id],
+            [prefix + "%", entity_id],
         )
         result = {}
         for key, value in cur.fetchall():
-            org = key[len(SETTINGS_PREFIX):]
+            org = key[len(prefix):]
             result[org] = value
+
+        if eff_env == "demo":
+            # legacy unscoped key 도 같이 노출 (이미 env-scoped 가 있으면 그 값 유지)
+            cur.execute(
+                "SELECT key, value FROM settings WHERE key LIKE %s AND entity_id = %s",
+                [SETTINGS_PREFIX + "%", entity_id],
+            )
+            for key, value in cur.fetchall():
+                org = key[len(SETTINGS_PREFIX):]
+                # env-scoped prefix 와 겹치지 않도록 확인 (codef_connected_id_demo_ 가 LIKE codef_connected_id_% 에도 매치됨)
+                if org.startswith("demo_") or org.startswith("production_"):
+                    continue
+                result.setdefault(org, value)
         return result
     finally:
         cur.close()
 
 
-def set_last_sync(conn: PgConnection, entity_id: int, org: str) -> None:
-    """sync 성공 시각을 settings에 저장 (UTC ISO)."""
+def set_last_sync(
+    conn: PgConnection,
+    entity_id: int,
+    org: str,
+    env: Optional[str] = None,
+) -> None:
+    """sync 성공 시각을 settings에 저장 (UTC ISO, env-scoped)."""
+    eff_env = env or get_active_env(conn)
     cur = conn.cursor()
     try:
         cur.execute(
@@ -1577,38 +2062,71 @@ def set_last_sync(conn: PgConnection, entity_id: int, org: str) -> None:
             ON CONFLICT (key, entity_id) DO UPDATE
                 SET value = EXCLUDED.value, updated_at = NOW()
             """,
-            [LAST_SYNC_PREFIX + org, entity_id],
+            [_last_sync_key(eff_env, org), entity_id],
         )
     finally:
         cur.close()
 
 
-def list_last_syncs(conn: PgConnection, entity_id: int) -> dict:
-    """entity의 모든 기관 last_sync 시각 조회. {org: ISO timestamp}."""
+def list_last_syncs(
+    conn: PgConnection,
+    entity_id: int,
+    env: Optional[str] = None,
+) -> dict:
+    """entity의 활성 env 기관별 last_sync 시각. {org: ISO timestamp}."""
+    eff_env = env or get_active_env(conn)
     cur = conn.cursor()
     try:
+        prefix = f"codef_last_sync_{eff_env}_"
         cur.execute(
             "SELECT key, value FROM settings WHERE key LIKE %s AND entity_id = %s",
-            [LAST_SYNC_PREFIX + "%", entity_id],
+            [prefix + "%", entity_id],
         )
         result = {}
         for key, value in cur.fetchall():
-            org = key[len(LAST_SYNC_PREFIX):]
+            org = key[len(prefix):]
             result[org] = value
+
+        if eff_env == "demo":
+            cur.execute(
+                "SELECT key, value FROM settings WHERE key LIKE %s AND entity_id = %s",
+                [LAST_SYNC_PREFIX + "%", entity_id],
+            )
+            for key, value in cur.fetchall():
+                org = key[len(LAST_SYNC_PREFIX):]
+                if org.startswith("demo_") or org.startswith("production_"):
+                    continue
+                result.setdefault(org, value)
         return result
     finally:
         cur.close()
 
 
-def delete_connected_id(conn: PgConnection, entity_id: int, org: str) -> bool:
-    """connected_id 삭제. Returns True if deleted."""
+def delete_connected_id(
+    conn: PgConnection,
+    entity_id: int,
+    org: str,
+    env: Optional[str] = None,
+) -> bool:
+    """connected_id 삭제 (env-scoped). Returns True if deleted.
+
+    demo 모드에서는 legacy unscoped key 도 함께 정리.
+    """
+    eff_env = env or get_active_env(conn)
     cur = conn.cursor()
     try:
         cur.execute(
             "DELETE FROM settings WHERE key = %s AND entity_id = %s",
-            [SETTINGS_PREFIX + org, entity_id],
+            [_connected_id_key(eff_env, org), entity_id],
         )
-        return cur.rowcount > 0
+        deleted = cur.rowcount > 0
+        if eff_env == "demo":
+            cur.execute(
+                "DELETE FROM settings WHERE key = %s AND entity_id = %s",
+                [SETTINGS_PREFIX + org, entity_id],
+            )
+            deleted = deleted or cur.rowcount > 0
+        return deleted
     finally:
         cur.close()
 

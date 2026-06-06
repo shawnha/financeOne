@@ -64,12 +64,16 @@ def _db():
 
 
 def _gather_targets(conn: PgConnection) -> list[tuple[int, str]]:
-    """자동 sync 대상 (entity_id, org).
+    """자동 sync 대상 (entity_id, org) — 활성 env 의 connected_id 중 last_sync 가 있는 것만.
 
-    안전장치: `codef_last_sync_<org>`가 존재하는 org만 포함 — 초기 sync는
-    사용자가 수동으로 먼저 돌려야 자동 인수인계됨. 신규 connected_id 등록만으로
-    대량 INSERT가 터지는 것을 방지.
+    안전장치: `codef_last_sync_<env>_<org>` (or legacy unscoped) 가 존재해야 포함됨 —
+    초기 sync 는 사용자가 수동으로 먼저 돌려야 자동 인수인계됨.
     """
+    from backend.services.integrations.codef import get_active_env
+
+    active_env = get_active_env(conn)
+    cid_prefix = f"codef_connected_id_{active_env}_"
+    ls_prefix = f"codef_last_sync_{active_env}_"
     cur = conn.cursor()
     try:
         cur.execute(
@@ -78,41 +82,90 @@ def _gather_targets(conn: PgConnection) -> list[tuple[int, str]]:
             FROM financeone.settings cid
             JOIN financeone.settings ls
               ON ls.entity_id = cid.entity_id
-             AND ls.key = 'codef_last_sync_' || regexp_replace(cid.key, '^codef_connected_id_', '')
+             AND ls.key = %s || regexp_replace(cid.key, %s, '')
              AND COALESCE(NULLIF(ls.value, ''), NULL) IS NOT NULL
-            WHERE cid.key LIKE 'codef_connected_id_%'
+            WHERE cid.key LIKE %s
               AND cid.entity_id IS NOT NULL
               AND COALESCE(NULLIF(cid.value, ''), NULL) IS NOT NULL
             ORDER BY cid.entity_id, cid.key
-            """
+            """,
+            [ls_prefix, f"^{cid_prefix}", f"{cid_prefix}%"],
         )
         rows = cur.fetchall()
+
+        # demo 모드에서는 legacy unscoped 키도 호환 (마이그레이션 전 데이터)
+        if active_env == "demo":
+            cur.execute(
+                """
+                SELECT cid.entity_id, cid.key
+                FROM financeone.settings cid
+                JOIN financeone.settings ls
+                  ON ls.entity_id = cid.entity_id
+                 AND ls.key = 'codef_last_sync_' || regexp_replace(cid.key, '^codef_connected_id_', '')
+                 AND COALESCE(NULLIF(ls.value, ''), NULL) IS NOT NULL
+                WHERE cid.key LIKE 'codef_connected_id_%%'
+                  AND cid.key NOT LIKE 'codef_connected_id_demo_%%'
+                  AND cid.key NOT LIKE 'codef_connected_id_production_%%'
+                  AND cid.entity_id IS NOT NULL
+                  AND COALESCE(NULLIF(cid.value, ''), NULL) IS NOT NULL
+                ORDER BY cid.entity_id, cid.key
+                """
+            )
+            legacy_rows = cur.fetchall()
+            # legacy 행도 active_env=demo 로 보고 합침 (org 만 추출)
+            rows = list(rows) + [
+                (eid, f"{cid_prefix}{k.removeprefix('codef_connected_id_')}")
+                for eid, k in legacy_rows
+            ]
     finally:
         cur.close()
     targets: list[tuple[int, str]] = []
     for entity_id, key in rows:
-        org = key.removeprefix("codef_connected_id_")
+        org = key.removeprefix(cid_prefix)
         if org:
             targets.append((entity_id, org))
-    return targets
+    # 중복 제거 (legacy + env-scoped 둘 다 있는 경우)
+    seen = set()
+    unique_targets = []
+    for t in targets:
+        if t not in seen:
+            seen.add(t)
+            unique_targets.append(t)
+    return unique_targets
 
 
-def _incremental_date_range(conn: PgConnection, entity_id: int, org: str) -> tuple[str, str]:
+def _incremental_date_range(
+    conn: PgConnection, entity_id: int, org: str, env: Optional[str] = None,
+) -> tuple[str, str]:
     """마지막 sync 시각 기반 (start_date, end_date) — YYYYMMDD.
 
     last_sync 없으면 오늘 기준 과거 3일. 있으면 그 날짜 -1일(여유분)부터 오늘.
     """
+    from backend.services.integrations.codef import get_active_env
+    eff_env = env or get_active_env(conn)
     cur = conn.cursor()
     try:
+        # env-scoped 우선
         cur.execute(
             """
             SELECT value
             FROM financeone.settings
             WHERE entity_id = %s AND key = %s
             """,
-            [entity_id, f"codef_last_sync_{org}"],
+            [entity_id, f"codef_last_sync_{eff_env}_{org}"],
         )
         row = cur.fetchone()
+        if (not row or not row[0]) and eff_env == "demo":
+            # legacy unscoped fallback (demo 만)
+            cur.execute(
+                """
+                SELECT value
+                FROM financeone.settings
+                WHERE entity_id = %s AND key = %s
+                """,
+                [entity_id, f"codef_last_sync_{org}"],
+            )
+            row = cur.fetchone()
     finally:
         cur.close()
 
@@ -148,32 +201,36 @@ def _sync_one_sync(entity_id: int, org: str) -> dict:
     from backend.services.integrations.codef import (
         CodefClient, CodefError, BANK_ORGS, CARD_ORGS, PUBLIC_ORGS,
         get_connected_id, set_last_sync,
+        get_active_credentials, resolve_base_url,
+        get_codef_account, resolve_codef_card_numbers,
     )
     from backend.routers.integrations import _log_codef_error  # helper reuse
 
-    client_id = os.environ.get("CODEF_CLIENT_ID", "")
-    client_secret = os.environ.get("CODEF_CLIENT_SECRET", "")
-    if not client_id or not client_secret:
-        return {"entity_id": entity_id, "org": org, "ok": False,
-                "detail": "CODEF creds not configured"}
-
     try:
         with _db() as conn:
-            connected_id = get_connected_id(conn, entity_id, org)
+            active_env, client_id, client_secret, _pk = get_active_credentials(conn)
+            if not client_id or not client_secret:
+                return {"entity_id": entity_id, "org": org, "ok": False,
+                        "detail": f"CODEF creds not configured for env={active_env}"}
+
+            connected_id = get_connected_id(conn, entity_id, org, env=active_env)
             if not connected_id:
                 return {"entity_id": entity_id, "org": org, "ok": False,
                         "detail": "connected_id missing"}
             start, end = _incremental_date_range(conn, entity_id, org)
 
-            client = CodefClient(client_id, client_secret)
+            client = CodefClient(client_id, client_secret, base_url=resolve_base_url(active_env))
             try:
                 if org in BANK_ORGS:
+                    account = get_codef_account(conn, entity_id, org, env=active_env)
                     result = client.sync_bank_transactions(
-                        conn, entity_id, connected_id, start, end, org=org,
+                        conn, entity_id, connected_id, start, end, account=account, org=org,
                     )
                 elif org in CARD_ORGS:
+                    card_numbers = resolve_codef_card_numbers(conn, entity_id, org, env=active_env)
                     result = client.sync_card_approvals(
                         conn, entity_id, connected_id, start, end, org,
+                        card_numbers=card_numbers,
                     )
                 elif org in PUBLIC_ORGS and org == "hometax":
                     # 홈택스 전자세금계산서 통합조회. our_biz_no 는 entities.business_number 자동 조회.
@@ -190,7 +247,7 @@ def _sync_one_sync(entity_id: int, org: str) -> dict:
                     return {"entity_id": entity_id, "org": org, "ok": False,
                             "detail": f"unknown org: {org}"}
 
-                set_last_sync(conn, entity_id, org)
+                set_last_sync(conn, entity_id, org, env=active_env)
                 conn.commit()
 
                 # P0-3: codef sync 직후 forecast actual_amount 동기화 (current + prev month).
@@ -269,18 +326,17 @@ async def codef_sync_job() -> None:
         return
 
     if not targets:
-        logger.info("codef_sync_job: no targets")
-        _last_run["finished_at"] = now_kst().isoformat()
-        return
-
-    # 순차 실행 — Codef 동시 호출에 대한 rate limit 안전 여유
-    for entity_id, org in targets:
-        result = await _sync_one(entity_id, org)
-        _last_run["results"].append(result)
-        if result.get("ok"):
-            _last_run["ok_count"] += 1
-        else:
-            _last_run["error_count"] += 1
+        # CODEF 타겟이 없어도 Mercury/Gowid 는 돌려야 하므로 return 하지 않음
+        logger.info("codef_sync_job: no codef targets — mercury/gowid 만 실행")
+    else:
+        # 순차 실행 — Codef 동시 호출에 대한 rate limit 안전 여유
+        for entity_id, org in targets:
+            result = await _sync_one(entity_id, org)
+            _last_run["results"].append(result)
+            if result.get("ok"):
+                _last_run["ok_count"] += 1
+            else:
+                _last_run["error_count"] += 1
 
     # Mercury sync (HOI) — codef 후 같은 cron 에서 자동 실행
     try:
@@ -294,6 +350,20 @@ async def codef_sync_job() -> None:
     except Exception as e:
         logger.warning("mercury sync in scheduler failed: %s", e)
         _last_run["results"].append({"source": "mercury", "ok": False, "detail": str(e)})
+        _last_run["error_count"] += 1
+
+    # Gowid sync (롯데카드) — codef 후 같은 cron 에서 자동 실행 (CODEF 와 격리)
+    try:
+        loop = asyncio.get_running_loop()
+        gowid_result = await loop.run_in_executor(None, _gowid_sync_sync)
+        _last_run["results"].append(gowid_result)
+        if gowid_result.get("ok"):
+            _last_run["ok_count"] += 1
+        else:
+            _last_run["error_count"] += 1
+    except Exception as e:
+        logger.warning("gowid sync in scheduler failed: %s", e)
+        _last_run["results"].append({"source": "gowid", "ok": False, "detail": str(e)})
         _last_run["error_count"] += 1
 
     _last_run["finished_at"] = now_kst().isoformat()
@@ -350,6 +420,57 @@ def _mercury_sync_sync() -> dict:
     except Exception as e:
         logger.exception("mercury sync crashed")
         return {"source": "mercury", "ok": False,
+                "detail": f"exception: {type(e).__name__}: {str(e)[:120]}"}
+
+
+def _gowid_sync_sync() -> dict:
+    """Gowid 롯데카드 자동 sync — gowid_api_key 등록된 entity 전부, 최근 7일 롤링.
+
+    dedup 은 gowid_id 마커 기준이라 겹치는 날 재sync 해도 안전. CODEF 와 격리됨.
+    """
+    try:
+        from backend.services.integrations.gowid import GowidClient, get_api_key
+    except Exception as e:
+        return {"source": "gowid", "ok": False, "detail": f"import failed: {e}"}
+
+    try:
+        with _db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT entity_id FROM settings "
+                "WHERE key = 'gowid_api_key' AND entity_id IS NOT NULL "
+                "AND COALESCE(NULLIF(value, ''), NULL) IS NOT NULL "
+                "ORDER BY entity_id"
+            )
+            entities = [r[0] for r in cur.fetchall()]
+            if not entities:
+                return {"source": "gowid", "ok": True, "detail": "no gowid entity", "synced": 0}
+
+            end = today_kst()
+            start = end - timedelta(days=7)
+            synced_total = 0
+            per_entity: dict[int, int] = {}
+            for eid in entities:
+                key = get_api_key(conn, eid)
+                if not key:
+                    continue
+                client = GowidClient(key)
+                try:
+                    r = client.sync_expenses(
+                        conn, eid, start.isoformat(), end.isoformat())
+                    conn.commit()
+                    synced_total += r.get("synced", 0)
+                    per_entity[eid] = r.get("synced", 0)
+                except Exception as e:
+                    logger.warning("gowid entity %s sync error: %s", eid, e)
+                finally:
+                    client.close()
+            return {"source": "gowid", "ok": True,
+                    "detail": {"entities": entities, "synced": synced_total,
+                               "per_entity": per_entity}}
+    except Exception as e:
+        logger.exception("gowid sync crashed")
+        return {"source": "gowid", "ok": False,
                 "detail": f"exception: {type(e).__name__}: {str(e)[:120]}"}
 
 
@@ -440,7 +561,14 @@ def get_status() -> dict:
                         """
                         SELECT s.entity_id,
                                COALESCE(e.name, '?') AS entity_name,
-                               regexp_replace(s.key, '^codef_last_sync_', '') AS org,
+                               regexp_replace(
+                                   regexp_replace(s.key, '^codef_last_sync_', ''),
+                                   '^(demo|production)_', ''
+                               ) AS org,
+                               regexp_replace(
+                                   substring(s.key from '^codef_last_sync_(demo_|production_)?'),
+                                   '_$', ''
+                               ) AS env_prefix,
                                s.value,
                                s.updated_at
                         FROM financeone.settings s
@@ -458,7 +586,8 @@ def get_status() -> dict:
                     "entity_id": r[0],
                     "entity_name": r[1],
                     "org": r[2],
-                    "last_sync": (r[4].isoformat() if r[4] else r[3]),
+                    "env": (r[3] or "legacy"),
+                    "last_sync": (r[5].isoformat() if r[5] else r[4]),
                 }
                 for r in rows
             ]
