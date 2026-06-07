@@ -1,9 +1,16 @@
 """계정과목 API — CRUD for standard/internal accounts and members"""
 
+import io
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 from psycopg2.extensions import connection as PgConnection
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+from openpyxl.utils import get_column_letter
 
 from backend.database.connection import get_db
 from backend.utils.db import fetch_all
@@ -157,6 +164,143 @@ def get_account_ledger(
     }
 
 
+@router.get("/{account_code}/ledger/export")
+def export_ledger_excel(
+    account_code: str,
+    entity_id: int = Query(...),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    conn: PgConnection = Depends(get_db),
+):
+    """계정별원장 Excel Export (회계법인 전달용)."""
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, code, name, category, subcategory, normal_side FROM standard_accounts WHERE code = %s",
+        [account_code],
+    )
+    acc_row = cur.fetchone()
+    if not acc_row:
+        cur.close()
+        raise HTTPException(404, f"Account {account_code} not found")
+    account = {"id": acc_row[0], "code": acc_row[1], "name": acc_row[2],
+               "category": acc_row[3], "subcategory": acc_row[4], "normal_side": acc_row[5]}
+
+    # 기초 잔액
+    opening = 0.0
+    if start_date:
+        cur.execute(
+            """SELECT COALESCE(SUM(jel.debit_amount),0) - COALESCE(SUM(jel.credit_amount),0)
+               FROM journal_entry_lines jel JOIN journal_entries je ON je.id = jel.journal_entry_id
+               WHERE je.entity_id = %s AND jel.standard_account_id = %s AND je.entry_date < %s""",
+            [entity_id, account["id"], start_date],
+        )
+        r = cur.fetchone()
+        opening = float(r[0]) if r else 0.0
+        if account["normal_side"] == "credit":
+            opening = -opening
+
+    # 분개 lines
+    where = ["je.entity_id = %s", "jel.standard_account_id = %s"]
+    params = [entity_id, account["id"]]
+    if start_date:
+        where.append("je.entry_date >= %s")
+        params.append(start_date)
+    if end_date:
+        where.append("je.entry_date <= %s")
+        params.append(end_date)
+    cur.execute(
+        f"""SELECT je.entry_date, je.description AS je_desc, jel.debit_amount, jel.credit_amount,
+                   jel.description AS line_desc, t.counterparty, t.source_type, t.note
+            FROM journal_entry_lines jel JOIN journal_entries je ON je.id = jel.journal_entry_id
+            LEFT JOIN transactions t ON t.id = je.transaction_id
+            WHERE {' AND '.join(where)}
+            ORDER BY je.entry_date, je.id, jel.id""",
+        params,
+    )
+    rows = cur.fetchall()
+
+    cur.execute("SELECT name FROM entities WHERE id = %s", [entity_id])
+    ent = cur.fetchone()
+    entity_name = (ent[0] if ent else f"entity_{entity_id}").replace(" ", "_")
+    cur.close()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = f"{account['code']}_{account['name'][:20]}"
+    thin = Border(left=Side(style="thin"), right=Side(style="thin"),
+                  top=Side(style="thin"), bottom=Side(style="thin"))
+    hfill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+    hfont = Font(name="맑은 고딕", bold=True, size=11, color="FFFFFF")
+    nfont = Font(name="맑은 고딕", size=10)
+    afont = Font(name="Consolas", size=10)
+
+    # Title
+    title = f"{entity_name} 계정별원장 — {account['code']} {account['name']} ({start_date or ''} ~ {end_date or ''})"
+    tc = ws.cell(row=1, column=1, value=title)
+    tc.font = Font(name="맑은 고딕", bold=True, size=14)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=7)
+
+    # Opening
+    ws.cell(row=3, column=1, value="기초잔액").font = nfont
+    oc = ws.cell(row=3, column=2, value=float(opening))
+    oc.font = afont
+    oc.number_format = "#,##0"
+
+    headers = ["날짜", "적요", "거래처", "출처", "차변", "대변", "잔액"]
+    for col, h in enumerate(headers, start=1):
+        c = ws.cell(row=5, column=col, value=h)
+        c.font = hfont
+        c.fill = hfill
+        c.alignment = Alignment(horizontal="center")
+        c.border = thin
+
+    running = opening
+    sum_debit = 0.0
+    sum_credit = 0.0
+    for i, r in enumerate(rows, start=6):
+        date, je_desc, debit, credit, line_desc, cp, src, note = r
+        debit = float(debit) if debit else 0.0
+        credit = float(credit) if credit else 0.0
+        sum_debit += debit
+        sum_credit += credit
+        if account["normal_side"] == "debit":
+            running += debit - credit
+        else:
+            running += credit - debit
+        ws.cell(row=i, column=1, value=date).font = nfont
+        ws.cell(row=i, column=2, value=line_desc or je_desc or "").font = nfont
+        ws.cell(row=i, column=3, value=cp or "").font = nfont
+        ws.cell(row=i, column=4, value=src or "").font = nfont
+        for col, val in [(5, debit), (6, credit), (7, running)]:
+            cc = ws.cell(row=i, column=col, value=val if val else None)
+            cc.font = afont
+            cc.number_format = "#,##0"
+            cc.alignment = Alignment(horizontal="right")
+
+    # 합계
+    tot_row = len(rows) + 6
+    ws.cell(row=tot_row, column=4, value="합계").font = Font(name="맑은 고딕", bold=True, size=10)
+    for col, val in [(5, sum_debit), (6, sum_credit), (7, running)]:
+        cc = ws.cell(row=tot_row, column=col, value=val)
+        cc.font = Font(name="Consolas", bold=True, size=10)
+        cc.number_format = "#,##0"
+        cc.alignment = Alignment(horizontal="right")
+
+    widths = [12, 30, 24, 18, 14, 14, 16]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = "A6"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    fname = f"{entity_name}_원장_{account['code']}_{account['name']}_{start_date or ''}_{end_date or ''}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(buf.getvalue()),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(fname)}"},
+    )
+
+
 # ---------------------------------------------------------------------------
 
 
@@ -273,13 +417,15 @@ def list_standard_accounts(
     gaap_clause_simple = "AND gaap_type = %s" if resolved_gaap else ""
 
     if entity_id is not None:
-        params = [entity_id]
+        params = [entity_id, entity_id]  # [is_backbone EXISTS, JOIN entity]
         if resolved_gaap:
             params.append(resolved_gaap)
         cur.execute(
             f"""
             SELECT sa.id, sa.code, sa.name, sa.category, sa.subcategory,
                    sa.normal_side, sa.sort_order, sa.description, sa.gaap_type,
+                   EXISTS(SELECT 1 FROM entity_standard_accounts e
+                           WHERE e.entity_id = %s AND e.standard_account_id = sa.id) AS is_backbone,
                    ia.id AS mapped_internal_id,
                    ia.name AS mapped_internal_name,
                    ia.code AS mapped_internal_code
@@ -326,6 +472,8 @@ def list_internal_accounts(
             """
             SELECT ia.id, ia.entity_id, ia.code, ia.name,
                    sa.code AS standard_code, sa.name AS standard_name,
+                   sa.category AS standard_category, sa.subcategory AS standard_subcategory,
+                   ia.standard_account_id, sa.sort_order AS standard_sort_order,
                    ia.sort_order, ia.parent_id, ia.is_recurring
             FROM internal_accounts ia
             LEFT JOIN standard_accounts sa ON ia.standard_account_id = sa.id
@@ -339,6 +487,8 @@ def list_internal_accounts(
             """
             SELECT ia.id, ia.entity_id, ia.code, ia.name,
                    sa.code AS standard_code, sa.name AS standard_name,
+                   sa.category AS standard_category, sa.subcategory AS standard_subcategory,
+                   ia.standard_account_id, sa.sort_order AS standard_sort_order,
                    ia.sort_order, ia.parent_id, ia.is_recurring
             FROM internal_accounts ia
             LEFT JOIN standard_accounts sa ON ia.standard_account_id = sa.id

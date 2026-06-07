@@ -5,23 +5,6 @@ import { useSearchParams } from "next/navigation"
 import { fetchAPI } from "@/lib/api"
 import { EntityTabs } from "@/components/entity-tabs"
 import { toast } from "sonner"
-import { cn } from "@/lib/utils"
-import {
-  DndContext,
-  closestCenter,
-  PointerSensor,
-  KeyboardSensor,
-  useSensor,
-  useSensors,
-  DragEndEvent,
-} from "@dnd-kit/core"
-import {
-  SortableContext,
-  verticalListSortingStrategy,
-  arrayMove,
-  sortableKeyboardCoordinates,
-} from "@dnd-kit/sortable"
-import { restrictToVerticalAxis } from "@dnd-kit/modifiers"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -34,7 +17,6 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { AlertTriangle, FolderTree, Plus, Copy } from "lucide-react"
-import { TreeAccountItem, flattenTree, type TreeAccount } from "@/components/tree-account-item"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -47,6 +29,10 @@ interface RawAccount {
   name: string
   standard_code: string | null
   standard_name: string | null
+  standard_category: string | null
+  standard_subcategory: string | null
+  standard_account_id: number | null
+  standard_sort_order: number | null
   sort_order: number
   parent_id: number | null
   is_recurring: boolean
@@ -57,6 +43,9 @@ interface StandardAccount {
   code: string
   name: string
   category: string
+  subcategory?: string | null
+  sort_order?: number
+  is_backbone?: boolean
 }
 
 interface FormData {
@@ -116,29 +105,80 @@ interface AutoMapStdResult {
 
 const ROOT_CODES = ["INC", "EXP"]
 
-function buildTree(accounts: RawAccount[]): TreeAccount[] {
-  const byParent = new Map<number | null, RawAccount[]>()
-  for (const a of accounts) {
-    const key = a.parent_id
-    const list = byParent.get(key) || []
-    list.push(a)
-    byParent.set(key, list)
-  }
+// ---------------------------------------------------------------------------
+// 표준 골격 기반 그룹핑 — 카테고리 > 표준(골격) > 잎 (재설계 목표 트리)
+// ---------------------------------------------------------------------------
 
-  function walk(parentId: number | null, depth: number): TreeAccount[] {
-    const children = byParent.get(parentId) || []
-    return children
-      .sort((a, b) => a.sort_order - b.sort_order)
-      .map((a) => ({
-        ...a,
-        depth,
-        isRoot: ROOT_CODES.includes(a.code),
-        is_recurring: a.is_recurring ?? false,
-        children: walk(a.id, depth + 1),
-      }))
-  }
-  return walk(null, 0)
+const CAT_ORDER = ["자산", "부채", "자본", "수익", "매출", "매출원가", "비용", "기타"]
+
+interface StdNode {
+  std: StandardAccount
+  leaves: { leaf: RawAccount; groupName: string | null }[]
 }
+interface CatNode {
+  category: string
+  standards: StdNode[]
+}
+
+function buildStandardGroups(
+  accounts: RawAccount[],
+  standards: StandardAccount[],
+): { cats: CatNode[]; unmapped: RawAccount[] } {
+  // 잎 = 자식 없는 내부계정 (컨테이너/그룹 노드 제외)
+  const hasChild = new Set<number>()
+  for (const a of accounts) if (a.parent_id != null) hasChild.add(a.parent_id)
+  const byId = new Map(accounts.map((a) => [a.id, a]))
+  const isContainer = (a: RawAccount) =>
+    ROOT_CODES.includes(a.code) || ["지출", "수입"].includes(a.name)
+  // 잎의 기능그룹 이름(부모가 컨테이너 아니면 그룹명)
+  const groupNameOf = (a: RawAccount): string | null => {
+    if (a.parent_id == null) return null
+    const p = byId.get(a.parent_id)
+    if (!p || isContainer(p)) return null
+    return p.name
+  }
+  const leaves = accounts.filter((a) => !hasChild.has(a.id) && !ROOT_CODES.includes(a.code))
+
+  const byStd = new Map<number, { leaf: RawAccount; groupName: string | null }[]>()
+  const unmapped: RawAccount[] = []
+  for (const lf of leaves) {
+    if (lf.standard_account_id == null) { unmapped.push(lf); continue }
+    const list = byStd.get(lf.standard_account_id) || []
+    list.push({ leaf: lf, groupName: groupNameOf(lf) })
+    byStd.set(lf.standard_account_id, list)
+  }
+  // /accounts/standard 는 잎당 1행이라 표준이 중복 → id 기준 dedup(backbone 우선)
+  const stdById = new Map<number, StandardAccount>()
+  for (const s of standards) {
+    const prev = stdById.get(s.id)
+    if (!prev) stdById.set(s.id, s)
+    else if (s.is_backbone && !prev.is_backbone) stdById.set(s.id, s)
+  }
+  // 표시 표준 = 골격(backbone) 또는 잎 보유
+  const shown = [...stdById.values()].filter((s) => s.is_backbone || byStd.has(s.id))
+  const byCat = new Map<string, StdNode[]>()
+  for (const s of shown) {
+    const leavesOf = (byStd.get(s.id) || []).sort((a, b) => {
+      const g = (a.groupName || "").localeCompare(b.groupName || "")
+      return g !== 0 ? g : a.leaf.name.localeCompare(b.leaf.name)
+    })
+    const list = byCat.get(s.category) || []
+    list.push({ std: s, leaves: leavesOf })
+    byCat.set(s.category, list)
+  }
+  for (const [, list] of byCat) {
+    list.sort((a, b) =>
+      (a.std.sort_order ?? 0) - (b.std.sort_order ?? 0) || a.std.code.localeCompare(b.std.code),
+    )
+  }
+  const cats = [...CAT_ORDER, ...[...byCat.keys()].filter((c) => !CAT_ORDER.includes(c))]
+    .filter((c) => byCat.has(c))
+    .map((c) => ({ category: c, standards: byCat.get(c)! }))
+  return { cats, unmapped }
+}
+
+// M3 정리(평탄화/잡탕)로 "기타 X" 리네임된 잎 = 변경 마커
+const isRenamed = (name: string) => name.startsWith("기타 ")
 
 // ---------------------------------------------------------------------------
 // Content Component
@@ -151,7 +191,7 @@ function InternalAccountsContent() {
   const [accounts, setAccounts] = useState<RawAccount[]>([])
   const [standardAccounts, setStandardAccounts] = useState<StandardAccount[]>([])
   const [loading, setLoading] = useState(true)
-  const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -178,10 +218,6 @@ function InternalAccountsContent() {
   const [stdMapPreview, setStdMapPreview] = useState<AutoMapStdResult | null>(null)
   const [stdMapRunning, setStdMapRunning] = useState(false)
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  )
 
   const load = useCallback(async () => {
     if (!entityId) return
@@ -199,10 +235,11 @@ function InternalAccountsContent() {
   }, [entityId])
 
   useEffect(() => {
-    fetchAPI<StandardAccount[]>("/accounts/standard")
+    const q = entityId ? `?entity_id=${entityId}` : ""
+    fetchAPI<StandardAccount[]>(`/accounts/standard${q}`)
       .then(setStandardAccounts)
       .catch(() => {})
-  }, [])
+  }, [entityId])
 
   useEffect(() => {
     fetchAPI<EntityOption[]>("/entities")
@@ -298,96 +335,39 @@ function InternalAccountsContent() {
     }
   }
 
-  const handleToggleRecurring = async (account: TreeAccount) => {
-    try {
-      await fetchAPI(`/accounts/internal/${account.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ is_recurring: !account.is_recurring }),
-      })
-      setAccounts((prev) =>
-        prev.map((a) => a.id === account.id ? { ...a, is_recurring: !a.is_recurring } : a),
-      )
-      toast.success(account.is_recurring ? "고정 해제됨" : "고정 설정됨")
-    } catch {
-      toast.error("고정 설정에 실패했습니다")
-    }
-  }
+  const { cats, unmapped } = useMemo(
+    () => buildStandardGroups(accounts, standardAccounts),
+    [accounts, standardAccounts],
+  )
+  const backboneCount = useMemo(
+    () => standardAccounts.filter((s) => s.is_backbone).length,
+    [standardAccounts],
+  )
 
-  const tree = useMemo(() => buildTree(accounts), [accounts])
-  const visibleItems = useMemo(() => flattenTree(tree, collapsed), [tree, collapsed])
-  const sortableIds = useMemo(() => visibleItems.map((n) => n.id), [visibleItems])
-
-  const handleToggle = (id: number) => {
+  const handleToggle = (key: string) => {
     setCollapsed((prev) => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
 
-  const handleDragEnd = async (event: DragEndEvent) => {
-    const { active, over } = event
-    if (!over || active.id === over.id) return
-
-    const dragId = active.id as number
-    const dropId = over.id as number
-
-    const dragItem = accounts.find((a) => a.id === dragId)
-    const dropItem = accounts.find((a) => a.id === dropId)
-    if (!dragItem || !dropItem) return
-    if (dragItem.parent_id !== dropItem.parent_id) return
-    if (ROOT_CODES.includes(dragItem.code)) return
-
-    const siblings = accounts
-      .filter((a) => a.parent_id === dragItem.parent_id)
-      .sort((a, b) => a.sort_order - b.sort_order)
-
-    const oldIndex = siblings.findIndex((s) => s.id === dragId)
-    const newIndex = siblings.findIndex((s) => s.id === dropId)
-    if (oldIndex === -1 || newIndex === -1) return
-
-    const reordered = arrayMove(siblings, oldIndex, newIndex)
-
-    const items = reordered.map((item, idx) => ({
-      id: item.id,
-      sort_order: (idx + 1) * 100,
-      parent_id: item.parent_id,
-    }))
-
-    // Optimistic update
-    const updatedAccounts = accounts.map((a) => {
-      const updated = items.find((i) => i.id === a.id)
-      return updated ? { ...a, sort_order: updated.sort_order } : a
+  // 표준 골격 뷰의 잎(RawAccount) 수정
+  const handleEditRaw = (leaf: RawAccount) => {
+    setEditingId(leaf.id)
+    setForm({
+      name: leaf.name,
+      standard_account_id: leaf.standard_account_id ? String(leaf.standard_account_id) : "",
+      parent_id: leaf.parent_id ? String(leaf.parent_id) : "",
     })
-    setAccounts(updatedAccounts)
-
-    try {
-      await fetchAPI("/accounts/internal/sort-order", {
-        method: "PUT",
-        body: JSON.stringify({ items }),
-      })
-    } catch {
-      toast.error("순서 저장에 실패했습니다")
-      load()
-    }
-  }
-
-  const handleAddChild = (parentId: number) => {
-    setEditingId(null)
-    setForm({ ...EMPTY_FORM, parent_id: String(parentId) })
     setDialogOpen(true)
   }
 
-  const handleEdit = (account: TreeAccount) => {
-    if (account.isRoot) return
-    setEditingId(account.id)
-    const std = standardAccounts.find((s) => s.code === account.standard_code)
-    setForm({
-      name: account.name,
-      standard_account_id: std ? String(std.id) : "",
-      parent_id: account.parent_id ? String(account.parent_id) : "",
-    })
+  // 빈 표준 골격 밑에 새 잎 추가 (표준 사전선택)
+  const handleAddUnderStandard = (stdId: number) => {
+    setEditingId(null)
+    setForm({ ...EMPTY_FORM, standard_account_id: String(stdId) })
     setDialogOpen(true)
   }
 
@@ -503,6 +483,11 @@ function InternalAccountsContent() {
         <CardHeader className="flex flex-row items-center justify-between gap-4 flex-wrap">
           <CardTitle className="text-base font-medium">
             내부 계정과목 ({accounts.length}건)
+            {backboneCount > 0 && (
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                · 표준 골격 {backboneCount}개
+              </span>
+            )}
           </CardTitle>
           <div className="flex items-center gap-2">
             <Button
@@ -545,29 +530,111 @@ function InternalAccountsContent() {
               <p className="mt-1 text-xs">seed를 실행하거나 계정을 추가해보세요.</p>
             </div>
           ) : (
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleDragEnd}
-              modifiers={[restrictToVerticalAxis]}
-            >
-              <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-                <div className="space-y-0.5">
-                  {visibleItems.map((node) => (
-                    <TreeAccountItem
-                      key={node.id}
-                      account={node}
-                      collapsed={collapsed}
-                      onToggle={handleToggle}
-                      onEdit={handleEdit}
-                      onDelete={(a) => setDeleteTarget(a as unknown as RawAccount)}
-                      onAddChild={handleAddChild}
-                      onToggleRecurring={handleToggleRecurring}
-                    />
-                  ))}
+            <div className="space-y-3">
+              {cats.map((cat) => {
+                const catKey = `cat:${cat.category}`
+                const catCollapsed = collapsed.has(catKey)
+                return (
+                  <div key={cat.category}>
+                    <button
+                      type="button"
+                      onClick={() => handleToggle(catKey)}
+                      className="flex w-full items-center gap-1.5 border-b border-border px-1 py-1.5 text-left text-sm font-bold text-foreground"
+                    >
+                      <span className="w-2 text-[9px] text-muted-foreground">{catCollapsed ? "▶" : "▼"}</span>
+                      {cat.category}
+                      <span className="text-xs font-normal text-muted-foreground">표준 {cat.standards.length}</span>
+                    </button>
+                    {!catCollapsed && cat.standards.map((sn) => {
+                      const empty = sn.leaves.length === 0
+                      const stdKey = `std:${sn.std.id}`
+                      const stdCollapsed = collapsed.has(stdKey)
+                      return (
+                        <div key={sn.std.id} className="mt-0.5">
+                          <div
+                            className="group flex items-center gap-2 rounded px-2 py-1.5 hover:bg-muted/30"
+                            onClick={() => !empty && handleToggle(stdKey)}
+                            role="button"
+                            tabIndex={0}
+                          >
+                            <span className="w-2 text-[9px] text-muted-foreground">
+                              {!empty ? (stdCollapsed ? "▶" : "▼") : ""}
+                            </span>
+                            <span className="min-w-[44px] font-mono text-[11px] font-bold text-blue-400">{sn.std.code}</span>
+                            <span className="text-[13px] font-semibold text-foreground">{sn.std.name}</span>
+                            {empty ? (
+                              <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] text-amber-300">
+                                비어있음 · 거래 시 잎 추가
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground">{sn.leaves.length}개</span>
+                            )}
+                            {sn.std.is_backbone && (
+                              <span className="rounded bg-emerald-500/10 px-1 text-[9px] text-emerald-300">골격</span>
+                            )}
+                            <span className="ml-auto opacity-0 transition-opacity group-hover:opacity-100">
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleAddUnderStandard(sn.std.id) }}
+                                className="text-[10px] text-accent hover:underline"
+                              >
+                                + 잎 추가
+                              </button>
+                            </span>
+                          </div>
+                          {!empty && !stdCollapsed && (
+                            <div className="ml-[18px] border-l border-border/40 pl-2">
+                              {sn.leaves.map(({ leaf, groupName }) => (
+                                <div
+                                  key={leaf.id}
+                                  className="group flex items-center gap-2 rounded px-2 py-1 text-[12px] hover:bg-muted/30"
+                                >
+                                  <span className="text-muted-foreground/40">└</span>
+                                  {groupName && (
+                                    <span className="rounded bg-blue-500/10 px-1 text-[9px] text-blue-300/80">{groupName}</span>
+                                  )}
+                                  <span className="text-foreground/90">{leaf.name}</span>
+                                  {isRenamed(leaf.name) && (
+                                    <span className="rounded bg-amber-500/10 px-1 text-[9px] text-amber-300">정리됨</span>
+                                  )}
+                                  {leaf.is_recurring && (
+                                    <span className="rounded bg-blue-500/10 px-1 text-[9px] text-blue-400">반복</span>
+                                  )}
+                                  <span className="ml-auto flex gap-2 text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+                                    <button type="button" onClick={() => handleEditRaw(leaf)} className="hover:text-foreground">수정</button>
+                                    <button type="button" onClick={() => setDeleteTarget(leaf)} className="hover:text-destructive">삭제</button>
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+
+              {unmapped.length > 0 && (
+                <div>
+                  <div className="border-b border-amber-500/30 px-1 py-1.5 text-sm font-bold text-amber-300">
+                    미분류 (표준 없음) · {unmapped.length}건
+                  </div>
+                  <div className="ml-[18px] border-l border-amber-500/20 pl-2">
+                    {unmapped.map((leaf) => (
+                      <div key={leaf.id} className="group flex items-center gap-2 rounded px-2 py-1 text-[12px] hover:bg-muted/30">
+                        <span className="text-muted-foreground/40">└</span>
+                        <span className="text-foreground/90">{leaf.name}</span>
+                        <span className="rounded bg-amber-500/10 px-1 text-[9px] text-amber-300">표준 지정 필요</span>
+                        <span className="ml-auto text-[10px] opacity-0 transition-opacity group-hover:opacity-100">
+                          <button type="button" onClick={() => handleEditRaw(leaf)} className="text-accent hover:underline">표준 지정</button>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </SortableContext>
-            </DndContext>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>
