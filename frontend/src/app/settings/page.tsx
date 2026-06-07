@@ -48,6 +48,11 @@ interface CodefStatus {
   base_url?: string
   connections?: Record<string, string>
   error?: string
+  envs?: {
+    active: "demo" | "production"
+    demo_configured: boolean
+    prod_configured: boolean
+  }
 }
 
 interface NpkiCert {
@@ -114,6 +119,8 @@ interface SchedulerStatus {
   running: boolean
   enabled: boolean
   serverless?: boolean
+  mode?: "cron" | "interval"
+  cron_hours?: string | null
   interval_min: number
   last_run: {
     started_at: string | null
@@ -158,6 +165,7 @@ type CodefOrg =
   | "gwangju_card"
   | "suhyup_card"
   | "jeju_card"
+  | "hometax"
 
 const CODEF_ORG_LABELS: Record<CodefOrg, string> = {
   woori_bank: "우리은행",
@@ -177,6 +185,7 @@ const CODEF_ORG_LABELS: Record<CodefOrg, string> = {
   gwangju_card: "광주카드",
   suhyup_card: "수협카드",
   jeju_card: "제주카드",
+  hometax: "홈택스(국세청)",
 }
 
 // 사용자가 실 보유한 기관만 우선 노출 (나머지는 향후 확장)
@@ -187,9 +196,11 @@ const CODEF_ORG_ORDER: CodefOrg[] = [
   "lotte_card",
   "woori_card",
   "shinhan_card",
+  "hometax",
 ]
 
 const CODEF_BANK_ORGS = new Set<CodefOrg>(["woori_bank", "ibk_bank", "shinhan_bank"])
+const CODEF_PUBLIC_ORGS = new Set<CodefOrg>(["hometax"])
 
 interface GowidStatus {
   configured: boolean
@@ -258,6 +269,9 @@ function SettingsContent() {
   const [codefErrorDetail, setCodefErrorDetail] = useState<CodefErrorDetail | null>(null)
   const [codefErrorLog, setCodefErrorLog] = useState<CodefErrorLogEntry[]>([])
   const [codefErrorLogLoading, setCodefErrorLogLoading] = useState(false)
+  // 은행 계좌번호 (목록 API 미신청 시 path B 직접조회용) — org → 계좌번호
+  const [codefAccounts, setCodefAccounts] = useState<Record<string, string>>({})
+  const [codefAccountSaving, setCodefAccountSaving] = useState<string | null>(null)
   const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus | null>(null)
   const [schedulerRunning, setSchedulerRunning] = useState(false)
   const [qboStatus, setQboStatus] = useState<ConnectionStatus | null>(null)
@@ -391,6 +405,16 @@ function SettingsContent() {
           error: err instanceof Error ? err.message : "fetch failed",
         }),
       )
+
+    fetchAPI<{ accounts: Record<string, string | null> }>(
+      `/integrations/codef/account-numbers?entity_id=${codefEntityId}`,
+    )
+      .then((r) => {
+        const acc: Record<string, string> = {}
+        for (const [o, v] of Object.entries(r.accounts || {})) if (v) acc[o] = v
+        setCodefAccounts(acc)
+      })
+      .catch(() => setCodefAccounts({}))
   }, [codefEntityId])
 
   // NPKI 인증서 목록 로드 (한 번만)
@@ -405,10 +429,13 @@ function SettingsContent() {
     if (codefAuthMode !== "cert" || !codefConnectOrg || codefNpkiCerts.length === 0) return
     const wantedBank = CODEF_ORG_LABELS[codefConnectOrg] // 예: "우리은행"
     const match = codefNpkiCerts.find((c) => {
+      // entity별 인증서 매칭 — 한아원홀세일은 옛 사명 "도팜인" 인증서일 수 있음
       const matchesEntity =
         codefEntityId === 3
           ? c.cn.includes("리테일")
-          : c.cn.includes("한아원") && !c.cn.includes("리테일")
+          : codefEntityId === 13
+            ? c.cn.includes("홀세일") || c.cn.includes("도팜인")
+            : c.cn.includes("한아원") && !c.cn.includes("리테일") && !c.cn.includes("홀세일")
       const matchesBank =
         c.bank === wantedBank ||
         (CODEF_BANK_ORGS.has(codefConnectOrg) ? c.bank === wantedBank : true)
@@ -497,12 +524,63 @@ function SettingsContent() {
     }
   }
 
+  const saveCodefAccount = async (org: string) => {
+    setCodefAccountSaving(org)
+    try {
+      await fetchAPI("/integrations/codef/account-numbers", {
+        method: "POST",
+        body: JSON.stringify({
+          entity_id: codefEntityId,
+          organization: org,
+          account: (codefAccounts[org] || "").trim(),
+        }),
+      })
+    } catch (err) {
+      alert(`계좌번호 저장 실패: ${err instanceof Error ? err.message : "unknown"}`)
+    } finally {
+      setCodefAccountSaving(null)
+    }
+  }
+
   const testCodef = async () => {
     setTesting("codef")
     try {
       await loadCodefStatus()
     } finally {
       setTesting(null)
+    }
+  }
+
+  const [codefEnvSwitching, setCodefEnvSwitching] = useState(false)
+  const switchCodefEnv = async (env: "demo" | "production") => {
+    if (codefStatus?.envs?.active === env) return
+    const otherConfigured = env === "demo"
+      ? codefStatus?.envs?.demo_configured
+      : codefStatus?.envs?.prod_configured
+    if (!otherConfigured) {
+      alert(
+        `${env === "production" ? "CODEF_PROD_" : "CODEF_DEMO_"}CLIENT_ID/SECRET 환경변수가 설정되어 있지 않아요. ` +
+        `.env 에 키 추가 후 서버 재시작이 필요해요.`,
+      )
+      return
+    }
+    if (!confirm(
+      `Codef 환경을 ${env} 로 전환할게요.\n\n` +
+      `주의: connected_id 는 env 별로 분리 저장됩니다. ` +
+      `${env === "demo" ? "demo" : "production"} 에 등록된 연결만 보이고, ` +
+      `반대 env 연결은 다시 토글하면 복원돼요.`,
+    )) return
+    setCodefEnvSwitching(true)
+    try {
+      await fetchAPI("/integrations/codef/env", {
+        method: "POST",
+        body: JSON.stringify({ env }),
+      })
+      await loadCodefStatus()
+    } catch (err) {
+      alert(`환경 전환 실패: ${err instanceof Error ? err.message : "unknown"}`)
+    } finally {
+      setCodefEnvSwitching(false)
     }
   }
 
@@ -620,9 +698,10 @@ function SettingsContent() {
     setCodefErrorDetail(null)
     try {
       const isBank = codefConnectOrg ? CODEF_BANK_ORGS.has(codefConnectOrg) : false
+      const isPublic = codefConnectOrg ? CODEF_PUBLIC_ORGS.has(codefConnectOrg) : false
       const account: Record<string, unknown> = {
         organization: codefConnectOrg,
-        business_type: isBank ? "BK" : "CD",
+        business_type: isPublic ? "PB" : isBank ? "BK" : "CD",
         client_type: "B",
       }
       if (codefAuthMode === "idpw") {
@@ -639,6 +718,10 @@ function SettingsContent() {
         } else {
           account.der_file_b64 = codefDerFileB64
           account.key_file_b64 = codefKeyFileB64
+        }
+        // 홈택스 등 PB 기관은 cert 모드에서도 사업자번호 필수
+        if (isPublic && codefBusinessNo) {
+          account.business_no = codefBusinessNo
         }
       }
       await fetchAPI("/integrations/codef/connect", {
@@ -692,6 +775,23 @@ function SettingsContent() {
             organization: org,
           }),
         })
+        setCodefSyncResult(
+          `${org}: 총 ${result.total_fetched}건 — 신규 ${result.synced}, 중복 ${result.duplicates}`,
+        )
+      } else if (CODEF_PUBLIC_ORGS.has(org) && org === "hometax") {
+        const result = await fetchAPI<{ synced: number; duplicates: number; total_fetched: number }>(
+          "/integrations/codef/sync-tax-invoice",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              entity_id: codefEntityId,
+              start_date: codefSyncStart,
+              end_date: codefSyncEnd,
+              query_type: "3",
+            }),
+          },
+        )
         setCodefSyncResult(
           `${org}: 총 ${result.total_fetched}건 — 신규 ${result.synced}, 중복 ${result.duplicates}`,
         )
@@ -870,7 +970,43 @@ function SettingsContent() {
           <CardTitle className="flex items-center gap-2">
             <Wifi className="h-5 w-5" />
             Codef API (한국 법인)
-            {codefStatus?.environment && (
+            {codefStatus?.envs && (
+              <div className="ml-2 flex items-center gap-1 rounded-md border border-border overflow-hidden">
+                <button
+                  onClick={() => switchCodefEnv("demo")}
+                  disabled={codefEnvSwitching}
+                  title={
+                    codefStatus.envs.demo_configured
+                      ? "demo 환경으로 전환"
+                      : "CODEF_DEMO_CLIENT_ID/SECRET 미설정"
+                  }
+                  className={`px-2 py-0.5 text-xs transition-colors ${
+                    codefStatus.envs.active === "demo"
+                      ? "bg-yellow-500/20 text-yellow-400"
+                      : "bg-transparent text-muted-foreground hover:bg-secondary/50"
+                  } ${!codefStatus.envs.demo_configured ? "opacity-50" : ""}`}
+                >
+                  demo
+                </button>
+                <button
+                  onClick={() => switchCodefEnv("production")}
+                  disabled={codefEnvSwitching}
+                  title={
+                    codefStatus.envs.prod_configured
+                      ? "production 환경으로 전환"
+                      : "CODEF_PROD_CLIENT_ID/SECRET 미설정"
+                  }
+                  className={`px-2 py-0.5 text-xs transition-colors ${
+                    codefStatus.envs.active === "production"
+                      ? "bg-green-500/20 text-green-400"
+                      : "bg-transparent text-muted-foreground hover:bg-secondary/50"
+                  } ${!codefStatus.envs.prod_configured ? "opacity-50" : ""}`}
+                >
+                  production
+                </button>
+              </div>
+            )}
+            {!codefStatus?.envs && codefStatus?.environment && (
               <span
                 className={`text-xs rounded px-2 py-0.5 ml-2 ${
                   codefStatus.environment === "production"
@@ -926,7 +1062,9 @@ function SettingsContent() {
           {codefStatus && !codefStatus.configured && (
             <div className="text-sm text-red-500">
               <XCircle className="inline h-4 w-4 mr-1" />
-              CODEF_CLIENT_ID / CODEF_CLIENT_SECRET 환경변수 미설정
+              {codefStatus.envs?.active === "production"
+                ? "CODEF_PROD_CLIENT_ID / CODEF_PROD_CLIENT_SECRET (또는 legacy CODEF_CLIENT_ID/SECRET) 미설정"
+                : "CODEF_DEMO_CLIENT_ID / CODEF_DEMO_CLIENT_SECRET (또는 legacy CODEF_CLIENT_ID/SECRET) 미설정"}
             </div>
           )}
 
@@ -975,8 +1113,9 @@ function SettingsContent() {
                     return (
                       <div
                         key={org}
-                        className="flex items-center justify-between gap-2 py-1 border-t border-border first:border-t-0"
+                        className="border-t border-border first:border-t-0"
                       >
+                        <div className="flex items-center justify-between gap-2 py-1">
                         <div className="flex flex-col flex-1">
                           <span className="text-sm font-medium">
                             {CODEF_ORG_LABELS[org]}
@@ -1025,13 +1164,45 @@ function SettingsContent() {
                               onClick={() => {
                                 setCodefConnectOrg(org)
                                 // 은행은 공동인증서 필수 → 자동 전환
-                                setCodefAuthMode(CODEF_BANK_ORGS.has(org) ? "cert" : "idpw")
+                                setCodefAuthMode(
+                                  CODEF_BANK_ORGS.has(org) || CODEF_PUBLIC_ORGS.has(org)
+                                    ? "cert"
+                                    : "idpw",
+                                )
                               }}
                             >
                               연결
                             </Button>
                           )}
                         </div>
+                        </div>
+                        {cid && CODEF_BANK_ORGS.has(org) && (
+                          <div className="flex items-center gap-2 pb-2 pl-1">
+                            <span className="text-xs text-muted-foreground w-14 shrink-0">
+                              계좌번호
+                            </span>
+                            <Input
+                              value={codefAccounts[org] || ""}
+                              onChange={(e) =>
+                                setCodefAccounts((p) => ({ ...p, [org]: e.target.value }))
+                              }
+                              className="flex-1 h-7 text-xs font-mono"
+                              placeholder="계좌번호 (하이픈 무관) — 목록 API 미신청 직접조회용"
+                            />
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => saveCodefAccount(org)}
+                              disabled={codefAccountSaving === org}
+                            >
+                              {codefAccountSaving === org ? (
+                                <RefreshCw className="h-3 w-3 animate-spin" />
+                              ) : (
+                                "저장"
+                              )}
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     )
                   },
@@ -1347,7 +1518,12 @@ function SettingsContent() {
                 {schedulerStatus && (
                   <div className="text-xs text-muted-foreground space-y-1">
                     <div>
-                      주기 <span className="text-foreground">{schedulerStatus.interval_min}분</span>
+                      주기{" "}
+                      <span className="text-foreground">
+                        {schedulerStatus.mode === "cron" && schedulerStatus.cron_hours
+                          ? `매일 KST ${schedulerStatus.cron_hours}시`
+                          : `${schedulerStatus.interval_min}분`}
+                      </span>
                       {schedulerStatus.jobs?.[0]?.next_run_time && (
                         <>
                           {" · 다음 실행 "}
