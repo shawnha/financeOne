@@ -2,6 +2,15 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-06-08 — 계정 트리 재설계 M4(표준6 추가) + M1b(코리아 51 골격) 적용
+
+### Added
+- `scripts/account_tree_m4_m1b_korea.py` — M4(표준 6 추가·18400 명칭) + M1b(코리아 51 표준 골격 ESA 등록) 멱등 적용 스크립트(dry-run 기본, `--apply`로 COMMIT). 정식설계 §3.5·§3.6·§1.1
+  - 신규 표준 6 (전부 형제 계정 미러링, 결산 read-only 대조) — `80800 퇴직급여`·`83101 지급수수료(구매대행)`·`92200 사업양도이익`(코리아)·`81500 수도광열비`(홀세일)·`23100 영업권`·`26100 미지급세금`(리테일). 코리아 3개는 0거래 backbone placeholder → 재무 영향 0
+  - `18400` 명칭 `회사설정계정과목` → `종속기업투자주식`(코드·category 고정, 순수 재라벨, 코쿼핏 ₩50M 정체 라벨 해소)
+  - `entity_standard_accounts` 코리아(2) 51 골격 INSERT(source='settlement', is_backbone). 롤업 영향 0
+  - prod 적용 완료(2026-06-08). 검증: ESA 51/51·코리아만·18400 라벨·internal_accounts·transactions 불변·트리거 바인딩 0
+
 ## [Unreleased] - 2026-06-08 — 계정 트리 재설계 M1 스키마 신설 (코리아 PoC 토대)
 
 ### Added
