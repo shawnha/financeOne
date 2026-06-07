@@ -2,6 +2,15 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-06-08 — 계정 트리 재설계 M6a 잎 표준교정 + drift 정렬 (코리아, 재무 영향)
+
+### Added
+- `scripts/account_tree_m6a_korea_mapping.py` — 코리아(2) 잎 표준교정 + drift 정렬(2026 열림분). 결산 reconciliation + drift 성격분류 기반. JEL std라인 in-place 교체(§2.4, 99.2% PDF 보호). dry-run 기본·게이트(가짜매출 비탐지·debit==credit·잔여drift 0)
+
+### Changed
+- 코리아 거래내역 표준 정렬 — 불변식 #1(거래std=BS·잎=P&L = 복식부기 다른 다리 KEEP 60건, 스마트스토어 외상매출금 20건 포함, 결산 대조 확인). 명시 잎교정 5종: 차입금이자비용+이자지급3→이자비용93100(₩2.14M 영업외비용 신규)·카드대금 정식/선결제→26200 미지급비용·통신비 dedup 82800→81400·관리비 84000→81500·퇴직금 80500→80800. 휴리스틱 ALIGN 83건(판관비 내부정렬, 총액 불변)
+  - prod 적용 완료(2026-06-08). 검증: 상품매출 ₩70.6M 불변·판관비 ₩656.3M 불변·debit==credit 어긋남0·잔여drift0. 2025 잠김 18·대여금 dup·차입금 엣지·tx7100(BS-only)은 후속
+
 ## [Unreleased] - 2026-06-08 — 계정 트리 재설계 M3 구조 정리 (코리아 내부계정 평탄화)
 
 ### Added
