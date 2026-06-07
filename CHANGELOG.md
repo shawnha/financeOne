@@ -7,6 +7,7 @@ All notable changes to FinanceOne will be documented in this file.
 ### Changed
 - `backend/routers/accounts.py` — `list_internal_accounts`에 표준 `standard_category`·`standard_subcategory`·`standard_account_id`·`standard_sort_order` 추가. `list_standard_accounts`(entity 지정)에 `is_backbone`(entity_standard_accounts EXISTS) 추가
 - `frontend/src/app/accounts/internal/page.tsx` — 내부계정 메뉴를 **parent_id(수입/지출) 트리 → 표준 골격 기반(카테고리 > 표준 > 잎)** 으로 재설계(목표 트리 = `docs/account_menu_mockup.html`). 빈 표준 골격도 "비어있음 · 거래 시 잎 추가"로 표시(entity_standard_accounts), 기능그룹은 잎 태그, 정리(평탄화/잡탕)된 "기타 X" 잎은 "정리됨" 마커, 골격 표준은 "골격" 배지, 미분류 잎은 "표준 지정 필요" 섹션. parent_id 드래그 정렬 제거(표준 그룹핑으로 대체)
+- `frontend/src/components/account-combobox.tsx` — 거래내역 내부계정 선택 드롭다운을 **표준 골격 기준(표준 코드+이름 헤더 > 잎)** 으로 그룹핑(옵션에 표준정보 있을 때, 없으면 기존 parent_id fallback). 평탄화 후 길어진 잎 나열의 혼란 해소. `frontend/src/app/transactions/page.tsx` — InternalAccount 인터페이스에 표준 필드 추가
 
 ## [Unreleased] - 2026-06-08 — 계정 트리 재설계 M6a 잎 표준교정 + drift 정렬 (코리아, 재무 영향)
 

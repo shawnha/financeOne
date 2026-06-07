@@ -11,6 +11,29 @@ interface AccountOption {
   name: string
   parent_id?: number | null
   is_recurring?: boolean
+  subcategory?: string | null
+  // 표준 골격 기반 그룹핑용 (있으면 표준 기준, 없으면 parent_id 트리 fallback)
+  standard_code?: string | null
+  standard_name?: string | null
+  standard_category?: string | null
+  standard_account_id?: number | null
+  standard_sort_order?: number | null
+}
+
+const CAT_ORDER = ["자산", "부채", "자본", "수익", "매출", "매출원가", "비용", "기타"]
+
+// 표준계정 code 앞자리로 K-GAAP 카테고리 라벨 결정
+function saCategoryLabel(code: string): string | null {
+  if (!code || !/^\d/.test(code)) return null
+  const p = code[0]
+  if (p === '1') return '자산'
+  if (p === '2') return '부채'
+  if (p === '3') return '자본'
+  if (p === '4') return '매출'
+  if (p === '5') return '매출원가'
+  if (p === '8') return '판관비'
+  if (p === '9') return '영업외'
+  return null
 }
 
 interface AccountComboboxProps {
@@ -28,6 +51,8 @@ interface AccountComboboxProps {
   dropUp?: boolean
   /** Callback to create a new account inline. If provided, shows "+ 새 계정 추가" button */
   onCreateAccount?: (name: string, parentId: number | null) => Promise<AccountOption | null>
+  /** Extra classes appended to the trigger button (use to match filter chip styling, etc.) */
+  triggerClassName?: string
 }
 
 export function AccountCombobox({
@@ -40,6 +65,7 @@ export function AccountCombobox({
   autoOpen = false,
   dropUp = false,
   onCreateAccount,
+  triggerClassName,
 }: AccountComboboxProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
@@ -117,7 +143,7 @@ export function AccountCombobox({
       const style: React.CSSProperties = {
         position: "fixed",
         left: rect.left - offsetX,
-        minWidth: Math.max(260, rect.width),
+        minWidth: Math.max(340, rect.width),
         zIndex: 99999,
       }
 
@@ -186,9 +212,17 @@ export function AccountCombobox({
     if (!search) return treeOrdered
     const q = search.toLowerCase()
 
+    // 띄어쓰기 무시 매칭
+    const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, "")
+    const qn = normalize(q)
     const directMatches = new Set<number>()
     for (const o of treeOrdered) {
-      if (o.code.toLowerCase().includes(q) || o.name.toLowerCase().includes(q)) {
+      const cat = saCategoryLabel(o.code) || ""
+      if (
+        normalize(o.code).includes(qn) ||
+        normalize(o.name).includes(qn) ||
+        normalize(cat).includes(qn)
+      ) {
         directMatches.add(o.id)
       }
     }
@@ -215,6 +249,60 @@ export function AccountCombobox({
   }, [treeOrdered, search])
 
   const ROOT_CODES = ["INC", "EXP"]
+
+  // 표준 골격 기반 그룹핑 렌더 — 옵션에 표준정보 있으면 카테고리>표준>잎, 없으면 parent_id fallback
+  const hasStandard = useMemo(() => options.some(o => o.standard_account_id != null), [options])
+  type StdRow =
+    | { kind: "std"; key: string; code: string; name: string }
+    | { kind: "leaf"; key: string; opt: AccountOption; groupName: string | null }
+  const stdRows = useMemo<StdRow[]>(() => {
+    if (!hasStandard) return []
+    const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "")
+    const hasChild = new Set<number>()
+    for (const o of options) if (o.parent_id != null) hasChild.add(o.parent_id)
+    const byId = new Map(options.map(o => [o.id, o]))
+    const isContainer = (o: AccountOption) => ROOT_CODES.includes(o.code) || ["지출", "수입"].includes(o.name)
+    const groupNameOf = (o: AccountOption): string | null => {
+      if (o.parent_id == null) return null
+      const p = byId.get(o.parent_id)
+      return !p || isContainer(p) ? null : p.name
+    }
+    const leaves = options.filter(o => !hasChild.has(o.id) && !ROOT_CODES.includes(o.code))
+    const byStd = new Map<number, AccountOption[]>()
+    const unmapped: AccountOption[] = []
+    for (const lf of leaves) {
+      if (lf.standard_account_id == null) { unmapped.push(lf); continue }
+      const l = byStd.get(lf.standard_account_id) || []
+      l.push(lf); byStd.set(lf.standard_account_id, l)
+    }
+    const stds = [...byStd.entries()].map(([sid, lvs]) => ({
+      sid, code: lvs[0].standard_code || "", name: lvs[0].standard_name || "",
+      cat: lvs[0].standard_category || "기타", sort: lvs[0].standard_sort_order ?? 0, leaves: lvs,
+    }))
+    stds.sort((a, b) => {
+      const ca = CAT_ORDER.indexOf(a.cat), cb = CAT_ORDER.indexOf(b.cat)
+      if (ca !== cb) return (ca < 0 ? 99 : ca) - (cb < 0 ? 99 : cb)
+      return a.sort - b.sort || a.code.localeCompare(b.code)
+    })
+    const q = search ? norm(search) : ""
+    const rows: StdRow[] = []
+    for (const st of stds) {
+      const lvs = q
+        ? st.leaves.filter(l => norm(l.name).includes(q) || norm(st.name).includes(q) || norm(st.code).includes(q))
+        : st.leaves
+      if (lvs.length === 0) continue
+      rows.push({ kind: "std", key: `s${st.sid}`, code: st.code, name: st.name })
+      for (const l of lvs.sort((a, b) => (a.name).localeCompare(b.name))) {
+        rows.push({ kind: "leaf", key: `l${l.id}`, opt: l, groupName: groupNameOf(l) })
+      }
+    }
+    const uq = q ? unmapped.filter(l => norm(l.name).includes(q)) : unmapped
+    if (uq.length) {
+      rows.push({ kind: "std", key: "s-unmapped", code: "—", name: "미분류" })
+      for (const l of uq) rows.push({ kind: "leaf", key: `l${l.id}`, opt: l, groupName: null })
+    }
+    return rows
+  }, [options, search, hasStandard])
 
   // Inline create state
   const [creating, setCreating] = useState(false)
@@ -277,10 +365,51 @@ export function AccountCombobox({
 
       {/* Options list */}
       <div className="max-h-[240px] overflow-y-auto py-1">
-        {filtered.length === 0 && !creating ? (
+        {(hasStandard ? stdRows.length === 0 : filtered.length === 0) && !creating ? (
           <div className="px-3 py-4 text-center text-xs text-muted-foreground">
             검색 결과가 없습니다
           </div>
+        ) : !creating && hasStandard ? (
+          // 표준 골격 기반: 카테고리>표준>잎
+          stdRows.map((row) => {
+            if (row.kind === "std") {
+              return (
+                <div
+                  key={row.key}
+                  className="flex items-center gap-1.5 px-3 py-1.5 mt-1 first:mt-0 border-t first:border-t-0 text-[11px] font-semibold text-blue-300/90"
+                >
+                  <span className="font-mono text-[10px] text-blue-400">{row.code}</span>
+                  {row.name}
+                </div>
+              )
+            }
+            const opt = row.opt
+            const isSelected = String(opt.id) === value
+            return (
+              <button
+                key={row.key}
+                type="button"
+                onClick={() => { onChange(String(opt.id)); setOpen(false); setSearch("") }}
+                className={cn(
+                  "w-full text-left px-3 py-1.5 text-xs transition-colors flex items-center gap-1.5 pl-6",
+                  "hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none",
+                  isSelected && "bg-accent/20 text-accent-foreground font-medium",
+                )}
+              >
+                <span className="text-muted-foreground/40">└</span>
+                {row.groupName && (
+                  <span className="text-[9px] text-blue-300/70 bg-blue-500/10 px-1 rounded shrink-0">{row.groupName}</span>
+                )}
+                <span className="flex-1 truncate">{opt.name}</span>
+                {opt.is_recurring && (
+                  <span className="text-[9px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded shrink-0">반복</span>
+                )}
+                {showCode && (
+                  <span className="text-muted-foreground/50 text-[10px] shrink-0">{opt.code}</span>
+                )}
+              </button>
+            )
+          })
         ) : !creating ? (
           filtered.map((opt) => {
             const depth = depthMap.get(opt.id) ?? 0
@@ -326,6 +455,7 @@ export function AccountCombobox({
             }
 
             // Leaf item — fully selectable
+            const catBadge = saCategoryLabel(opt.code)
             return (
               <button
                 key={opt.id}
@@ -336,19 +466,22 @@ export function AccountCombobox({
                   setSearch("")
                 }}
                 className={cn(
-                  "w-full text-left px-3 py-1.5 text-xs transition-colors flex items-center",
+                  "w-full text-left px-3 py-1.5 text-xs transition-colors flex items-center gap-1.5",
                   "hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none",
                   isSelected && "bg-accent/20 text-accent-foreground font-medium",
                   "pl-6",
                 )}
               >
-                <span className="text-muted-foreground/40 mr-1">└</span>
-                <span className="flex-1">{opt.name}</span>
+                <span className="text-muted-foreground/40">└</span>
+                {catBadge && (
+                  <span className="text-[9px] font-semibold text-amber-300/90 bg-amber-500/10 px-1.5 py-0.5 rounded shrink-0 min-w-[3.5rem] text-center">{catBadge}</span>
+                )}
+                <span className="flex-1 truncate">{opt.name}</span>
                 {opt.is_recurring && (
-                  <span className="text-[9px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded ml-2 shrink-0">반복</span>
+                  <span className="text-[9px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded shrink-0">반복</span>
                 )}
                 {showCode && (
-                  <span className="text-muted-foreground/50 text-[10px] ml-2 shrink-0">{opt.code}</span>
+                  <span className="text-muted-foreground/50 text-[10px] shrink-0">{opt.code}</span>
                 )}
               </button>
             )
@@ -424,10 +557,18 @@ export function AccountCombobox({
           "hover:bg-muted/30 transition-colors",
           compact ? "h-7 px-2 text-xs" : "h-9 px-3 text-sm",
           !selected && "text-muted-foreground",
+          triggerClassName,
         )}
       >
         <span className="truncate">
-          {selected ? selected.name : placeholder}
+          {selected ? (
+            <>
+              {selected.name}
+              {saCategoryLabel(selected.code) && (
+                <span className="text-muted-foreground/60 ml-1.5 text-[10px]">[{saCategoryLabel(selected.code)}]</span>
+              )}
+            </>
+          ) : placeholder}
         </span>
         <div className="flex items-center gap-0.5 shrink-0 ml-1">
           {selected && (

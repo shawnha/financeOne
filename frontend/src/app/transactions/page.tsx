@@ -104,6 +104,9 @@ interface InternalAccount {
   name: string
   standard_code: string | null
   standard_name: string | null
+  standard_category: string | null
+  standard_account_id: number | null
+  standard_sort_order: number | null
   parent_id: number | null
 }
 
@@ -1062,12 +1065,37 @@ export default function TransactionsPage() {
   }, [detailTx, detailForm, splitsEnabled, splitRows, fetchTransactions])
 
   // Excel 다운로드 (회계법인 전달용) — kind: 'all' | 'bank' | 'card'
+  // 화면에 적용된 필터(검색/계정/회원/출처/상태 등)를 함께 보내 같은 결과로 export.
   const handleExcelDownload = useCallback(async (kind: "all" | "bank" | "card" = "all") => {
     if (!entityId) return
     try {
-      const [y, m] = globalMonth.split("-").map(Number)
+      // year/month: 필터 date range 가 같은 달이면 그 달, 아니면 globalMonth
+      const sameMonth = filters.dateFrom && filters.dateTo && filters.dateFrom.slice(0, 7) === filters.dateTo.slice(0, 7)
+      const ym = sameMonth ? filters.dateFrom.slice(0, 7) : globalMonth
+      const [y, m] = ym.split("-").map(Number)
+
+      const params = new URLSearchParams()
+      params.set("entity_id", String(entityId))
+      params.set("year", String(y))
+      params.set("month", String(m))
+      params.set("kind", kind)
+      if (debouncedSearch) params.set("search", debouncedSearch)
+      if (filters.dateFrom) params.set("date_from", filters.dateFrom)
+      if (filters.dateTo) params.set("date_to", filters.dateTo)
+      if (filters.memberId) params.set("member_id", filters.memberId)
+      if (filters.internalAccountId) params.set("internal_account_id", filters.internalAccountId)
+      if (filters.standardAccountId) params.set("standard_account_id", filters.standardAccountId)
+      if (filters.sourceType) params.set("source_type", filters.sourceType)
+      if (filters.txType) params.set("tx_type", filters.txType)
+      if (filters.mappingSource) params.set("mapping_source", filters.mappingSource)
+      if (filters.recentlyMapped) params.set("recently_mapped", "true")
+      if (filters.slackMatched) params.set("slack_matched", "true")
+      if (filters.unclassified) params.set("unclassified", "true")
+      if (filters.unconfirmed) params.set("unconfirmed", "true")
+      if (filters.hideCancelled) params.set("hide_cancelled", "true")
+
       const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"
-      const url = `${apiBase}/transactions/export?entity_id=${entityId}&year=${y}&month=${m}&kind=${kind}`
+      const url = `${apiBase}/transactions/export?${params.toString()}`
       const res = await fetch(url)
       if (!res.ok) throw new Error(await res.text())
       const blob = await res.blob()
@@ -1089,7 +1117,7 @@ export default function TransactionsPage() {
       const msg = err instanceof Error ? err.message : "다운로드 실패"
       toast.error(msg)
     }
-  }, [entityId, globalMonth])
+  }, [entityId, globalMonth, filters, debouncedSearch])
 
   // 자동 매핑
   const [autoMapping, setAutoMapping] = useState(false)
@@ -1431,17 +1459,17 @@ export default function TransactionsPage() {
         {/* Filter Bar — Tier 2 (보조 필터, 접기/펼치기) */}
         {tier2Open && (
           <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/[0.06]">
-            {/* Internal Account */}
-            <SearchableSelect
-              value={filters.internalAccountId}
-              onChange={v => updateFilter("internalAccountId", v)}
-              options={internalAccounts
-                .filter(a => a.code !== "INC" && a.code !== "EXP")
-                .map(a => ({ value: String(a.id), label: formatIAOption(a, internalAccounts) }))}
-              placeholder="내부계정"
-              searchPlaceholder="내부계정 검색..."
-              className="w-36 rounded-full"
-            />
+            {/* Internal Account — 계정 트리 (수입/비용 그룹 헤더 + 카테고리 + 리프) */}
+            <div className="w-44">
+              <AccountCombobox
+                value={filters.internalAccountId}
+                onChange={v => updateFilter("internalAccountId", v)}
+                options={internalAccounts}
+                placeholder="내부계정"
+                compact
+                triggerClassName="rounded-full"
+              />
+            </div>
 
             {/* Standard Account */}
             <SearchableSelect
