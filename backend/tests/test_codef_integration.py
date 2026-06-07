@@ -257,7 +257,7 @@ def test_client_environment_property(monkeypatch):
 
 def test_is_duplicate_found():
     cur = MagicMock()
-    cur.fetchone.return_value = (123,)
+    cur.fetchone.return_value = (123, None)  # (id, time) — time backfill 도입 후 2-tuple
     tx = {
         "date": "2026-03-15",
         "amount": Decimal("50000"),
@@ -353,17 +353,16 @@ def test_sync_card_approvals_inserts_and_dedups():
         conn.cursor.return_value = cur
 
         # sync_card_approvals 동작 (각 row별):
-        #   1) _is_duplicate (fetchone) — None=신규, 값=중복
-        #   2) member 매칭 (parsed_member_name 없음 → 카드번호로 매칭, fetchone)
-        #   3) carry-on UPDATE (lotte_card는 체크우리 cancel 안 함, woori_card만)
-        # row마다 fetchone 호출 횟수: dedup(1) + member_card_lookup(1) = 2
-        # 중복 row는 dedup True에서 멈춤 → fetchone 1회만
-        # 4 rows: row1(신규)=2, row2(신규)=2, row3(중복)=1, row4(신규)=2 → 7
+        #   1) _is_duplicate (fetchone, (id,time) 2-tuple 또는 None) — None=신규
+        #   2) member 매칭: 이름 없음 → 카드번호 exact(fetchone) → 실패 시 뒤3자리 tail3(fetchone)
+        # 신규 row fetchone: dedup(1) + exact(1) + tail3(1) = 3 (둘 다 None)
+        # 중복 row: dedup hit 에서 멈춤 → fetchone 1회
+        # 4 rows: row1(신규)=3, row2(신규)=3, row3(중복)=1, row4(신규)=3 → 10
         fetchone_results = [
-            None, None,  # row 1: dedup None, member None
-            None, None,  # row 2: dedup None, member None
-            (999,),      # row 3: dedup True → 즉시 continue
-            None, None,  # row 4: dedup None, member None
+            None, None, None,   # row 1: dedup None, member exact None, tail3 None
+            None, None, None,   # row 2
+            (999, None),        # row 3: dedup hit (id,time) → 즉시 continue
+            None, None, None,   # row 4
         ]
         cur.fetchone.side_effect = fetchone_results
 
