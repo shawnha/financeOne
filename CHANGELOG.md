@@ -2,6 +2,18 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-06-08 — 계정 트리 재설계 M1 스키마 신설 (코리아 PoC 토대)
+
+### Added
+- `backend/alembic/versions/m9n0o1p2q3r4_account_tree_schema.py` — 계정 트리 재설계 M1 스키마 마이그레이션(가역, 기존 데이터 무변경). 정식설계 `docs/account-tree-redesign-design.md` §1·§2, 스코프 A'(plan-eng-review 2026-06-07)
+  - `entity_standard_accounts` — 법인별 표준 골격(결산 union). 잎 없는 빈 GAAP 표준도 골격으로 유지. 롤업 영향 0(롤업 권위=category/subcategory)
+  - `fiscal_period_locks` — 기간 동결(경량 historical 쓰기 가드). 2025-12 이하 잠금 대상(등록은 M2)
+  - `canonical_remap` — 중복 표준코드 일원화 매핑(old→canonical, 같은 gaap_type 내). 채움은 M5
+  - `remap_audit` — 행별 old→new 기록(batch_id 역재생). entity_id로 영향 법인 추적
+  - `internal_accounts` +3 운영 직교태그 — `cost_behavior`(fixed/variable)·`is_subscription`·`cost_center`. 어떤 재무제표 롤업도 안 읽음 → 재무 숫자 영향 0
+  - 트리거 함수 2종 `trg_fiscal_period_lock_guard`·`trg_sync_standard_from_internal` — **함수만 생성, 어떤 테이블에도 바인딩 안 함**(발화 0). 잠금 바인딩=M2, 표준 도출 sync 바인딩=M3(잎 교정 후, 불변식 #1)
+  - prod 적용 완료(2026-06-08, dry-run+diff+명시승인 게이트 통과). 검증: 4테이블 rows=0·신규컬럼 3·is_subscription 0/560 TRUE·트리거 바인딩 0
+
 ## [Unreleased] - 2026-06-07 — clobe(클로브) 세금계산서 importer + 코리아 B2B 매출 정상화
 
 ### Added
