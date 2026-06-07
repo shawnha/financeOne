@@ -2,6 +2,18 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-06-07 — clobe(클로브) 세금계산서 importer + 코리아 B2B 매출 정상화
+
+### Added
+- `backend/services/parsers/clobe_tax_invoice.py` — clobe.ai 세금계산서 다운로드 엑셀 파서. 국세청(홈택스) 직접 연동이 없어 clobe(공동인증서로 홈택스 수집)의 공식 "엑셀 다운로드"를 브릿지로 사용(스크래핑 불필요). '매출 매입 유형' 컬럼으로 direction 직접 판별, 음수=수정(취소) 세금계산서
+- `backend/services/clobe_import_service.py` — 파싱 행을 `invoices`(source_kind='tax_invoice')로 멱등 적재. '내 사업자번호'→`entities.business_number` 매핑(멀티법인), **dedup 자연키 (entity, direction, 작성일자, 합계금액)** — 기존 tax_invoice 행이 counterparty_biz_no=NULL·vat=0·amount=합계로 저장돼 공통 신뢰 필드가 합계(total)뿐이라서
+- `backend/routers/invoices.py` — `POST /api/invoices/import-clobe`(업로드 + dry_run + only_entity_id/only_direction)
+- `backend/tests/test_clobe_tax_invoice.py` — 파서·자연키 dedup 단위테스트 13건
+
+### Changed
+- 한아원코리아(entity 2) 매출 정상화 — clobe 매출 세금계산서 신규 10건(2~4월, 공급가 ₩65.85M·세액 ₩6.58M·합계 ₩72.43M) prod 적재. Tier 1 배선 후 invoices만 읽던 `/pnl` 코리아 매출이 2월 ₩11.9M→₩62.5M·3월 ₩0.2M→₩10.8M·4월 ₩6.4M→₩17.5M로 정상화. 기존 1월 5건은 자연키 dedup으로 skip
+  - 보류: 1월 수정세금계산서(−13.4M)는 기존 vat=0 legacy와 엉켜 세무 확인 후 별도. 매입 146건은 발생주의 재무제표 쪽으로 후속
+
 ## [Unreleased] - 2026-06-06 — 홀세일 외상매출(미수/수금율) SIMS 코드조인 정확화
 
 ### Changed

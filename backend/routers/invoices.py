@@ -544,3 +544,51 @@ async def import_invoices_excel(
         "column_map": result["column_map"],
         "header_row": result["header_row"],
     }
+
+
+@router.post("/invoices/import-clobe")
+async def import_clobe_tax_invoices(
+    dry_run: bool = Form(True),
+    only_entity_id: Optional[int] = Form(None),
+    only_direction: Optional[str] = Form(None),
+    file: UploadFile = File(...),
+    conn: PgConnection = Depends(get_db),
+):
+    """clobe(클로브) 세금계산서 엑셀 업로드 → invoices(tax_invoice) 멱등 적재.
+
+    clobe 워크스페이스 > 세금계산서 > 엑셀 다운로드 파일을 그대로 업로드.
+    - entity 매핑: 행의 '내 사업자번호' → entities.business_number.
+    - dedup 자연키: (entity, direction, 작성일자, 합계금액).
+    - dry_run=True (기본): 미리보기만, INSERT 안 함.
+    - only_entity_id / only_direction: 특정 법인·방향만 적재 (예: 2 + sales).
+    """
+    from backend.services.parsers.clobe_tax_invoice import parse_clobe_tax_invoice
+    from backend.services.clobe_import_service import import_clobe_invoices
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(400, "빈 파일")
+    try:
+        parsed = parse_clobe_tax_invoice(file_bytes)
+    except Exception as e:
+        logger.exception("clobe 세금계산서 파싱 실패")
+        raise HTTPException(400, f"파싱 실패: {type(e).__name__}: {e}")
+
+    if only_direction not in (None, "sales", "purchase"):
+        raise HTTPException(400, "only_direction 은 sales/purchase 만 허용")
+
+    try:
+        result = import_clobe_invoices(
+            conn, parsed["parsed"], dry_run=dry_run,
+            only_entity_id=only_entity_id, only_direction=only_direction,
+        )
+    except Exception:
+        conn.rollback()
+        logger.exception("clobe 세금계산서 적재 실패")
+        raise HTTPException(500, "적재 실패")
+
+    # 미리보기는 과다 방지 위해 상위 일부만
+    result["new_rows"] = result["new_rows"][:50]
+    result["dup_rows"] = result["dup_rows"][:20]
+    result["parse_stats"] = parsed["stats"]
+    return result
