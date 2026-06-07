@@ -2,6 +2,12 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-06-08 — 계정 트리 재설계 M6c 코리아 미분류 잎 결산 매핑
+
+### Added
+- `scripts/account_tree_m6c_korea_unmapped.py` — 코리아(2) 미분류(std NULL) 잎 11개를 결산 거래처 대조로 표준 부여 + 2026 거래 정렬. 제작외주/정수기렌탈(청호나이스)/에스원/스마트스토어리뷰→지급수수료83100·노트북→소모품비83000·상여금→복리후생비81100·인프라구축비→외상매출금10800(수금, 매출은 invoices 인식). 기타 캐치올(481/493)→잡손실/잡이익(NULL-std 거래만, 기존 분류된 매출 보호). 자기자금이체(법인간)는 미분류 유지
+  - prod 적용 완료. 게이트: 상품매출 ₩70.6M 불변(채효리 브리에 매출 보호)·debit==credit·26 bookkeeping 테스트 PASS. 481 가전각 ₩19.67M은 영업외(잡손실) 왜곡 방지 위해 소모품비(83000, 판관비)로 별도 재분류(tx8151)
+
 ## [Unreleased] - 2026-06-08 — 계정 트리 재설계 UI 배선 (계정관리 표준 골격 뷰)
 
 ### Changed
