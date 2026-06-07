@@ -2,6 +2,13 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-06-08 — 계정 트리 재설계 M2 마감 잠금 (코리아 2025 동결)
+
+### Added
+- `backend/alembic/versions/n0o1p2q3r4s5_account_tree_lock_triggers.py` — `trg_fiscal_period_lock_guard`(M1 생성)를 `transactions`·`journal_entry_lines`·`transaction_splits`에 BEFORE INSERT/UPDATE/DELETE 바인딩. 잠긴 (entity, period) 쓰기 거부, `financeone.allow_locked_write=on` 세션만 우회. 가역(DROP TRIGGER)
+- `scripts/account_tree_m2_korea_lock.py` — 코리아(2) 2025-01~2025-12 `fiscal_period_locks` 등록(basis=both, 12행). 25년귀속 회계법인 신고완료 동결. 멱등·dry-run 기본
+  - prod 적용 완료(2026-06-08). 통합테스트 7/7(코리아 2025 tx/UPDATE/split/JEL 차단·2026 통과·타법인 통과·bypass 허용) + 라이브 트리거 재검증. 2026 전체 열림(가결산 대조 가능). 재무 영향 0
+
 ## [Unreleased] - 2026-06-08 — 계정 트리 재설계 M4(표준6 추가) + M1b(코리아 51 골격) 적용
 
 ### Added
