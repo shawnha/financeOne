@@ -2,6 +2,15 @@
 
 All notable changes to FinanceOne will be documented in this file.
 
+## [Unreleased] - 2026-06-08 — 계정 트리 재설계 M3 구조 정리 (코리아 내부계정 평탄화)
+
+### Added
+- `scripts/account_tree_m3_korea_structure.py` — 코리아(2) 내부계정 구조 정리. 멱등·dry-run 기본·각 행 이름/거래수 사전 단언. 재무 net 0(parent_id/name/is_active만, standard_account_id·거래·분개 불변)
+
+### Changed
+- 코리아 내부계정 트리 평탄화(123→117 활성). ①평탄화 8: 빈 그룹 6(매출·서비스매출·인건비·복리후생·임차료·수수료) 자식 위로+비활성 / 이중역할 2(교통·세금공과, 직접거래 보유) 자식 위로+"기타 여비교통비"·"기타 세금과공과금" 리네임(유지). ②잡탕 리네임 5(임차료→기타 지급임차료·사무용품→기타 사무용품비·이자수익→기타 이자수익·통신비→기타 통신비·법인세→기타 법인세등). ③죽은시드 0(코리아 시드 원본·후보 전부 backbone)
+  - prod 적용 완료(2026-06-08). 검증: transactions 5373 불변·새 고아거래 0(기존 IA 373 Google Workspace 2건은 M3 무관). 채널그룹→cost_center·매핑교정은 M6/별도
+
 ## [Unreleased] - 2026-06-08 — 계정 트리 재설계 M2 마감 잠금 (코리아 2025 동결)
 
 ### Added
