@@ -1788,16 +1788,19 @@ class GowidSyncRequest(BaseModel):
 
 
 def _get_gowid_client_for_entity(conn: PgConnection, entity_id: int):
-    """entity별 API key로 Gowid 클라이언트 생성. 없으면 env GOWID_API_KEY로 fallback."""
+    """entity별 등록된 API key 로만 Gowid 클라이언트 생성.
+
+    ⚠️ env GOWID_API_KEY fallback 제거 — 그 키가 entity 2 의 것이라, 키 없는 다른
+    법인(3·13)에 sync 시 entity 2 데이터가 그 법인에 잘못 복제되는 footgun 이었음
+    (2026-06-07 entity 3 에 112건 오복제 발생). 각 법인은 설정에서 자기 키 등록 필수.
+    """
     from backend.services.integrations.gowid import GowidClient, get_api_key
     key = get_api_key(conn, entity_id)
     if not key:
-        # 하위 호환: 첫 등록 전엔 env var 사용 (entity 2 마이그레이션용)
-        key = os.environ.get("GOWID_API_KEY", "").strip()
-    if not key:
         raise HTTPException(
             400,
-            f"Gowid API key가 entity_id={entity_id}에 등록되지 않음 — 설정에서 추가 필요",
+            f"Gowid API key가 entity_id={entity_id}에 등록되지 않음 — 설정에서 추가 필요 "
+            f"(법인간 데이터 오염 방지를 위해 env 키 fallback 은 제거됨)",
         )
     return GowidClient(key)
 
@@ -1822,7 +1825,7 @@ def gowid_status(
 ):
     """Gowid 연결 상태 + 마지막 sync 시각 (entity별)."""
     from backend.services.integrations.gowid import get_api_key
-    key = get_api_key(conn, entity_id) or os.environ.get("GOWID_API_KEY", "").strip()
+    key = get_api_key(conn, entity_id)  # env fallback 제거 (법인간 오염 방지)
     configured = bool(key)
 
     if not configured:
