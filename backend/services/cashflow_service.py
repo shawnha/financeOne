@@ -616,6 +616,10 @@ def _split_forecasts_by_today(
     """
     past_in = Decimal("0"); past_expense = Decimal("0"); past_card = Decimal("0")
     rem_in = Decimal("0"); rem_expense = Decimal("0"); rem_card = Decimal("0")
+    # 같은 (계정, type) 의 NULL-day 항목이 여러 개면 실제액을 항목마다 중복 차감하면 안 됨.
+    # 계정 단위로 실제액을 한 번만 소진(greedy) — 안 그러면 시스템사용료 22M 예상 3건 +
+    # 실제 22M 1건 시 항목별 max(0,22M-22M)=0 이 3번 → 0 으로 붕괴(미실현 44M 누락).
+    null_day_consumed: dict = {}
     for item in items:
         forecast_amt = Decimal(str(item["forecast_amount"]))
         exp_day = item.get("expected_day")
@@ -630,10 +634,14 @@ def _split_forecasts_by_today(
             card_actual = Decimal(str(info.get("card", 0) or 0))
         total_actual = bank_actual + card_actual
 
-        # NULL-day: 미실현분만 remaining으로 처리
+        # NULL-day: 미실현분만 remaining으로 처리 (계정 단위 실제액 1회 소진)
         effective_amt = forecast_amt
         if exp_day is None and acct_id:
-            effective_amt = max(Decimal("0"), forecast_amt - total_actual)
+            key = (acct_id, item["type"])
+            consumed = null_day_consumed.get(key, Decimal("0"))
+            applied = min(forecast_amt, max(Decimal("0"), total_actual - consumed))
+            effective_amt = forecast_amt - applied
+            null_day_consumed[key] = consumed + applied
 
         # 실제 결제 방식이 카드 주류(>50%)인데 forecast는 bank로 잡힌 경우 → 카드로 재분류
         is_actual_card_dominant = (total_actual > 0) and (card_actual > bank_actual)

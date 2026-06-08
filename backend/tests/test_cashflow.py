@@ -17,6 +17,7 @@ from backend.services.cashflow_service import (
     calc_card_timing_adjustment,
     calc_forecast_closing,
     predicted_ending_mode,
+    _split_forecasts_by_today,
 )
 
 
@@ -413,6 +414,57 @@ class TestForecastClosingBaseline:
             "_split_forecasts_by_today 안의 effective_pm 재분류는 유지되어야 함 "
             "(predicted_ending 합성에서 카드 주류 재분류 처리)"
         )
+
+
+class TestNullDaySharedAccountNetting:
+    """회귀: NULL-day forecast 항목이 같은 계정을 공유할 때 실제액을 항목마다
+    중복 차감하면 안 됨.
+
+    버그: 리테일 시스템 사용료 22M 예상 3건(같은 계정 1507, expected_day=None) +
+    실제 입금 22M 1건 → 항목별 max(0, 22M-22M)=0 이 3번 → remaining_in=0 으로 붕괴.
+    그 결과 predicted_ending 이 미실현 44M(5월분+2호점)을 통째로 누락.
+    수정: 계정 단위로 실제액을 1회만 소진(greedy) → remaining_in=44M.
+    """
+
+    def _income_item(self, amt, acct_id=1507):
+        return {
+            "forecast_amount": amt,
+            "expected_day": None,
+            "internal_account_id": acct_id,
+            "type": "in",
+            "payment_method": "bank",
+        }
+
+    def test_three_shared_account_income_nets_actual_once(self):
+        items = [self._income_item(22_000_000) for _ in range(3)]
+        actual = {(1507, "in"): {"bank": 22_000_000, "card": 0, "total": 22_000_000}}
+        result = _split_forecasts_by_today(items, today_day=8, actual_by_account=actual)
+        # 실제 22M 은 한 번만 소진 → 66M - 22M = 44M 가 remaining
+        assert result["remaining_in"] == Decimal("44000000")
+
+    def test_single_item_per_account_unchanged(self):
+        """단일 항목 케이스는 기존 동작 그대로 (실제 == 예상 → remaining 0)."""
+        items = [self._income_item(22_000_000)]
+        actual = {(1507, "in"): {"bank": 22_000_000, "card": 0, "total": 22_000_000}}
+        result = _split_forecasts_by_today(items, today_day=8, actual_by_account=actual)
+        assert result["remaining_in"] == Decimal("0")
+
+    def test_no_actual_keeps_full_forecast(self):
+        """실제 입금 0 → NULL-day 전액이 remaining (실현분 없음)."""
+        items = [self._income_item(22_000_000) for _ in range(2)]
+        result = _split_forecasts_by_today(items, today_day=8, actual_by_account={})
+        assert result["remaining_in"] == Decimal("44000000")
+
+    def test_shared_account_expense_nets_once(self):
+        """지출 측도 동일 — 같은 계정 NULL-day 다건이면 실제 1회 소진."""
+        items = [
+            {"forecast_amount": 1_000_000, "expected_day": None,
+             "internal_account_id": 900, "type": "out", "payment_method": "bank"}
+            for _ in range(3)
+        ]
+        actual = {(900, "out"): {"bank": 1_000_000, "card": 0, "total": 1_000_000}}
+        result = _split_forecasts_by_today(items, today_day=8, actual_by_account=actual)
+        assert result["remaining_expense"] == Decimal("2000000")
 
 
 # ── Test 10: KST timezone helper — P1-4 ────────────────────────────────────
