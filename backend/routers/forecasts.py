@@ -133,7 +133,7 @@ def create_forecast(
              forecast_amount, is_recurring, internal_account_id, note,
              expected_day, payment_method, holiday_rule, line_items)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
-        ON CONFLICT (entity_id, year, month, internal_account_id, type)
+        ON CONFLICT (entity_id, year, month, internal_account_id, type, note)
           WHERE internal_account_id IS NOT NULL
         DO UPDATE SET forecast_amount = EXCLUDED.forecast_amount,
                       is_recurring = EXCLUDED.is_recurring,
@@ -663,7 +663,7 @@ def add_missing_recurring(
                      forecast_amount, is_recurring, internal_account_id, note,
                      expected_day, payment_method)
                 VALUES (%s, %s, %s, %s, NULL, %s, %s, true, %s, NULL, NULL, %s)
-                ON CONFLICT (entity_id, year, month, internal_account_id, type)
+                ON CONFLICT (entity_id, year, month, internal_account_id, type, note)
                   WHERE internal_account_id IS NOT NULL
                 DO NOTHING
                 RETURNING id

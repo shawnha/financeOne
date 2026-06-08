@@ -166,7 +166,8 @@ CREATE TABLE IF NOT EXISTS forecasts (
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_forecasts_account
-  ON forecasts (entity_id, year, month, internal_account_id, type)
+  ON forecasts (entity_id, year, month, internal_account_id, type, note)
+  NULLS NOT DISTINCT
   WHERE internal_account_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_forecasts_category
   ON forecasts (entity_id, year, month, category, subcategory, type)
