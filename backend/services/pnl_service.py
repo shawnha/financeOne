@@ -28,6 +28,83 @@ _WHOLESALE_ENTITIES = (13,)
 # HOI(1) 등 그 외는 기존 transactions 매출 유지(US-GAAP, 범위 밖).
 _INVOICE_REVENUE_ENTITIES = (2, 3)
 
+# HOI(1) = US GAAP. transactions 의 US_GAAP 표준을 코드/카테고리로 P&L 버킷에 매핑(현금주의·USD·VAT 없음).
+# K-GAAP 한글 분류('비용'/'수익'·'판매관리비')에 안 걸려 HOI /pnl 이 0 으로 뜨던 문제 해결.
+# (QBO production 연결되면 qbo_reports.fetch_qbo_profit_loss 로 라우팅 전환 예정.)
+HOI_ENTITY_ID = 1
+# LIKE 패턴의 % 는 psycopg2 paramstyle 충돌 회피 위해 %% 로 이스케이프(쿼리에 %s 파라미터 동거).
+_HOI_OTHER_INCOME = "sa.category = 'Revenue' AND (sa.code LIKE 'HOI-PL-7%%' OR sa.code IN ('4200','4400','7000','7010'))"
+_HOI_REVENUE = "sa.category = 'Revenue' AND NOT (sa.code LIKE 'HOI-PL-7%%' OR sa.code IN ('4200','4400','7000','7010'))"
+_HOI_COGS = "(sa.code LIKE 'HOI-PL-50%%' OR sa.code IN ('5000') OR sa.name ILIKE 'Cost of%%')"
+_HOI_NONOP_EXP = "(sa.code IN ('5600','5700','5800','5990') OR sa.name ILIKE '%%Interest Expense%%' OR sa.name ILIKE '%%Income Tax%%' OR sa.name ILIKE '%%Foreign Exchange%%')"
+_HOI_SGA = f"sa.category IN ('Expense','Expenses') AND NOT {_HOI_COGS} AND NOT {_HOI_NONOP_EXP}"
+
+
+def _hoi_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int, start, end) -> dict:
+    """HOI(US GAAP) P&L — transactions 의 US_GAAP 표준을 버킷 매핑. USD·VAT 없음 → excl_vat=동일."""
+    cur = conn.cursor()
+    base = """FROM transactions t JOIN standard_accounts sa ON sa.id = t.standard_account_id
+             WHERE t.entity_id = %s AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
+               AND sa.gaap_type = 'US_GAAP' AND t.is_duplicate = false AND (t.is_cancel IS NOT TRUE)"""
+
+    def total(pred: str, extra: str = ""):
+        cur.execute(f"SELECT COALESCE(SUM(t.amount),0), COUNT(*) {base} AND ({pred}) {extra}", [entity_id, start, end])
+        r = cur.fetchone()
+        return Decimal(str(r[0])), r[1]
+
+    revenue, sales_count = total(_HOI_REVENUE)
+    cogs, _ = total(_HOI_COGS)
+    opex, _ = total(_HOI_SGA, "AND t.type = 'out'")
+    non_op_income, _ = total(_HOI_OTHER_INCOME)
+    non_op_expense, _ = total(_HOI_NONOP_EXP, "AND t.type = 'out'")
+
+    cur.execute(
+        f"""SELECT sa.code, sa.name, COUNT(*), SUM(t.amount) {base} AND ({_HOI_SGA}) AND t.type='out'
+            GROUP BY sa.code, sa.name ORDER BY SUM(t.amount) DESC""",
+        [entity_id, start, end],
+    )
+    opex_breakdown = [{"code": r[0], "name": r[1], "count": r[2], "amount": float(r[3])} for r in cur.fetchall()]
+
+    cur.execute(
+        f"""SELECT t.id, t.date, t.amount, t.description, t.counterparty, t.transfer_memo,
+                   ia.name, sa.code, sa.name
+            FROM transactions t JOIN standard_accounts sa ON sa.id = t.standard_account_id
+            LEFT JOIN internal_accounts ia ON ia.id = t.internal_account_id
+            WHERE t.entity_id=%s AND COALESCE(t.pnl_date,t.date)>=%s AND COALESCE(t.pnl_date,t.date)<%s
+              AND sa.gaap_type='US_GAAP' AND t.is_duplicate=false AND (t.is_cancel IS NOT TRUE)
+              AND ({_HOI_NONOP_EXP}) AND t.type='out' ORDER BY t.date, t.id""",
+        [entity_id, start, end],
+    )
+    non_op_expense_txs = [
+        {"id": r[0], "date": str(r[1]), "amount": float(r[2]), "description": r[3],
+         "counterparty": r[4], "transfer_memo": r[5], "internal_name": r[6],
+         "std_code": r[7], "std_name": r[8]}
+        for r in cur.fetchall()
+    ]
+    cur.close()
+
+    gross = revenue - cogs
+    op = gross - opex
+    net = op + non_op_income - non_op_expense
+    f = float
+    pct = lambda n, d: f(n / d * 100) if d > 0 else None  # noqa: E731
+    return {
+        "year": year, "month": month, "entity_id": entity_id,
+        "revenue": f(revenue), "cogs": f(cogs), "gross_profit": f(gross),
+        "gross_margin_pct": pct(gross, revenue),
+        "opex": f(opex), "operating_profit": f(op), "operating_margin_pct": pct(op, revenue),
+        "non_op_income": f(non_op_income), "non_op_expense": f(non_op_expense),
+        "net_income": f(net), "net_margin_pct": pct(net, revenue), "purchases_total": 0.0,
+        "revenue_excl_vat": f(revenue), "cogs_excl_vat": f(cogs), "opex_excl_vat": f(opex),
+        "gross_profit_excl_vat": f(gross), "gross_margin_pct_excl_vat": pct(gross, revenue),
+        "operating_profit_excl_vat": f(op), "operating_margin_pct_excl_vat": pct(op, revenue),
+        "net_income_excl_vat": f(net), "net_margin_pct_excl_vat": pct(net, revenue),
+        "purchases_total_excl_vat": 0.0,
+        "sales_count": sales_count, "purchases_count": 0,
+        "opex_breakdown": opex_breakdown, "non_op_expense_transactions": non_op_expense_txs,
+        "revenue_source": "transactions(US-GAAP)", "cogs_basis": "cash",
+    }
+
 
 def _revenue_cogs_summary(cur, entity_id: int, start, end) -> dict:
     """entity 별 매출/매출원가 집계.
@@ -126,6 +203,10 @@ def _revenue_cogs_summary(cur, entity_id: int, start, end) -> dict:
 
 def get_pnl_summary(conn: PgConnection, entity_id: int, year: int, month: int) -> dict:
     start, end = build_date_range(year, month)
+
+    if entity_id == HOI_ENTITY_ID:
+        return _hoi_pnl_summary(conn, entity_id, year, month, start, end)
+
     cur = conn.cursor()
 
     # 매출 + 매출원가 — entity 별 source 분기 (wholesale vs transactions)
