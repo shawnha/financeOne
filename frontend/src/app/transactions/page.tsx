@@ -199,6 +199,7 @@ interface Filters {
   slackMatched: boolean
   unclassified: boolean
   unconfirmed: boolean
+  stdUnmapped: boolean
   hideCancelled: boolean
 }
 
@@ -294,6 +295,7 @@ const INITIAL_FILTERS: Filters = {
   slackMatched: false,
   unclassified: false,
   unconfirmed: false,
+  stdUnmapped: false,
   hideCancelled: true,
 }
 
@@ -397,6 +399,7 @@ export default function TransactionsPage() {
       sourceType: urlSourceType || "",
       unclassified: urlFilter === "unmapped",
       unconfirmed: urlUnconfirmed || urlFilter === "unconfirmed",
+      stdUnmapped: urlFilter === "std_unmapped",
     }
   })
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
@@ -550,6 +553,7 @@ export default function TransactionsPage() {
     if (filters.slackMatched) params.set("slack_matched", "true")
     if (filters.unclassified) params.set("unclassified", "true")
     if (filters.unconfirmed) params.set("unconfirmed", "true")
+    if (filters.stdUnmapped) params.set("std_unmapped", "true")
     if (filters.hideCancelled) params.set("hide_cancelled", "true")
 
     try {
@@ -562,7 +566,7 @@ export default function TransactionsPage() {
       setErrorMsg(msg)
       setViewState("error")
     }
-  }, [entityId, page, perPage, debouncedSearch, filters.dateFrom, filters.dateTo, filters.memberId, filters.internalAccountId, filters.standardAccountId, filters.sourceType, filters.txType, filters.mappingSource, filters.recentlyMapped, filters.slackMatched, filters.unclassified, filters.unconfirmed, filters.hideCancelled])
+  }, [entityId, page, perPage, debouncedSearch, filters.dateFrom, filters.dateTo, filters.memberId, filters.internalAccountId, filters.standardAccountId, filters.sourceType, filters.txType, filters.mappingSource, filters.recentlyMapped, filters.slackMatched, filters.unclassified, filters.unconfirmed, filters.stdUnmapped, filters.hideCancelled])
 
   useEffect(() => {
     fetchTransactions()
@@ -573,7 +577,7 @@ export default function TransactionsPage() {
     setFilters(prev => ({ ...prev, [key]: value }))
     if (key !== "search") setPage(1)
     // URL에서 filter 파라미터 제거 (새로고침 시 필터 고착 방지)
-    if (key === "unclassified" || key === "unconfirmed") {
+    if (key === "unclassified" || key === "unconfirmed" || key === "stdUnmapped") {
       const params = new URLSearchParams(window.location.search)
       if (params.has("filter")) {
         params.delete("filter")
@@ -591,7 +595,7 @@ export default function TransactionsPage() {
   const hasActiveFilters = useMemo(() => {
     return filters.search !== "" || filters.dateFrom !== "" || filters.dateTo !== "" ||
       filters.memberId !== "" || filters.internalAccountId !== "" || filters.standardAccountId !== "" ||
-      filters.sourceType !== "" || filters.txType !== "" || filters.mappingSource !== "" || filters.recentlyMapped || filters.slackMatched || filters.unclassified || filters.unconfirmed
+      filters.sourceType !== "" || filters.txType !== "" || filters.mappingSource !== "" || filters.recentlyMapped || filters.slackMatched || filters.unclassified || filters.unconfirmed || filters.stdUnmapped
   }, [filters])
 
   // Tier 2 (보조 필터) 활성 개수 — 필터 버튼 배지 표시용
@@ -1092,6 +1096,7 @@ export default function TransactionsPage() {
       if (filters.slackMatched) params.set("slack_matched", "true")
       if (filters.unclassified) params.set("unclassified", "true")
       if (filters.unconfirmed) params.set("unconfirmed", "true")
+      if (filters.stdUnmapped) params.set("std_unmapped", "true")
       if (filters.hideCancelled) params.set("hide_cancelled", "true")
 
       const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"
@@ -1306,6 +1311,20 @@ export default function TransactionsPage() {
             )}
           >
             미확정
+          </button>
+
+          {/* Std-unmapped toggle (pill) — 표준 미지정(결산 미확정 flag) */}
+          <button
+            onClick={() => updateFilter("stdUnmapped", !filters.stdUnmapped)}
+            className={cn(
+              "h-8 px-3 rounded-full border text-xs font-medium transition-colors",
+              filters.stdUnmapped
+                ? "bg-violet-500/15 text-violet-400 border-violet-500/30"
+                : "border-white/10 text-muted-foreground hover:bg-white/[0.04]",
+            )}
+            title="표준계정이 비었거나 내부계정 잎이 표준 미매핑인 거래 (결산 미확정 flag)"
+          >
+            표준 미지정
           </button>
 
           {/* Hide cancelled toggle — 기본 ON. 취소된 거래 + 페어된 원거래 숨김 */}

@@ -19,27 +19,209 @@ from backend.services.export import export_transactions_excel
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
 
+def _build_transactions_where(
+    entity_id: Optional[int] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    source_type: Optional[str] = None,
+    is_confirmed: Optional[bool] = None,
+    search: Optional[str] = None,
+    member_id: Optional[int] = None,
+    standard_account_id: Optional[int] = None,
+    internal_account_id: Optional[int] = None,
+    tx_type: Optional[str] = None,
+    mapping_source: Optional[str] = None,
+    recently_mapped: Optional[bool] = None,
+    slack_matched: Optional[bool] = None,
+    unclassified: Optional[bool] = None,
+    unconfirmed: Optional[bool] = None,
+    std_unmapped: Optional[bool] = None,
+    hide_cancelled: Optional[bool] = None,
+) -> tuple[str, list, bool]:
+    """list / export 가 공유하는 WHERE 절 빌더.
+
+    Returns:
+        (where_clause, params, need_join_for_search) — need_join_for_search 가
+        True 면 호출자가 internal_accounts ia LEFT JOIN 을 보장해야 함.
+    """
+    where = ["1=1"]
+    params: list = []
+
+    if entity_id is not None:
+        where.append("t.entity_id = %s")
+        params.append(entity_id)
+    if date_from is not None:
+        where.append("t.date >= %s")
+        params.append(date_from)
+    if date_to is not None:
+        where.append("t.date <= %s")
+        params.append(date_to)
+    if source_type is not None:
+        where.append("(t.source_type = %s OR t.source_type = %s)")
+        params.append(source_type)
+        params.append(f"codef_{source_type}")
+    if is_confirmed is not None:
+        where.append("t.is_confirmed = %s")
+        params.append(is_confirmed)
+    if member_id is not None:
+        where.append("t.member_id = %s")
+        params.append(member_id)
+    if standard_account_id is not None:
+        where.append("t.standard_account_id = %s")
+        params.append(standard_account_id)
+    if internal_account_id is not None:
+        where.append("""(t.internal_account_id = %s OR t.internal_account_id IN (
+            SELECT id FROM internal_accounts WHERE parent_id = %s
+        ))""")
+        params.extend([internal_account_id, internal_account_id])
+    if tx_type in ("in", "out"):
+        where.append("t.type = %s")
+        params.append(tx_type)
+        where.append("t.is_cancel = false")
+    if mapping_source:
+        where.append("t.mapping_source = %s")
+        params.append(mapping_source)
+    if recently_mapped:
+        where.append("t.internal_account_id IS NOT NULL AND t.mapping_source IN ('ai', 'similar', 'keyword')")
+    if slack_matched:
+        where.append("EXISTS (SELECT 1 FROM transaction_slack_match tsm WHERE tsm.transaction_id = t.id AND tsm.is_confirmed = true)")
+    if unclassified:
+        where.append("t.is_confirmed = false AND t.internal_account_id IS NULL")
+    if unconfirmed:
+        where.append("t.is_confirmed = false AND t.internal_account_id IS NOT NULL")
+    if std_unmapped:
+        # 표준 미지정(결산 미확정 flag): 거래 표준 NULL 이거나, 그 거래의 내부계정 잎이 표준 미매핑
+        where.append("""(t.standard_account_id IS NULL
+            OR EXISTS (SELECT 1 FROM internal_accounts ia_u
+                       WHERE ia_u.id = t.internal_account_id
+                         AND ia_u.standard_account_id IS NULL))""")
+    if hide_cancelled:
+        where.append("""
+            t.is_cancel = FALSE
+            AND NOT EXISTS (
+                SELECT 1 FROM transactions c
+                WHERE c.entity_id = t.entity_id
+                  AND c.date = t.date
+                  AND c.amount = t.amount
+                  AND c.card_number IS NOT DISTINCT FROM t.card_number
+                  AND c.source_type = t.source_type
+                  AND c.is_cancel = TRUE
+                  AND c.id != t.id
+            )
+        """)
+
+    need_join_for_search = False
+    if search:
+        clean = search.replace(",", "").strip()
+        need_join_for_search = True
+        try:
+            amount_val = float(clean)
+            lo = round(amount_val * 0.97, 2)
+            hi = round(amount_val * 1.03, 2)
+            where.append(
+                "(t.amount BETWEEN %s AND %s OR "
+                "REPLACE(COALESCE(t.description,''),' ','') ILIKE %s OR "
+                "REPLACE(COALESCE(t.counterparty,''),' ','') ILIKE %s OR "
+                "REPLACE(COALESCE(t.note,''),' ','') ILIKE %s OR "
+                "REPLACE(COALESCE(t.transfer_memo,''),' ','') ILIKE %s OR "
+                "REPLACE(COALESCE(ia.name,''),' ','') ILIKE %s OR "
+                "CAST(t.date AS TEXT) ILIKE %s)"
+            )
+            q_nospace = f"%{search.replace(' ', '')}%"
+            q_raw = f"%{search}%"
+            params.extend([lo, hi, q_nospace, q_nospace, q_nospace, q_nospace, q_nospace, q_raw])
+        except ValueError:
+            where.append(
+                "(REPLACE(COALESCE(t.description,''),' ','') ILIKE %s OR "
+                "REPLACE(COALESCE(t.counterparty,''),' ','') ILIKE %s OR "
+                "REPLACE(COALESCE(t.note,''),' ','') ILIKE %s OR "
+                "REPLACE(COALESCE(t.transfer_memo,''),' ','') ILIKE %s OR "
+                "REPLACE(COALESCE(ia.name,''),' ','') ILIKE %s OR "
+                "CAST(t.date AS TEXT) ILIKE %s)"
+            )
+            q_nospace = f"%{search.replace(' ', '')}%"
+            q_raw = f"%{search}%"
+            params.extend([q_nospace, q_nospace, q_nospace, q_nospace, q_nospace, q_raw])
+
+    return " AND ".join(where), params, need_join_for_search
+
+
 @router.get("/export")
 def export_transactions(
     entity_id: int = Query(...),
     year: int = Query(...),
     month: int = Query(..., ge=1, le=12),
     kind: str = Query("all", pattern="^(all|bank|card)$"),
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    source_type: Optional[str] = None,
+    search: Optional[str] = None,
+    member_id: Optional[int] = None,
+    standard_account_id: Optional[int] = None,
+    internal_account_id: Optional[int] = None,
+    tx_type: Optional[str] = None,
+    mapping_source: Optional[str] = None,
+    recently_mapped: Optional[bool] = None,
+    slack_matched: Optional[bool] = None,
+    unclassified: Optional[bool] = None,
+    unconfirmed: Optional[bool] = None,
+    std_unmapped: Optional[bool] = None,
+    hide_cancelled: Optional[bool] = None,
     conn: PgConnection = Depends(get_db),
 ):
     """월별 거래내역 Excel Export (회계법인 전달용).
 
     kind: 'all' (전체, 기본) | 'bank' (은행만) | 'card' (카드만)
     파일명 suffix: _은행 / _카드 (all 은 suffix 없음)
+
+    list_transactions 와 동일한 필터를 받아 화면에 보이는 거래만 export.
+    date_from / date_to 미지정 시 year/month 의 1일~말일을 기본 적용.
     """
-    xlsx_bytes = export_transactions_excel(conn, entity_id, year, month, kind=kind)
+    import calendar
+    if date_from is None and date_to is None:
+        last_day = calendar.monthrange(year, month)[1]
+        date_from = date(year, month, 1)
+        date_to = date(year, month, last_day)
+
+    where_clause, params, need_join = _build_transactions_where(
+        entity_id=entity_id,
+        date_from=date_from,
+        date_to=date_to,
+        source_type=source_type,
+        search=search,
+        member_id=member_id,
+        standard_account_id=standard_account_id,
+        internal_account_id=internal_account_id,
+        tx_type=tx_type,
+        mapping_source=mapping_source,
+        recently_mapped=recently_mapped,
+        slack_matched=slack_matched,
+        unclassified=unclassified,
+        unconfirmed=unconfirmed,
+        std_unmapped=std_unmapped,
+        hide_cancelled=hide_cancelled,
+    )
+
+    filtered = any([
+        source_type, search, member_id, standard_account_id, internal_account_id,
+        tx_type, mapping_source, recently_mapped, slack_matched,
+        unclassified, unconfirmed, std_unmapped, hide_cancelled,
+    ])
+
+    xlsx_bytes = export_transactions_excel(
+        conn, entity_id, year, month, kind=kind,
+        where_clause=where_clause, params=params,
+        need_join_for_search=need_join,
+        filtered=filtered,
+    )
     cur = conn.cursor()
     cur.execute("SELECT name FROM entities WHERE id = %s", [entity_id])
     row = cur.fetchone()
     cur.close()
     entity_name = (row[0] if row else f"entity_{entity_id}").replace(" ", "_")
     suffix = {"bank": "_은행", "card": "_카드"}.get(kind, "")
-    fname = f"{entity_name}_{year}-{month:02d}{suffix}.xlsx"
+    filter_suffix = "_필터" if filtered else ""
+    fname = f"{entity_name}_{year}-{month:02d}{suffix}{filter_suffix}.xlsx"
     return StreamingResponse(
         io.BytesIO(xlsx_bytes),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -86,6 +268,7 @@ def list_transactions(
     slack_matched: Optional[bool] = None,
     unclassified: Optional[bool] = None,
     unconfirmed: Optional[bool] = None,
+    std_unmapped: Optional[bool] = None,
     hide_cancelled: Optional[bool] = None,
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -93,106 +276,25 @@ def list_transactions(
 ):
     cur = conn.cursor()
 
-    where = ["1=1"]
-    params: list = []
-
-    if entity_id is not None:
-        where.append("t.entity_id = %s")
-        params.append(entity_id)
-    if date_from is not None:
-        where.append("t.date >= %s")
-        params.append(date_from)
-    if date_to is not None:
-        where.append("t.date <= %s")
-        params.append(date_to)
-    if source_type is not None:
-        # Excel 업로드 ('woori_bank') 와 Codef sync ('codef_woori_bank') 는 같은 기관.
-        # 기본 source_type 으로 필터링 시 codef_<x> 도 같이 매칭.
-        where.append("(t.source_type = %s OR t.source_type = %s)")
-        params.append(source_type)
-        params.append(f"codef_{source_type}")
-    if is_confirmed is not None:
-        where.append("t.is_confirmed = %s")
-        params.append(is_confirmed)
-    if member_id is not None:
-        where.append("t.member_id = %s")
-        params.append(member_id)
-    if standard_account_id is not None:
-        where.append("t.standard_account_id = %s")
-        params.append(standard_account_id)
-    if internal_account_id is not None:
-        # 상위 항목 선택 시 하위 항목 거래도 포함
-        where.append("""(t.internal_account_id = %s OR t.internal_account_id IN (
-            SELECT id FROM internal_accounts WHERE parent_id = %s
-        ))""")
-        params.extend([internal_account_id, internal_account_id])
-    if tx_type in ("in", "out"):
-        where.append("t.type = %s")
-        params.append(tx_type)
-        where.append("t.is_cancel = false")
-    if mapping_source:
-        where.append("t.mapping_source = %s")
-        params.append(mapping_source)
-    if recently_mapped:
-        where.append("t.internal_account_id IS NOT NULL AND t.mapping_source IN ('ai', 'similar', 'keyword')")
-    if slack_matched:
-        where.append("EXISTS (SELECT 1 FROM transaction_slack_match tsm WHERE tsm.transaction_id = t.id AND tsm.is_confirmed = true)")
-    if unclassified:
-        where.append("t.is_confirmed = false AND t.internal_account_id IS NULL")
-    if unconfirmed:
-        where.append("t.is_confirmed = false AND t.internal_account_id IS NOT NULL")
-    if hide_cancelled:
-        # 같은 날·같은 금액의 승인/취소 페어 및 단독 취소 row 모두 숨김
-        # (type='in' + is_cancel=TRUE) 또는 (해당 취소와 페어가 되는 원거래) 제외
-        where.append("""
-            t.is_cancel = FALSE
-            AND NOT EXISTS (
-                SELECT 1 FROM transactions c
-                WHERE c.entity_id = t.entity_id
-                  AND c.date = t.date
-                  AND c.amount = t.amount
-                  AND c.card_number IS NOT DISTINCT FROM t.card_number
-                  AND c.source_type = t.source_type
-                  AND c.is_cancel = TRUE
-                  AND c.id != t.id
-            )
-        """)
-    need_join_for_search = False
-    if search:
-        # 숫자만이면 금액 검색 (±3%), 아니면 텍스트 검색 (내역/거래처/메모/내부계정명/날짜)
-        # 띄어쓰기 무시: 검색어 + 컬럼 둘 다 공백 제거 후 ILIKE 매칭
-        clean = search.replace(",", "").strip()
-        need_join_for_search = True
-        try:
-            amount_val = float(clean)
-            lo = round(amount_val * 0.97, 2)
-            hi = round(amount_val * 1.03, 2)
-            where.append(
-                "(t.amount BETWEEN %s AND %s OR "
-                "REPLACE(COALESCE(t.description,''),' ','') ILIKE %s OR "
-                "REPLACE(COALESCE(t.counterparty,''),' ','') ILIKE %s OR "
-                "REPLACE(COALESCE(t.note,''),' ','') ILIKE %s OR "
-                "REPLACE(COALESCE(t.transfer_memo,''),' ','') ILIKE %s OR "
-                "REPLACE(COALESCE(ia.name,''),' ','') ILIKE %s OR "
-                "CAST(t.date AS TEXT) ILIKE %s)"
-            )
-            q_nospace = f"%{search.replace(' ', '')}%"
-            q_raw = f"%{search}%"
-            params.extend([lo, hi, q_nospace, q_nospace, q_nospace, q_nospace, q_nospace, q_raw])
-        except ValueError:
-            where.append(
-                "(REPLACE(COALESCE(t.description,''),' ','') ILIKE %s OR "
-                "REPLACE(COALESCE(t.counterparty,''),' ','') ILIKE %s OR "
-                "REPLACE(COALESCE(t.note,''),' ','') ILIKE %s OR "
-                "REPLACE(COALESCE(t.transfer_memo,''),' ','') ILIKE %s OR "
-                "REPLACE(COALESCE(ia.name,''),' ','') ILIKE %s OR "
-                "CAST(t.date AS TEXT) ILIKE %s)"
-            )
-            q_nospace = f"%{search.replace(' ', '')}%"
-            q_raw = f"%{search}%"
-            params.extend([q_nospace, q_nospace, q_nospace, q_nospace, q_nospace, q_raw])
-
-    where_clause = " AND ".join(where)
+    where_clause, params, need_join_for_search = _build_transactions_where(
+        entity_id=entity_id,
+        date_from=date_from,
+        date_to=date_to,
+        source_type=source_type,
+        is_confirmed=is_confirmed,
+        search=search,
+        member_id=member_id,
+        standard_account_id=standard_account_id,
+        internal_account_id=internal_account_id,
+        tx_type=tx_type,
+        mapping_source=mapping_source,
+        recently_mapped=recently_mapped,
+        slack_matched=slack_matched,
+        unclassified=unclassified,
+        unconfirmed=unconfirmed,
+        std_unmapped=std_unmapped,
+        hide_cancelled=hide_cancelled,
+    )
     offset = (page - 1) * per_page
 
     # Count

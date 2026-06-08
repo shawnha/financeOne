@@ -204,6 +204,10 @@ def export_transactions_excel(
     year: int,
     month: int,
     kind: str = "all",
+    where_clause: str | None = None,
+    params: list | None = None,
+    need_join_for_search: bool = False,
+    filtered: bool = False,
 ) -> bytes:
     """거래내역 Excel Export (회계법인 전달용).
 
@@ -211,21 +215,29 @@ def export_transactions_excel(
     kind: 'all' (전체) | 'bank' (은행만) | 'card' (카드만)
     컬럼: 날짜 / 시각 / 출처 / 회원 / 적요 / 거래처 / 입금 / 출금 /
           내부계정 / 표준계정코드 / 표준계정명 / 메모 / 취소
+
+    where_clause / params: list_transactions 와 공유되는 필터 WHERE.
+        None 이면 entity_id + 월간 기본 WHERE 만 적용.
+    need_join_for_search: WHERE 가 ia.name 을 참조하는지 여부 (export 는 항상 ia JOIN 하므로 무시 가능).
+    filtered: 사용자 필터가 걸려 있어 부분만 export 된 경우 (제목/시트명에 ' (필터)' 부착).
     """
     import calendar
-    last_day = calendar.monthrange(year, month)[1]
-    start_d = f"{year:04d}-{month:02d}-01"
-    end_d = f"{year:04d}-{month:02d}-{last_day:02d}"
+
+    if where_clause is None:
+        last_day = calendar.monthrange(year, month)[1]
+        start_d = f"{year:04d}-{month:02d}-01"
+        end_d = f"{year:04d}-{month:02d}-{last_day:02d}"
+        where_clause = "t.entity_id = %s AND t.date >= %s AND t.date <= %s"
+        params = [entity_id, start_d, end_d]
+    else:
+        params = list(params or [])
 
     if kind == "bank":
-        source_filter_sql = "AND t.source_type = ANY(%s)"
-        source_filter_params = [list(EXPORT_BANK_SOURCES)]
+        where_clause = f"({where_clause}) AND t.source_type = ANY(%s)"
+        params.append(list(EXPORT_BANK_SOURCES))
     elif kind == "card":
-        source_filter_sql = "AND t.source_type = ANY(%s)"
-        source_filter_params = [list(EXPORT_CARD_SOURCES)]
-    else:
-        source_filter_sql = ""
-        source_filter_params = []
+        where_clause = f"({where_clause}) AND t.source_type = ANY(%s)"
+        params.append(list(EXPORT_CARD_SOURCES))
 
     cur = conn.cursor()
     cur.execute(
@@ -241,11 +253,10 @@ def export_transactions_excel(
         LEFT JOIN members m ON m.id = t.member_id
         LEFT JOIN internal_accounts ia ON ia.id = t.internal_account_id
         LEFT JOIN standard_accounts sa ON sa.id = t.standard_account_id
-        WHERE t.entity_id = %s AND t.date >= %s AND t.date <= %s
-          {source_filter_sql}
+        WHERE {where_clause}
         ORDER BY t.date, t.time NULLS LAST, t.id
         """,
-        [entity_id, start_d, end_d, *source_filter_params],
+        params,
     )
     rows = cur.fetchall()
 
@@ -255,8 +266,14 @@ def export_transactions_excel(
     cur.close()
 
     kind_label = {"bank": "은행", "card": "카드"}.get(kind, "")
-    sheet_title = f"{year}-{month:02d}" + (f" {kind_label}" if kind_label else "")
-    title_text = f"{entity_name} 거래내역" + (f" — {kind_label}" if kind_label else "") + f" ({year}-{month:02d})"
+    filter_label = " (필터)" if filtered else ""
+    sheet_title = f"{year}-{month:02d}" + (f" {kind_label}" if kind_label else "") + filter_label
+    title_text = (
+        f"{entity_name} 거래내역"
+        + (f" — {kind_label}" if kind_label else "")
+        + f" ({year}-{month:02d})"
+        + filter_label
+    )
 
     wb = Workbook()
     ws = wb.active
