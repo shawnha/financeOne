@@ -268,9 +268,7 @@ export function OpexContent() {
           <Wallet className="h-12 w-12 text-muted-foreground" />
           <p className="text-lg font-medium">해당 법인에 OpEx 거래가 없습니다.</p>
           <p className="text-sm text-muted-foreground">
-            거래에 SG&amp;A 계정(판매관리비)이 매핑되면 자동으로 표시됩니다.
-            <br />
-            (HOI는 US-GAAP — 추후 지원 예정)
+            거래에 SG&amp;A 계정(판매관리비 / HOI는 HOI-PL-6xxx)이 매핑되면 자동으로 표시됩니다.
           </p>
           <Button asChild variant="secondary" className="gap-2">
             <Link href="/upload">

@@ -18,6 +18,17 @@ from backend.utils.db import build_date_range, fetch_all
 # K-GAAP SG&A 식별. category='비용' 안에서 매출원가/영업외/법인세 제외 → 판관비만.
 SGA_SUBCATEGORIES = ("판매관리비", "판매비와관리비")
 
+# HOI(US-GAAP) 는 한국식 category='비용'/subcategory 가 없어 위 필터로는 0 으로 뜬다.
+# HOI SG&A = HOI-PL-6xxx (rent·3PL·광고·법률·구독 등). COGS(5xxx)·영업외(8xxx) 제외.
+# pnl_service._HOI_SGA 와 동일 정의 → /pnl 의 HOI opex 와 숫자 일치.
+HOI_ENTITY_ID = 1
+
+
+def _opex_subcats(entity_id: int) -> list:
+    """OpEx 필터의 subcategory 파라미터. HOI 는 빈 리스트로 K-GAAP 분기를 비활성화
+    ( PostgreSQL 에서 x = ANY('{}') 는 항상 false ) → HOI-PL-6xxx 분기만 적용된다."""
+    return [] if entity_id == HOI_ENTITY_ID else list(SGA_SUBCATEGORIES)
+
 
 def get_opex_summary_data(
     conn: PgConnection,
@@ -36,14 +47,14 @@ def get_opex_summary_data(
         FROM transactions t
         JOIN standard_accounts s ON s.id = t.standard_account_id
         WHERE t.entity_id = %s
-          AND s.category = '비용'
-          AND s.subcategory = ANY(%s)
+          AND ((s.category = '비용' AND s.subcategory = ANY(%s))
+               OR (s.category IN ('Expense','Expenses') AND s.code LIKE 'HOI-PL-6%%'))
           AND t.type = 'out'
           AND t.is_duplicate = false
           AND (t.is_cancel IS NOT TRUE)
         ORDER BY month
         """,
-        [entity_id, list(SGA_SUBCATEGORIES)],
+        [entity_id, _opex_subcats(entity_id)],
     )
     available_months = [r[0] for r in cur.fetchall()]
 
@@ -65,8 +76,8 @@ def get_opex_summary_data(
         FROM transactions t
         JOIN standard_accounts s ON s.id = t.standard_account_id
         WHERE t.entity_id = %s
-          AND s.category = '비용'
-          AND s.subcategory = ANY(%s)
+          AND ((s.category = '비용' AND s.subcategory = ANY(%s))
+               OR (s.category IN ('Expense','Expenses') AND s.code LIKE 'HOI-PL-6%%'))
           AND t.type = 'out'
           AND t.is_duplicate = false
           AND (t.is_cancel IS NOT TRUE)
@@ -74,7 +85,7 @@ def get_opex_summary_data(
         GROUP BY date_trunc('month', COALESCE(t.pnl_date, t.date))
         ORDER BY month
         """,
-        [entity_id, list(SGA_SUBCATEGORIES), first_date],
+        [entity_id, _opex_subcats(entity_id), first_date],
     )
     expense_by_month = {r[0]: (Decimal(str(r[1])), r[2]) for r in cur.fetchall()}
     cur.close()
@@ -118,15 +129,15 @@ def get_opex_detail(
         LEFT JOIN internal_accounts ia ON t.internal_account_id = ia.id
         LEFT JOIN internal_accounts pia ON ia.parent_id = pia.id
         WHERE t.entity_id = %s
-          AND s.category = '비용'
-          AND s.subcategory = ANY(%s)
+          AND ((s.category = '비용' AND s.subcategory = ANY(%s))
+               OR (s.category IN ('Expense','Expenses') AND s.code LIKE 'HOI-PL-6%%'))
           AND t.type = 'out'
           AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
           AND t.is_duplicate = false
           AND (t.is_cancel IS NOT TRUE)
         ORDER BY t.date, t.id
         """,
-        [entity_id, list(SGA_SUBCATEGORIES), start, end],
+        [entity_id, _opex_subcats(entity_id), start, end],
     )
     rows = fetch_all(cur)
 
@@ -140,14 +151,14 @@ def get_opex_detail(
         FROM transactions t
         JOIN standard_accounts s ON s.id = t.standard_account_id
         WHERE t.entity_id = %s
-          AND s.category = '비용'
-          AND s.subcategory = ANY(%s)
+          AND ((s.category = '비용' AND s.subcategory = ANY(%s))
+               OR (s.category IN ('Expense','Expenses') AND s.code LIKE 'HOI-PL-6%%'))
           AND t.type = 'out'
           AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
           AND t.is_duplicate = false
           AND (t.is_cancel IS NOT TRUE)
         """,
-        [entity_id, list(SGA_SUBCATEGORIES), prev_start, prev_end],
+        [entity_id, _opex_subcats(entity_id), prev_start, prev_end],
     )
     prev_total = Decimal(str(cur.fetchone()[0]))
 
@@ -160,14 +171,14 @@ def get_opex_detail(
         FROM transactions t
         JOIN standard_accounts s ON s.id = t.standard_account_id
         WHERE t.entity_id = %s
-          AND s.category = '비용'
-          AND s.subcategory = ANY(%s)
+          AND ((s.category = '비용' AND s.subcategory = ANY(%s))
+               OR (s.category IN ('Expense','Expenses') AND s.code LIKE 'HOI-PL-6%%'))
           AND t.type = 'out'
           AND COALESCE(t.pnl_date, t.date) >= %s AND COALESCE(t.pnl_date, t.date) < %s
           AND t.is_duplicate = false
           AND (t.is_cancel IS NOT TRUE)
         """,
-        [entity_id, list(SGA_SUBCATEGORIES), yoy_start, yoy_end],
+        [entity_id, _opex_subcats(entity_id), yoy_start, yoy_end],
     )
     yoy_total = Decimal(str(cur.fetchone()[0]))
     cur.close()
